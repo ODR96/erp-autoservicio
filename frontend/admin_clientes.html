@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP Admin - Clientes y Cuentas Corrientes</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/estilos.css">
+    <style>
+        .list-group-item-action:focus {
+            background-color: #e9ecef;
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="layout-sidebar-placeholder"></div>
+
+    <div class="main-wrapper">
+        <div id="layout-navbar-placeholder"></div>
+
+        <div class="content-area">
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
+                <h3 class="fw-bold mb-0"><i class="bi bi-people text-primary"></i> Clientes y Cuentas Corrientes</h3>
+                <button class="btn btn-primary fw-bold shadow-sm" onclick="abrirModalCliente()">
+                    <i class="bi bi-person-plus"></i> NUEVO CLIENTE
+                </button>
+            </div>
+
+            <div class="p-4 bg-white border rounded shadow-sm">
+                <ul class="nav nav-tabs mb-4" id="clientesTabs">
+                    <li class="nav-item">
+                        <button class="nav-link active fw-bold text-secondary" onclick="cambiarPestana('listado')">
+                            <i class="bi bi-journal-text"></i> Directorio
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link fw-bold text-secondary" onclick="cambiarPestana('ctacte')">
+                            <i class="bi bi-wallet2"></i> Estado de Deudas
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="row g-2 mb-4">
+                    <div class="col-md-6">
+                        <div class="input-group shadow-sm">
+                            <span class="input-group-text bg-light border-end-0"><i class="bi bi-search text-primary"></i></span>
+                            <input type="text" id="inputBuscarCliente" class="form-control border-start-0" placeholder="Buscar por nombre o DNI/CUIT..." autocomplete="off">
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-listado" class="tab-pane active">
+                    <div class="table-responsive bg-white border rounded">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Nombre Completo</th>
+                                    <th>DNI/CUIT</th>
+                                    <th>Condición AFIP</th>
+                                    <th>Teléfono</th>
+                                    <th class="text-end">Límite Fiado</th>
+                                    <th class="text-center">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tablaClientesBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="tab-ctacte" class="tab-pane d-none">
+                    <div class="row">
+                        <div class="col-md-5 border-end">
+                            <div class="list-group list-group-flush shadow-sm rounded border" id="listaSaldosClientes" style="max-height: 600px; overflow-y: auto;">
+                            </div>
+                        </div>
+                        <div class="col-md-7 ps-md-4">
+                            <div id="mensajeSeleccion" class="text-center py-5 text-muted">
+                                <i class="bi bi-person-check display-1 opacity-25"></i>
+                                <p class="mt-3">Seleccioná un cliente para ver su historial o registrar un pago.</p>
+                            </div>
+
+                            <div id="panelDetalleCliente" class="d-none">
+                                <div class="d-flex justify-content-between align-items-start mb-4">
+                                    <div>
+                                        <h4 id="nombreClienteDetalle" class="fw-bold mb-1 text-primary">---</h4>
+                                        <span class="badge bg-secondary" id="dniClienteDetalle">DNI: ---</span>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="small text-muted text-uppercase fw-bold">Saldo Actual</div>
+                                        <h2 id="saldoClienteDetalle" class="fw-bold text-danger mb-0">$ 0.00</h2>
+                                        <button class="btn btn-sm btn-outline-secondary mt-2 w-100 fw-bold shadow-sm" onclick="imprimirResumenCuenta()">
+                                            <i class="bi bi-printer"></i> Imprimir Resumen
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="card bg-light border-0 mb-4 shadow-sm">
+                                    <div class="card-body">
+                                        <h6 class="fw-bold mb-3"><i class="bi bi-cash-stack text-success"></i> Registrar Pago a Cuenta</h6>
+                                        <div class="row g-2">
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-lg shadow-sm">
+                                                    <span class="input-group-text bg-success text-white fw-bold">$</span>
+                                                    <input type="number" id="inputMontoPago" class="form-control fw-bold" placeholder="Monto" onkeypress="if(event.key === 'Enter') registrarPagoCliente()">
+                                                </div>
+                                            </div>
+                                            <div class="col-sm-6">
+                                                <select id="metodoPagoCliente" class="form-select form-select-lg shadow-sm fw-bold text-primary">
+                                                    <option value="EFECTIVO">Efectivo Caja</option>
+                                                    <option value="TRANSFERENCIA">Transferencia / QR</option>
+                                                    <option value="TARJETA">Tarjeta Débito/Crédito</option>
+                                                    <option value="CHEQUE">Cheque de Terceros</option>
+                                                    <option value="CANJE">Canje / Compensación de Deuda</option>
+                                                </select>
+                                            </div>
+                                            
+                                            <div class="col-12 mt-2 mb-2">
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" id="checkAfectaCaja">
+                                                    <label class="form-check-label fw-bold text-muted" for="checkAfectaCaja">
+                                                        <i class="bi bi-box-arrow-in-down text-success"></i> Ingresar billetes a la Caja del Mostrador (Turno Actual)
+                                                    </label>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-12">
+                                                <button class="btn btn-success btn-lg w-100 fw-bold shadow-sm" onclick="registrarPagoCliente()">
+                                                    <i class="bi bi-check-circle"></i> CONFIRMAR COBRO
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row g-2 mb-4">
+                                    <div class="col-6">
+                                        <button class="btn btn-outline-danger w-100 fw-bold shadow-sm" onclick="aplicarRecargoManual()">
+                                            <i class="bi bi-graph-up-arrow"></i> Recargo por Mora
+                                        </button>
+                                    </div>
+                                    <div class="col-6">
+                                        <button class="btn btn-outline-primary w-100 fw-bold shadow-sm" onclick="recalcularDeudaInflacion()">
+                                            <i class="bi bi-arrow-repeat"></i> Actualizar Precio (Inflación)
+                                        </button>
+                                    </div>
+                                </div>
+                                <h6 class="fw-bold mb-2 text-muted"><i class="bi bi-clock-history"></i> Últimos Movimientos</h6>
+                                <div class="table-responsive border rounded bg-white">
+                                    <table class="table table-sm table-hover mb-0 text-center align-middle">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th class="text-start ps-2">Fecha</th>
+                                                <th>Tipo</th>
+                                                <th class="text-start">Detalle</th>
+                                                <th class="text-end">Monto</th>
+                                                <th>Acción</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="tablaHistorialMovimientos">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalEdicionCliente" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-primary shadow-lg">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fw-bold" id="tituloModalCliente"><i class="bi bi-person-badge"></i> Alta de Cliente</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4 bg-light">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Nombre Completo o Razón Social</label>
+                        <input type="text" id="cliNombre" class="form-control fw-bold" placeholder="Ej: Juan Pérez o Constructora SRL">
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-sm-6">
+                            <label class="form-label fw-bold small">DNI / CUIT</label>
+                            <input type="text" id="cliDni" class="form-control" placeholder="Sin guiones">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label fw-bold small">Teléfono / WhatsApp</label>
+                            <input type="text" id="cliTel" class="form-control">
+                        </div>
+                        <div class="col-12 mb-3">
+                            <label class="form-label fw-bold small">Dirección / Domicilio</label>
+                            <input type="text" id="cliDireccion" class="form-control" placeholder="Ej: Av. San Martín 123">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-primary">Condición frente al IVA (AFIP)</label>
+                        <select id="cliIva" class="form-select border-primary fw-bold">
+                            <option value="Consumidor Final">Consumidor Final</option>
+                            <option value="Responsable Inscripto">Responsable Inscripto (Factura A)</option>
+                            <option value="Monotributista">Monotributista</option>
+                            <option value="Exento">Exento</option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-bold small text-danger">Límite de Fiado (Cuenta Corriente)</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-danger text-white">$</span>
+                            <input type="number" id="cliLimite" class="form-control fw-bold" value="50000">
+                        </div>
+                        <small class="text-muted">Si supera este límite, la caja pedirá autorización.</small>
+                    </div>
+                </div>
+                <div class="modal-footer bg-white">
+                    <button type="button" class="btn btn-secondary fw-bold" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary fw-bold px-4" onclick="guardarCliente()">
+                        <i class="bi bi-save"></i> Guardar Ficha
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="js/layout.js"></script>
+    <script src="js/app_clientes.js"></script>
+</body>
+</html>

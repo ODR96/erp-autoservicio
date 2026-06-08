@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Acceso - Autoservicio 20 de Junio</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        body { background: #1a1a1a; height: 100vh; display: flex; align-items: center; justify-content: center; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .login-card { background: #ffffff; padding: 40px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.5); width: 380px; text-align: center; }
+        .logo-circulo { width: 80px; height: 80px; background: #0d6efd; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 2rem; box-shadow: 0 5px 15px rgba(13, 110, 253, 0.4); }
+        .form-control-custom { border-radius: 10px; border: 2px solid #eee; padding: 12px; transition: 0.3s; }
+        .form-control-custom:focus { border-color: #0d6efd; box-shadow: none; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="logo-circulo"><i class="bi bi-shield-lock"></i></div>
+        <h4 class="fw-bold mb-1">Bienvenido</h4>
+        <p class="text-muted mb-4 small">Autoservicio 20 de Junio</p>
+
+        <div class="text-start mb-3">
+            <label class="small fw-bold text-muted">Código de Usuario</label>
+            <input type="text" id="inputUsuario" class="form-control form-control-custom" placeholder="Ej: 202604" autofocus>
+        </div>
+
+        <div class="text-start mb-4">
+            <label class="small fw-bold text-muted">PIN Secreto</label>
+            <input type="password" id="inputPin" class="form-control form-control-custom text-center fs-4" placeholder="****" maxlength="6" onkeypress="if(event.key === 'Enter') intentarAcceso()">
+        </div>
+
+        <button class="btn btn-primary w-100 fw-bold py-2 shadow-sm" onclick="intentarAcceso()">
+            INGRESAR AL SISTEMA
+        </button>
+    </div>
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+        // EL INDEX INTELIGENTE: Si ya tenés la llave, no te pide PIN, te manda directo.
+const tokenActivo = localStorage.getItem('token');
+        const rolActivo = localStorage.getItem('usuario_rol') || localStorage.getItem('rol');
+        
+        if (tokenActivo) {
+            // Si es Jefe o Encargado, pasa al panel
+            if (rolActivo === 'ADMIN' || rolActivo === 'ENCARGADO') {
+                window.location.href = 'admin_productos.html';
+            } else {
+                window.location.href = 'pos.html';
+            }
+        }
+    </script>
+    <script src="js/login.js"></script>
+</body>
+</html>

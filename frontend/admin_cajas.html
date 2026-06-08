@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP Admin - Cajas y Usuarios</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+
+    <div id="layout-sidebar-placeholder"></div>
+
+    <div class="main-wrapper">
+        <div id="layout-navbar-placeholder"></div>
+
+        <div class="content-area">
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
+                <h3 class="fw-bold mb-0"><i class="bi bi-safe text-primary"></i> Monitor de Cajas y Empleados</h3>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-primary fw-bold shadow-sm w-100" onclick="cargarDatosEnVivo()">
+                        <i class="bi bi-arrow-clockwise"></i> ACTUALIZAR VIVO
+                    </button>
+                    <button class="btn btn-primary fw-bold shadow-sm w-100" data-bs-toggle="modal" data-bs-target="#modalNuevoEmpleado" style="white-space: nowrap;">
+                        <i class="bi bi-person-plus-fill"></i> NUEVO EMPLEADO
+                    </button>
+                </div>
+            </div>
+
+            <div class="card-custom">
+                <ul class="nav nav-tabs flex-nowrap overflow-auto" id="cajaTabs" style="white-space: nowrap;">
+                    <li class="nav-item"><button class="nav-link active" onclick="cambiarPestana('vivo', event)"><i class="bi bi-display"></i> Monitor en Vivo</button></li>
+                    <li class="nav-item"><button class="nav-link" onclick="cambiarPestana('empleados', event)"><i class="bi bi-people"></i> Empleados y Permisos</button></li>
+                </ul>
+
+                <div class="tab-content p-4">
+                    
+                    <div class="tab-pane active" id="tab-vivo">
+                        <div class="row g-4" id="contenedorMonitorVivo">
+                            <div class="col-12 text-center text-muted py-5">
+                                <div class="spinner-border text-primary mb-2" role="status"></div>
+                                <p>Buscando cajas abiertas en el local...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane" id="tab-empleados">
+                        <div class="table-responsive">
+                            <table class="table table-hover table-custom border align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Nombre del Empleado</th>
+                                        <th>Rol / Permiso</th>
+                                        <th>Cód. Credencial</th>
+                                        <th class="text-center">Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tablaEmpleadosBody">
+                                    </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalNuevoEmpleado" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered"> 
+            <div class="modal-content border-primary">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-person-badge"></i> Alta de Empleado</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <input type="hidden" id="empId" value="">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Nombre y Apellido</label>
+                        <input id="empNombre" type="text" class="form-control" placeholder="Ej: Marta Gómez">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Nivel de Acceso (Rol)</label>
+                        <select id="empRol" class="form-select">
+                            <option value="CAJERO">CAJERO (Solo cobra, no anula sin PIN)</option>
+                            <option value="ENCARGADO">ENCARGADO (Cobra, anula y autoriza fiados)</option>
+                            <option value="ADMIN">ADMINISTRADOR (Dueño, acceso total)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">PIN Secreto (Para Login y Autorizaciones)</label>
+                        <input id="empPin" type="password" class="form-control text-center fs-4 fw-bold" placeholder="Ej: 1234">
+                        <small class="text-danger d-block mt-1"><i class="bi bi-shield-lock"></i> Se guardará encriptado nivel bancario.</small>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-bold small">Cód. de Barras de su Tarjeta (Opcional)</label>
+                        <input id="empCredencial" type="text" class="form-control" placeholder="Escanee la tarjeta o invente un número">
+                    </div>
+                </div>
+                <div class="modal-footer bg-white border-top">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary fw-bold px-4" onclick="guardarEmpleado()">Registrar Empleado</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
+    <script src="js/layout.js"></script>
+    <script src="js/app_cajas.js"></script>
+</body>
+</html>

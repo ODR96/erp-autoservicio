@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Panel - Autoservicio 20 de Junio</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+</head>
+<body class="bg-light d-flex align-items-center justify-content-center" style="height: 100vh;">
+    <div class="card border-0 shadow" style="width: 500px; padding: 40px; border-radius: 15px;">
+        <h2 class="fw-bold text-center">Bienvenido, <span id="nombreAdmin" class="text-primary"></span></h2>
+        <p class="text-center text-muted mb-4">¿A dónde querés ir?</p>
+        
+        <div class="row g-3">
+            <div class="col-6">
+                <a href="pos.html" class="btn btn-outline-primary w-100 fw-bold" style="height: 100px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-size: 1.1rem;">
+                    <i class="bi bi-cash-stack fs-1 mb-2"></i> PUNTO DE VENTA
+                </a>
+            </div>
+            <div class="col-6">
+                <a href="admin_productos.html" class="btn btn-outline-dark w-100 fw-bold" style="height: 100px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-size: 1.1rem;">
+                    <i class="bi bi-gear-fill fs-1 mb-2"></i> ADMINISTRACIÓN
+                </a>
+            </div>
+        </div>
+        <div class="text-center mt-4">
+            <button class="btn btn-link text-danger text-decoration-none" onclick="localStorage.clear(); window.location.href='index.html'"><i class="bi bi-box-arrow-left"></i> Salir del sistema</button>
+        </div>
+    </div>
+    <script>
+        // Esto pone tu nombre automático en la pantalla
+        document.getElementById('nombreAdmin').innerText = localStorage.getItem('usuario_nombre') || 'Admin';
+    </script>
+</body>
+</html>

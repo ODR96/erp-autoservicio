@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP Admin - Configuración del Sistema</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+    <div id="layout-sidebar-placeholder"></div>
+
+    <div class="main-wrapper">
+        <div id="layout-navbar-placeholder"></div>
+
+        <div class="content-area">
+            <h3 class="fw-bold mb-4"><i class="bi bi-gear-fill text-secondary"></i> Configuración Global</h3>
+
+            <div class="row g-4">
+                <div class="col-lg-8">
+                    <div class="card shadow-sm border-0">
+                        <div class="card-header bg-dark text-white fw-bold">
+                            <i class="bi bi-shop"></i> Perfil del Negocio
+                        </div>
+                        <div class="card-body bg-light">
+                            <form id="formConfig" onsubmit="guardarConfiguracion(event)">
+                                <div class="row g-3">
+                                    <div class="col-md-8">
+                                        <label class="form-label fw-bold small">Nombre del Negocio / Razón Social</label>
+                                        <input type="text" id="confNombre" class="form-control fw-bold border-primary" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-bold small">CUIT</label>
+                                        <input type="text" id="confCuit" class="form-control" placeholder="XX-XXXXXXXX-X" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold small">Condición frente al IVA</label>
+                                        <select id="confIva" class="form-select">
+                                            <option value="Responsable Inscripto">Responsable Inscripto</option>
+                                            <option value="Monotributo">Monotributo</option>
+                                            <option value="Exento">Exento</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold small">Teléfono / WhatsApp</label>
+                                        <input type="text" id="confTel" class="form-control">
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label fw-bold small">Dirección Comercial</label>
+                                        <input type="text" id="confDir" class="form-control">
+                                    </div>
+                                    
+                                    <hr class="mt-4">
+                                    <h6 class="fw-bold text-primary"><i class="bi bi-receipt"></i> Preferencias de Impresión</h6>
+                                    
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold small">Formato de Ticket por Defecto</label>
+                                        <select id="confImpresora" class="form-select">
+                                            <option value="80mm">Ticketera Térmica (80mm)</option>
+                                            <option value="A4">Impresora Normal (A4 / A5)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-12">
+    <label class="form-label fw-bold small">Mensaje / Leyenda al pie del Ticket</label>
+    <textarea id="confMsj" class="form-control" rows="2" placeholder="Ej: ¡Gracias por tu compra! Pedidos WhatsApp: 3704-XXXXXX"></textarea>
+</div>
+                                </div>
+                                <div class="mt-4 text-end">
+                                    <button type="submit" class="btn btn-primary btn-lg fw-bold px-5 shadow-sm">
+                                        <i class="bi bi-save"></i> Guardar Cambios
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 d-flex flex-column gap-4">
+                    <div class="card shadow-sm border-0 text-center">
+                        <div class="card-header bg-secondary text-white fw-bold">
+                            <i class="bi bi-image"></i> Logo del Sistema
+                        </div>
+                        <div class="card-body p-4 bg-light">
+                            <img id="previewLogo" src="img/placeholder-logo.png" class="img-fluid rounded mb-3 border shadow-sm" style="max-height: 120px; object-fit: contain;">
+                            <input class="form-control form-control-sm mb-2" id="inputLogo" type="file" accept="image/png, image/jpeg">
+                            <button class="btn btn-outline-dark btn-sm w-100 fw-bold" onclick="subirLogo()">
+                                <i class="bi bi-cloud-arrow-up"></i> Subir Logo
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm border-info">
+                        <div class="card-header bg-info text-dark fw-bold">
+                            <i class="bi bi-cloud-sync"></i> Sistema Híbrido / Nube
+                        </div>
+                        <div class="card-body bg-light text-center">
+                            <p class="small text-muted mb-3">Tu sistema está funcionando de manera local (Offline).</p>
+                            <button class="btn btn-success w-100 fw-bold mb-2 shadow-sm" disabled>
+                                <i class="bi bi-arrow-repeat"></i> Forzar Sincronización
+                            </button>
+                            <button class="btn btn-outline-danger w-100 fw-bold btn-sm shadow-sm" onclick="descargarBackup()">
+                                <i class="bi bi-database-down"></i> Descargar Backup Local
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="js/layout.js"></script>
+    <script src="js/app_config.js"></script>
+</body>
+</html>

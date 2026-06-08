@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP Admin - Oficina Mayorista y Depósito</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+    <div id="layout-sidebar-placeholder"></div>
+
+    <div class="main-wrapper">
+        <div id="layout-navbar-placeholder"></div>
+
+        <div class="content-area">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h3 class="fw-bold mb-0"><i class="bi bi-truck text-primary"></i> Oficina de Ventas y Presupuestos</h3>
+                <div id="estadoConexionNube" class="badge bg-success shadow-sm">
+                    <i class="bi bi-hdd-fill"></i> MODO LOCAL: El Colorado
+                </div>
+            </div>
+
+            <ul class="nav nav-tabs mb-4" id="mayoristaTabs">
+                <li class="nav-item">
+                    <button class="nav-link active fw-bold text-primary" onclick="cambiarPestanaMay('nueva')">
+                        <i class="bi bi-cart-plus"></i> Nueva Operación
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link fw-bold text-secondary" onclick="cambiarPestanaMay('monitor')">
+                        <i class="bi bi-display"></i> Monitor Logístico
+                    </button>
+                </li>
+            </ul>
+
+            <div id="tab-nueva" class="tab-pane active">
+                <div class="row g-4">
+                    <div class="col-lg-8">
+                        <div class="card shadow-sm border-0 mb-4">
+                            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                                <span class="fw-bold"><i class="bi bi-cart-plus"></i> Productos del Pedido</span>
+                                <div class="input-group input-group-sm w-50">
+                                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                    <input type="text" id="busquedaProductoMay" class="form-control" placeholder="Nombre o código de barras...">
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive" style="max-height: 500px;">
+                                    <table class="table table-hover mb-0" id="tablaPedidoMayorista">
+                                        <thead class="table-secondary small fw-bold">
+                                            <tr>
+                                                <th style="width: 50%;">Producto</th>
+                                                <th style="width: 15%;">Cant.</th>
+                                                <th style="width: 15%;">P. Unit.</th>
+                                                <th style="width: 15%;">Subtotal</th>
+                                                <th style="width: 5%;"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="bodyPedidoMay">
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div id="msgVacio" class="text-center py-5 text-muted">
+                                    <i class="bi bi-inbox display-1 d-block opacity-25"></i>
+                                    <p>Buscá productos arriba para empezar el presupuesto</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-4">
+                        <div class="card shadow-sm border-0 mb-4">
+                            <div class="card-header bg-primary text-white fw-bold">
+                                <i class="bi bi-person-badge"></i> Cliente Destino
+                            </div>
+                            <div class="card-body bg-light">
+                                <select id="selectClienteMay" class="form-select fw-bold mb-3">
+                                    <option value="0">Consumidor Final / Ocasional</option>
+                                </select>
+                                <div id="infoClienteMay" class="small text-muted d-none">
+                                    <p class="mb-1"><i class="bi bi-info-circle"></i> CUIT: <span id="cuitClienteMay">-</span></p>
+                                    <p class="mb-1"><i class="bi bi-wallet2"></i> Saldo Pendiente: <b class="text-danger">$0.00</b></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card shadow-sm border-0">
+                            <div class="card-body p-4">
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="text-muted">Subtotal:</span>
+                                    <span class="fw-bold" id="totalSubMay">$ 0.00</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-4 border-top pt-2">
+                                    <h4 class="fw-bold">TOTAL:</h4>
+                                    <h4 class="fw-bold text-primary" id="totalFinalMay">$ 0.00</h4>
+                                </div>
+
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-outline-secondary fw-bold" onclick="guardarComoPresupuesto()">
+                                        <i class="bi bi-file-earmark-pdf"></i> SOLO PRESUPUESTO (A5)
+                                    </button>
+                                    <button class="btn btn-success btn-lg fw-bold shadow-sm" onclick="confirmarYReservar()">
+                                        <i class="bi bi-check-all"></i> CONFIRMAR Y RESERVAR STOCK
+                                    </button>
+                                    <hr>
+                                    <div class="alert alert-warning small py-2 mb-0">
+                                        <i class="bi bi-exclamation-triangle"></i> <b>Nota:</b> "Confirmar" bloqueará el stock en el salón para que nadie lo venda por error.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div> </div> <div id="tab-monitor" class="tab-pane d-none">
+                <div class="d-flex justify-content-between mb-3">
+                    <div class="input-group w-50 shadow-sm">
+                        <span class="input-group-text bg-white"><i class="bi bi-search text-primary"></i></span>
+                        <input type="text" id="buscadorMonitor" class="form-control" placeholder="Buscar cliente o N°..." onkeyup="filtrarMonitor()">
+                    </div>
+                    <button class="btn btn-outline-secondary shadow-sm fw-bold" onclick="cargarMonitorPedidos()">
+                        <i class="bi bi-arrow-repeat"></i> Actualizar
+                    </button>
+                </div>
+
+                <div class="table-responsive bg-white border rounded shadow-sm">
+                    <table class="table table-hover align-middle text-center mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>N°</th>
+                                <th class="text-start">Fecha / Hora</th>
+                                <th class="text-start">Cliente</th>
+                                <th>Tipo</th>
+                                <th class="text-end">Total</th>
+                                <th>Estado</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bodyMonitor">
+                        </tbody>
+                    </table>
+                </div>
+            </div> </div> </div> <div class="modal fade" id="modalResultadosProd" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title fw-bold">Seleccionar Producto</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div class="list-group list-group-flush" id="listaResultadosMay">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="js/layout.js"></script>
+    <script src="js/app_mayorista.js"></script>
+</body>
+</html>

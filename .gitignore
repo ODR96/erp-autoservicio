@@ -1,0 +1,13 @@
+# Base de datos local
+autoservicio_20dejunio.db
+*.db
+*.sqlite3
+
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales (si usas)
+venv/
+env/

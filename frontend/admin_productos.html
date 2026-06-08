@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP Admin - Autoservicio 20 de Junio</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.0/dist/JsBarcode.all.min.js"></script>
+
+    <link rel="stylesheet" href="css/estilos.css">
+</head>
+
+<body>
+
+    <div id="app-container" style="display: flex; width: 100%; height: 100%;">
+
+        <div id="layout-sidebar-placeholder"></div>
+
+        <div class="main-wrapper">
+
+            <div id="layout-navbar-placeholder"></div>
+            <div class="content-area">
+                <div class="d-flex justify-content-between align-items-center mb-3 d-print-none">
+                    <h3 class="fw-bold mb-0"><i class="bi bi-boxes text-primary"></i> Gestión de Productos</h3>
+                    <div>
+                        <button class="btn btn-outline-success fw-bold shadow-sm me-2" onclick="abrirModalExportar()">
+                            <i class="bi bi-file-earmark-excel"></i> EXPORTAR
+                        </button>
+                        <button class="btn btn-outline-primary fw-bold shadow-sm me-2"
+                            onclick="gestionarCategoriasUI()">
+                            <i class="bi bi-tags"></i> RUBROS
+                        </button>
+                        <button class="btn btn-primary fw-bold shadow-sm" data-bs-toggle="modal"
+                            data-bs-target="#modalNuevoProducto">
+                            <i class="bi bi-plus-lg"></i> NUEVO PRODUCTO
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card-custom">
+                    <ul class="nav nav-tabs d-print-none" id="productTabs">
+                        <li class="nav-item"><button class="nav-link active"
+                                onclick="cambiarPestana('catalogo', event)"><i class="bi bi-list-ul"></i> Catálogo y
+                                ABM</button></li>
+                        <li class="nav-item"><button class="nav-link" onclick="cambiarPestana('masiva', event)"><i
+                                    class="bi bi-graph-up-arrow"></i> Actualización Masiva</button></li>
+                        <li class="nav-item"><button class="nav-link" onclick="cambiarPestana('etiquetas', event)"><i
+                                    class="bi bi-tags"></i> Cartelería y Ofertas</button></li>
+                        <li class="nav-item">
+                            <button class="nav-link fw-bold" onclick="cambiarPestana('cat-pos', event)">
+                                <i class="bi bi-grid-3x3-gap"></i> Categorías POS
+                            </button>
+                        </li>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link fw-bold text-success" onclick="cambiarPestana('combos', event)">
+                                <i class="bi bi-gift"></i> Gestión de Combos
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content" id="productTabsContent">
+
+                        <div class="tab-pane active" id="tab-catalogo">
+                            <div class="row g-2 mb-3 bg-light p-3 rounded border mx-0 mt-0 d-print-none">
+                                <div class="col-md-3">
+                                    <div class="input-group">
+                                        <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                                        <input type="text" class="form-control border-start-0 ps-0"
+                                            id="inputBuscarCatalogo" placeholder="Buscar código o nombre..."
+                                            onkeyup="filtrarCatalogoFront()">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <select class="form-select" id="selectFiltroCategoria"
+                                        onchange="filtrarCatalogoFront()">
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <select class="form-select" id="selectFiltroProveedor"
+                                        onchange="filtrarCatalogoFront()">
+                                        <option value="">Todos los Prov.</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <select class="form-select fw-bold text-primary" id="filtroEstado"
+                                        onchange="cargarCatalogo()">
+                                        <option value="1" selected>Activos</option>
+                                        <option value="critico" class="text-danger fw-bold">⚠️ Stock Crítico</option>
+                                        <option value="vencimiento" class="text-warning fw-bold" style="color: #d97706!important;">⏳ Alerta Vencimiento</option>
+                                        <option value="0" class="text-muted">Inactivos</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <button class="btn btn-secondary w-100 fw-bold shadow-sm"
+                                        onclick="limpiarFiltrosCatalogo()">
+                                        <i class="bi bi-eraser"></i> Limpiar
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-hover table-custom border align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>Código</th>
+                                            <th>Producto</th>
+                                            <th>Rubro</th>
+                                            <th class="text-end">Costo Neto</th>
+                                            <th class="text-end">Precio Final</th>
+                                            <th class="text-center">Stock Físico</th>
+                                            <th class="text-center">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tablaCatalogoBody"></tbody>
+                                </table>
+                                <div id="paginacionProductos" class="d-flex justify-content-center mt-3 mb-4"></div>
+                            </div>
+                        </div>
+
+                        <div class="tab-pane" id="tab-masiva">
+                            <div class="row d-print-none">
+                                <div class="col-md-4">
+                                    <div class="card border-primary mb-3 shadow-sm">
+                                        <div class="card-header bg-primary text-white fw-bold"><i
+                                                class="bi bi-calculator"></i> Configurar Ajuste</div>
+                                        <div class="card-body p-3">
+                                            <label class="form-label fw-bold small text-muted">1. Aplicar ajuste
+                                                a:</label>
+                                            <select class="form-select mb-3 fw-bold" id="masivaFiltro">
+                                                <option value="todos_0">A TODOS LOS PRODUCTOS</option>
+                                                <optgroup label="Filtrar por Rubro">
+                                                    <option value="categoria_1">Solo Almacén</option>
+                                                    <option value="categoria_2">Solo Bebidas</option>
+                                                </optgroup>
+                                            </select>
+                                            <label class="form-label fw-bold small text-muted">2. Filtrar palabra
+                                                (Opcional)</label>
+                                            <input type="text" class="form-control mb-3 border-info" id="masivaPalabra"
+                                                placeholder="Ej: Sancor, Manaos...">
+                                            <label class="form-label fw-bold small text-muted">3. Tipo de Ajuste y Valor</label>
+                                            
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="radio" name="masivaTipo" id="masivaTipoPorcentaje" checked onchange="cambiarIconoAjuste()">
+                                                <label class="form-check-label fw-bold">Porcentaje (%)</label>
+                                            </div>
+                                            <div class="form-check mb-3">
+                                                <input class="form-check-input" type="radio" name="masivaTipo" id="masivaTipoFijo" onchange="cambiarIconoAjuste()">
+                                                <label class="form-check-label fw-bold text-success">Precio Fijo Exacto ($)</label>
+                                            </div>
+
+                                            <div class="input-group mb-3 input-group-lg">
+                                                <span class="input-group-text fw-bold text-primary" id="iconoAjusteMasivo">%</span>
+                                                <input type="number" class="form-control text-center fw-bold fs-4" id="masivaValor" value="15" step="0.1">
+                                            </div>
+                                            <label class="form-label fw-bold small text-muted">4. Afectar a:</label>
+                                            <div class="form-check mb-2"><input class="form-check-input" type="radio"
+                                                    name="masivaAfectar" id="masivaCostoYVenta" checked><label
+                                                    class="form-check-label fw-bold">Costo y Precio</label></div>
+                                            <div class="form-check mb-4"><input class="form-check-input" type="radio"
+                                                    name="masivaAfectar" id="masivaSoloVenta"><label
+                                                    class="form-check-label">Solo Precio de Venta</label></div>
+                                            <button class="btn btn-info w-100 fw-bold shadow-sm py-2 fs-5 text-white"
+                                                onclick="simularAjusteMasivo()"><i class="bi bi-eye-fill"></i> SIMULAR
+                                                AJUSTE</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-8">
+                                    <div class="card border-info h-100 shadow-sm">
+                                        <div
+                                            class="card-header bg-info text-white fw-bold d-flex justify-content-between align-items-center">
+                                            <span><i class="bi bi-table"></i> Vista Previa (Simulador)</span>
+                                            <span class="badge bg-dark fs-6" id="simuladorContador">0 productos</span>
+                                        </div>
+                                        <div class="card-body p-0" style="max-height: 480px; overflow-y: auto;">
+                                            <table class="table table-hover table-sm align-middle text-center mb-0"
+                                                id="tablaSimulacion">
+                                                <thead class="table-light sticky-top">
+                                                    <tr>
+                                                        <th class="text-start ps-3">Producto</th>
+                                                        <th>Costo (Act ➔ Nvo)</th>
+                                                        <th>Precio (Act ➔ Nvo)</th>
+                                                        <th>Dif. Precio</th>
+                                                        <th class="text-center">Quitar</th> </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr>
+                                                        <td colspan="5" class="text-muted py-5">Usá el panel para simular.</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div class="card-footer bg-light text-end p-3 d-none" id="footerSimulador">
+                                            <button class="btn btn-secondary me-2 fw-bold"
+                                                onclick="limpiarSimulacion()">Cancelar</button>
+                                            <button class="btn btn-success fw-bold px-4 fs-5 shadow"
+                                                onclick="confirmarAjusteMasivo()"><i
+                                                    class="bi bi-check-circle-fill"></i> CONFIRMAR REAL</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="tab-pane" id="tab-etiquetas">
+                            <div class="row d-print-none">
+                                <div class="col-md-4 pr-4">
+                                    <div class="card border-success mb-3 shadow-sm">
+                                        <div class="card-header bg-success text-white fw-bold"><i
+                                                class="bi bi-layers-fill"></i> Encolado Masivo</div>
+                                        <div class="card-body p-3">
+                                            <select class="form-select mb-2 form-select-sm" id="etiquetaMasivaFiltro">
+                                                <option value="todos_0">Todo el Catálogo</option>
+                                                <optgroup label="Por Rubro">
+                                                    <option value="categoria_1">Almacén</option>
+                                                    <option value="categoria_2">Bebidas</option>
+                                                </optgroup>
+                                            </select>
+                                            <input type="text" class="form-control form-control-sm mb-3"
+                                                id="etiquetaMasivaPalabra" placeholder="Filtrar palabra (Ej: Coca)">
+                                            <button class="btn btn-outline-success w-100 fw-bold btn-sm"
+                                                onclick="encolarMasivoCarteleria()"><i class="bi bi-plus-circle"></i>
+                                                Encolar a Cenefas</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="card border-secondary mb-3 shadow-sm">
+                                        <div class="card-header bg-secondary text-white fw-bold"><i
+                                                class="bi bi-tag-fill"></i> Agregar Individual</div>
+                                        <div class="card-body p-3">
+                                            <label class="form-label fw-bold small">Producto:</label>
+                                            <div class="position-relative">
+                                                <input type="text" id="inputBuscarEtiqueta"
+                                                    class="form-control form-control-sm"
+                                                    placeholder="Buscar producto..."
+                                                    onkeyup="buscarParaEtiqueta(this.value)">
+                                                <div id="resultadosEtiqueta"
+                                                    class="list-group position-absolute w-100 shadow-lg d-none"
+                                                    style="z-index: 1050; max-height: 200px; overflow-y: auto;"></div>
+                                            </div>
+                                            <label class="form-label fw-bold small">Formato:</label>
+                                            <select class="form-select mb-2 form-select-sm" id="selectEtiquetaFormato"
+                                                onchange="toggleOpcionesA4()">
+                                                <option value="Cenefa">Cenefa para Góndola</option>
+                                                <option value="Oferta A4">Cartel Oferta A4</option>
+                                            </select>
+
+                                            <div id="panelExtraA4" class="d-none bg-light p-2 border rounded mb-2">
+                                                <label class="form-label fw-bold small text-primary">Texto
+                                                    Superior:</label>
+                                                <input type="text"
+                                                    class="form-control form-control-sm border-primary mb-2"
+                                                    id="inputEtiquetaTexto" placeholder="Ej: ¡Promo 2x1!">
+
+                                                <label class="form-label fw-bold small text-success">Precio Oferta
+                                                    Personalizado:</label>
+                                                <div class="input-group input-group-sm">
+                                                    <span
+                                                        class="input-group-text bg-success text-white border-success">$</span>
+                                                    <input type="number"
+                                                        class="form-control border-success fw-bold text-success"
+                                                        id="inputEtiquetaPrecioFalso" placeholder="Opcional">
+                                                </div>
+                                            </div>
+
+                                            <div class="input-group input-group-sm mt-2">
+                                                <span class="input-group-text fw-bold">Copias:</span>
+                                                <input type="number" class="form-control text-center fw-bold"
+                                                    id="inputEtiquetaCant" value="1" min="1">
+                                                <button class="btn btn-secondary fw-bold"
+                                                    onclick="agregarEtiquetaManual()">Agregar</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-8 pl-4">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h5 class="fw-bold mb-0">Cola de Impresión Actual</h5>
+                                        <div class="d-flex gap-2">
+                                            <select id="selectColumnasCenefa"
+                                                class="form-select form-select-sm fw-bold border-success text-success"
+                                                style="width: auto;">
+                                                <option value="3">3 Columnas (Estándar)</option>
+                                                <option value="2" selected>2 Columnas (Anchas)</option>
+                                            </select>
+
+                                            <button class="btn btn-outline-danger btn-sm"
+                                                onclick="vaciarColaEtiquetas()">
+                                                <i class="bi bi-trash"></i> Vaciar
+                                            </button>
+
+                                            <div class="btn-group shadow-sm">
+                                                <button class="btn btn-success fw-bold"
+                                                    onclick="lanzarImpresion('Solo Cenefas')">
+                                                    <i class="bi bi-journal-text"></i> Imprimir Cenefas
+                                                </button>
+                                                <button class="btn btn-primary fw-bold"
+                                                    onclick="lanzarImpresion('Solo A4')">
+                                                    <i class="bi bi-file-earmark-image"></i> Imprimir A4
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="table-responsive bg-white border rounded shadow-sm"
+                                        style="max-height: 500px; overflow-y: auto;">
+                                        <table class="table table-hover align-middle mb-0 text-center"
+                                            id="tablaColaEtiquetas">
+                                            <thead class="table-light sticky-top">
+                                                <tr>
+                                                    <th class="text-start ps-3">Producto</th>
+                                                    <th>Precio</th>
+                                                    <th>Formato</th>
+                                                    <th>Extras</th>
+                                                    <th>Copias</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr>
+                                                    <td colspan="6" class="text-muted py-5">Cola vacía.</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tab-pane p-4" id="tab-cat-pos">
+                            <h5 class="fw-bold mb-3">Configurar Categorías Rápidas de la Caja</h5>
+                            <p class="text-muted small">Modifique los 8 botones que aparecen en la pantalla táctil de la
+                                caja registradora.</p>
+
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle border">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Botón (Preview)</th>
+                                            <th>Nombre a Mostrar</th>
+                                            <th>Palabra Clave (Buscador)</th>
+                                            <th>Color Fondo</th>
+                                            <th>Acción</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tablaCategoriasPOS">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="tab-pane p-4" id="tab-combos">
+                            <h5 class="fw-bold mb-3 text-success"><i class="bi bi-gift"></i> Panel Central de Combos y
+                                Promociones</h5>
+                            <p class="text-muted small">Aquí puede ver todos los productos que están compuestos por
+                                otros. (Para crear un combo nuevo, use el botón "Nuevo Producto").</p>
+
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle border">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Nombre del Combo / Pack</th>
+                                            <th>Componentes que descuenta</th>
+                                            <th>Precio de Venta</th>
+                                            <th class="text-center">Acción</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tablaListadoCombos">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="hojaImpresionLimpia" class="d-none"></div>
+
+    <div class="modal fade" id="modalNuevoProducto" data-bs-backdrop="static">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content border-primary">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-box-seam"></i> Alta / Edición de Producto</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold small">Código de Barras / Interno</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-upc-scan"></i></span>
+                                <input id="inputCodigo" type="text" class="form-control" placeholder="Escanear...">
+                                <button class="btn btn-outline-primary px-2" type="button"
+                                    onclick="generarCodigoInterno()" title="Generar código"><i
+                                        class="bi bi-magic"></i></button>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-bold small">Nombre / Descripción del Producto</label>
+                            <input id="inputNombre" type="text" class="form-control"
+                                placeholder="Descripción del Producto...">
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold small">Rubro / Categoría</label>
+                            <select id="selectCategoria" class="form-select border-primary">
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold small text-primary">Proveedor Habitual</label>
+                            <select id="selectProveedor" class="form-select border-primary">
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold small">Unidad de Venta</label>
+                            <select id="selectUnidadMedida" class="form-select">
+                                <option value="Unidad">Por Unidad</option>
+                                <option value="Kg">Por Kilo (Kg)</option>
+                                <option value="Litro">Por Litro (L)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <ul class="nav nav-pills mb-3 mt-4" id="abmTabs">
+                        <li class="nav-item"><button class="nav-link active py-1 px-3"
+                                onclick="cambiarPestanaAbm('precios')"><i class="bi bi-currency-dollar"></i> Precios,
+                                Costos y Stock</button></li>
+                        <li class="nav-item"><button class="nav-link py-1 px-3" onclick="cambiarPestanaAbm('lotes')"><i
+                                    class="bi bi-boxes"></i> Auditoría Lotes FIFO</button></li>
+                        <li class="nav-item">
+                            <button class="nav-link py-1 px-3" onclick="cambiarPestanaAbm('combo')">
+                                <i class="bi bi-gift"></i> Configurar Combo
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link py-1 px-3" onclick="cambiarPestanaAbm('historial')">
+                                <i class="bi bi-clock-history"></i> Historial
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content border rounded p-3 bg-light" id="abmTabsContent">
+
+                        <div class="tab-pane-abm active" id="tab-abm-precios">
+                            <div class="row g-3">
+                                <div class="col-md-6 border-end pr-3">
+                                    <h6 class="fw-bold text-primary mb-3">Precio Minorista</h6>
+                                    <div class="row g-2">
+                                        <div class="col-6">
+                                            <label class="form-label fw-bold small text-muted">Costo Neto s/IVA</label>
+                                            <div class="input-group input-group-sm">
+                                                <span class="input-group-text">$</span>
+                                                <input id="inputCosto" type="number" class="form-control text-end"
+                                                    placeholder="0.00" oninput="calcularPrecioAutomatico()">
+                                            </div>
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label fw-bold small text-muted">IVA (%)</label>
+                                            <select id="inputIva" class="form-select form-select-sm text-end"
+                                                onchange="calcularPrecioAutomatico()">
+                                                <option value="21.0">21.0%</option>
+                                                <option value="10.5">10.5%</option>
+                                                <option value="0">Exento</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-6 mt-3">
+                                            <label class="form-label fw-bold small text-primary">Margen (%)</label>
+                                            <div class="input-group input-group-sm">
+                                                <input id="inputMargen" type="number"
+                                                    class="form-control text-end fw-bold border-primary"
+                                                    placeholder="40" oninput="calcularPrecioAutomatico()">
+                                                <span
+                                                    class="input-group-text bg-primary text-white border-primary">%</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-6 mt-3">
+                                            <label class="form-label fw-bold small text-success">Precio de Venta</label>
+                                            <div class="input-group input-group-sm">
+                                                <span class="input-group-text bg-success text-white fw-bold">$</span>
+                                                <input id="inputPrecioVenta" type="number"
+                                                    class="form-control text-end fw-bold text-success fs-6 border-success bg-white"
+                                                    placeholder="0.00">
+                                            </div>
+                                        </div>
+                                    </div>
+
+
+                                </div>
+
+                                <div class="col-md-6 pl-3">
+                                    <h6 class="fw-bold text-secondary mb-3">Reglas de Precio Mayorista / Volumen</h6>
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-5">
+                                            <label class="form-label fw-bold small">A partir de:</label>
+                                            <div class="input-group input-group-sm">
+                                                <input id="inputCantMayorista" type="number"
+                                                    class="form-control text-center" placeholder="Ej: 6">
+                                                <span class="input-group-text">Unid.</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-5">
+                                            <label class="form-label fw-bold small">Precio Unitario:</label>
+                                            <div class="input-group input-group-sm">
+                                                <span class="input-group-text">$</span>
+                                                <input id="inputPrecioMayorista" type="number"
+                                                    class="form-control text-end" placeholder="0.00">
+                                            </div>
+                                        </div>
+                                        <div class="col-2">
+                                            <button class="btn btn-sm btn-outline-primary w-100" type="button"
+                                                onclick="agregarReglaUI()"><i class="bi bi-plus-lg"></i></button>
+                                        </div>
+                                    </div>
+                                    <table class="table table-sm mt-3 bg-white border small">
+                                        <thead class="table-secondary">
+                                            <tr>
+                                                <th class="text-center">Llevando...</th>
+                                                <th class="text-center">Precio x Unidad</th>
+                                                <th></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="tablaReglasBody">
+                                            <tr>
+                                                <td colspan="3" class="text-center text-muted">No hay reglas
+                                                    configuradas</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="tab-pane-abm" id="tab-abm-lotes" style="display: none;">
+                            <div class="row g-3">
+                                <div class="col-md-3">
+                                    <label class="form-label fw-bold small">Alerta Stock Mínimo</label>
+                                    <input id="inputAlertaStock" type="number" class="form-control form-control-sm"
+                                        placeholder="Ej: 5" value="5">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label fw-bold small text-danger">Control Vencimientos</label>
+                                    <select class="form-select form-select-sm border-danger text-danger fw-bold"
+                                        id="selectControlVenc" onchange="toggleAlertaDias()">
+                                        <option value="NO">NO (Secos)</option>
+                                        <option value="SI" selected>SÍ (Perecederos)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3" id="cajaDiasAlerta">
+                                    <label class="form-label fw-bold small text-warning"
+                                        style="color: #d97706 !important;">Avisar vencimiento con</label>
+                                    <div class="input-group input-group-sm">
+                                        <input id="inputDiasAlerta" type="number" class="form-control text-center"
+                                            value="10">
+                                        <span class="input-group-text">Días</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr>
+                            <h6 class="fw-bold mb-3"><i class="bi bi-box-arrow-in-down"></i> Ingresar Lote de Stock</h6>
+
+                            <div id="msgLoteNuevo" class="alert alert-info py-2" style="display: none;">
+                                <i class="bi bi-info-circle-fill"></i> Llená los datos del lote y se ingresará
+                                automáticamente cuando toques "Guardar Producto" abajo de todo.
+                            </div>
+
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-2"><label class="form-label fw-bold small">N° Lote</label><input
+                                        id="inputNumLote" type="text" class="form-control form-control-sm"></div>
+                                <div class="col-md-3"><label class="form-label fw-bold small">Fecha
+                                        Vencimiento</label><input id="inputVencimiento" type="date"
+                                        class="form-control form-control-sm"></div>
+                                <div class="col-md-2"><label class="form-label fw-bold small">Cant.
+                                        Ingresa</label><input id="inputCantLote" type="number"
+                                        class="form-control form-control-sm text-center"></div>
+                                <div class="col-md-3"><label class="form-label fw-bold small">Costo Lote</label>
+                                    <div class="input-group input-group-sm"><span
+                                            class="input-group-text">$</span><input id="inputCostoLote" type="number"
+                                            class="form-control text-end"></div>
+                                </div>
+
+                                <div class="col-md-2" id="btnAgregarLoteRapido">
+                                    <button type="button" class="btn btn-sm btn-success w-100 fw-bold"
+                                        onclick="agregarLoteRapido()"><i class="bi bi-plus-circle"></i> AGREGAR</button>
+                                </div>
+                            </div>
+
+                            <table class="table table-sm mt-3 bg-white border text-center align-middle">
+                                <thead class="table-secondary">
+                                    <tr>
+                                        <th>Lote</th>
+                                        <th>Ingreso</th>
+                                        <th>Vence</th>
+                                        <th>Stock Disp.</th>
+                                        <th>Costo Lote</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tablaLotesBody">
+                                    <tr>
+                                        <td colspan="6" class="text-muted">Aún no hay lotes ingresados.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                        </div>
+                        <div class="tab-pane-abm" id="tab-abm-combo" style="display: none;">
+                            <h6 class="fw-bold text-primary mb-3">Armar Pack / Combo</h6>
+                            <div class="alert alert-info small">
+                                <i class="bi bi-info-circle"></i> Al vender este producto, se descontará stock de los
+                                artículos de la lista.
+                            </div>
+                            <div class="row g-2 align-items-end mb-3">
+                                <div class="col-8">
+                                    <label class="form-label small fw-bold">Buscar Componente</label>
+                                    <div class="position-relative">
+                                        <input type="text" id="inputBuscarComponente"
+                                            class="form-control form-control-sm"
+                                            placeholder="Escriba nombre o código para buscar..."
+                                            onkeyup="buscarComponenteCombo(this.value)">
+                                        <div id="resultadosBusquedaCombo"
+                                            class="list-group position-absolute w-100 shadow-lg d-none"
+                                            style="z-index: 1050; max-height: 200px; overflow-y: auto;">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-2">
+                                    <label class="form-label small fw-bold">Cant.</label>
+                                    <input type="number" id="inputCantComponente" class="form-control form-control-sm"
+                                        value="1">
+                                </div>
+                                <div class="col-2">
+                                    <button class="btn btn-sm btn-primary w-100" onclick="agregarComponenteUI()">
+                                        <i class="bi bi-plus-lg"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <table class="table table-sm border small">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Producto</th>
+                                        <th>Cant.</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tablaComponentesCombo"></tbody>
+                            </table>
+                        </div>
+                        <div class="tab-pane-abm" id="tab-abm-historial" style="display: none;">
+                            <h6 class="fw-bold text-secondary mb-3"><i class="bi bi-clock-history"></i> Últimos 10
+                                Movimientos</h6>
+                            <table class="table table-sm border small text-center align-middle bg-white">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Fecha y Hora</th>
+                                        <th>Tipo de Movimiento</th>
+                                        <th>Cant.</th>
+                                        <th>Responsable</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tablaHistorialProd">
+                                    <tr>
+                                        <td colspan="4" class="text-muted">Cargando historial...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-white border-top">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary fw-bold px-4"
+                        onclick="guardarProductoCompleto()">Guardar Producto</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalMerma" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-warning shadow-lg">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-box-arrow-down-right"></i> Registrar Merma: <span
+                            id="mermaNombreProducto"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="mb-3 text-muted">Ajuste de stock sin ingreso de dinero. El costo se registrará como
+                        pérdida contable.</p>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-12">
+                            <label class="form-label fw-bold small">Seleccione el Lote afectado</label>
+                            <select id="mermaSelectLote" class="form-select form-select-sm"></select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold small">Cant. a descontar</label>
+                            <input id="mermaCantidad" type="number"
+                                class="form-control form-control-sm text-center fw-bold text-danger" value="1" min="0.1"
+                                step="0.1">
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-bold small">Motivo de la baja</label>
+                            <select id="mermaMotivo" class="form-select form-select-sm">
+                                <option value="Rotura en local">Rotura en Góndola/Depósito</option>
+                                <option value="Producto Vencido">Producto Vencido / Mal estado</option>
+                                <option value="Consumo Interno">Consumo Interno / Uso propio</option>
+                                <option value="Faltante Inventario">Faltante detectado en inventario</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Observaciones adicionales</label>
+                        <input id="mermaObservaciones" type="text" class="form-control form-control-sm"
+                            placeholder="Ej: Se cayó la caja al cobrar...">
+                    </div>
+                </div>
+                <div class="modal-footer border-0 p-3 pt-0 mt-3">
+                    <button class="btn btn-warning w-100 fw-bold shadow-sm" onclick="confirmarMerma()">CONFIRMAR BAJA DE
+                        STOCK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <script src="js/app_productos.js"></script>
+    <script src="js/layout.js"></script>
+
+</body>
+
+</html>
