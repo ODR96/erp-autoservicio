@@ -2,9 +2,11 @@ from typing import Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
 import sqlite3
-from datetime import timedelta, date
+from datetime import datetime, timezone, timedelta, date
 
 router = APIRouter()
+
+ZONA_AR = timezone(timedelta(hours=-3))
 
 # --- MODELOS DE DATOS ---
 class ProductoNuevo(BaseModel):
@@ -249,11 +251,14 @@ def ver_producto_por_id(producto_id: int):
             cursor.execute("DELETE FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible = 0", (producto_id,))
 
             # Si no alcanzó la mercadería positiva y sigue habiendo deuda, creamos 1 solo lote unificado
+            # Si no alcanzó la mercadería positiva y sigue habiendo deuda, creamos 1 solo lote unificado
             if deuda_total > 0:
+                # Calculamos la fecha exacta desde Python
+                fecha_hoy_ar = datetime.now(ZONA_AR).strftime("%Y-%m-%d")
                 cursor.execute('''
                     INSERT INTO lotes_stock (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento, cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
-                    VALUES (?, 'VENTA_SIN_STOCK', DATE('now'), '2099-12-31', 0, ?, 0, 'Activo')
-                ''', (producto_id, -deuda_total))
+                    VALUES (?, 'VENTA_SIN_STOCK', ?, '2099-12-31', 0, ?, 0, 'Activo')
+                ''', (producto_id, fecha_hoy_ar, -deuda_total))
 
             conexion.commit() # Guardamos la limpieza en la base de datos
         # =================================================================

@@ -270,55 +270,81 @@ def historial_ventas_turno(turno_id: int):
     finally:
         conexion.close()
 
-# --- 5. ANULAR UNA VENTA Y DEVOLVER EL STOCK ---
+# --- 5. ANULAR UNA VENTA Y DEVOLVER EL STOCK Y DINERO ---
 @router.put("/anular/{venta_id}")
 def anular_venta(venta_id: int):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
+        # 1. Buscamos el ticket
         cursor.execute("SELECT estado, id, metodo_pago, total_venta, cliente_id FROM ventas_cabecera WHERE id = ?", (venta_id,))
         venta = cursor.fetchone()
         
         if not venta: raise Exception("La venta no existe.")
         if venta[0] == 'ANULADA': raise Exception("Esta venta ya está anulada.")
 
+        # 2. REVERSO DE STOCK (El Bug del Motivo arreglado con LIKE)
         cursor.execute('''
             SELECT lote_id, cantidad, producto_id 
-            FROM movimientos_stock WHERE motivo = ?
-        ''', (f"Ticket #{venta_id}",))
+            FROM movimientos_stock WHERE motivo LIKE ?
+        ''', (f"Ticket #{venta_id}%",))
         movimientos_afectados = cursor.fetchall()
 
         for mov in movimientos_afectados:
             lote_id, cantidad, producto_id = mov
+            # Devolvemos la cantidad al lote
             cursor.execute("UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible + ? WHERE id = ?", (cantidad, lote_id))
+            # Registramos el movimiento de devolución
             cursor.execute('''
                 INSERT INTO movimientos_stock (producto_id, lote_id, tipo_movimiento, cantidad, motivo)
                 VALUES (?, ?, 'ANULACION', ?, ?)
             ''', (producto_id, lote_id, cantidad, f"Anulación Ticket #{venta_id}"))
 
+        # 3. REVERSO DE DINERO Y CUENTAS
         metodo_pago = venta[2].upper()
         total_venta = venta[3]
         cliente_id = venta[4]
         
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+
+        # A. Si era fiado, le restamos la deuda al cliente y dejamos registro
         if metodo_pago in ['FIADO', 'CUENTA CORRIENTE'] and cliente_id:
             cursor.execute("UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor - ? WHERE id = ?", (total_venta, cliente_id))
+            cursor.execute('''
+                INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
+                VALUES (?, ?, 'PAGO_ANULACION', ?, ?, 1)
+            ''', (cliente_id, fecha_actual, total_venta, f"Anulación Ticket #{venta_id}"))
 
-        # Restar efectivo de la caja si era MIXTO
-        if metodo_pago == 'MIXTO':
+        # B. Si era EFECTIVO puro (El Bug de la Caja arreglado)
+        elif metodo_pago == 'EFECTIVO':
+            cursor.execute("SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO'")
+            turno = cursor.fetchone()
+            if turno:
+                cursor.execute('''
+                    INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones) 
+                    VALUES (?, 1, 'RETIRO', ?, ?)
+                ''', (fecha_actual, total_venta, f"Anulación Efectivo Ticket #{venta_id}"))
+
+        # C. Si era MIXTO, sacamos solo la parte que era efectivo físico
+        elif metodo_pago == 'MIXTO':
             try:
                 cursor.execute("SELECT monto FROM ventas_pagos_mixtos WHERE venta_id = ? AND metodo_pago = 'EFECTIVO'", (venta_id,))
                 efvo = cursor.fetchone()
-                if efvo:
+                if efvo and efvo[0] > 0:
                     cursor.execute("SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO'")
                     turno = cursor.fetchone()
                     if turno:
-                        cursor.execute("INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones) VALUES (?, ?, 'RETIRO', ?, ?)", (datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S"), 1, efvo[0], f"Anulación Efectivo Mixto #{venta_id}"))
+                        cursor.execute('''
+                            INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones) 
+                            VALUES (?, 1, 'RETIRO', ?, ?)
+                        ''', (fecha_actual, efvo[0], f"Anulación Efectivo Mixto #{venta_id}"))
             except: pass
 
+        # 4. Tachamos el ticket definitivamente
         cursor.execute("UPDATE ventas_cabecera SET estado = 'ANULADA' WHERE id = ?", (venta_id,))
         
         conexion.commit()
-        return {"mensaje": "Venta anulada, stock devuelto y cuentas actualizadas."}
+        return {"mensaje": "Venta anulada, stock devuelto y caja actualizada."}
     except Exception as e:
         conexion.rollback()
         return {"error": str(e)}

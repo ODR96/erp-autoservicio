@@ -1,10 +1,12 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import sqlite3
 
 router = APIRouter()
+
+ZONA_AR = timezone(timedelta(hours=-3))
 
 # --- 1. LOS GUARDIAS DE LA CAJA ---
 class AperturaCaja(BaseModel):
@@ -34,7 +36,7 @@ def abrir_turno(apertura: AperturaCaja):
         if cursor.fetchone():
             raise Exception("Ya hay un turno abierto en esta caja. Tenés que cerrarlo primero.")
             
-        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
         cursor.execute('''
             INSERT INTO turnos_caja (caja_id, usuario_id, fecha_hora_apertura, monto_inicial, estado_turno)
@@ -309,7 +311,7 @@ def cobrar_pedido_mayorista(cobro: CobroPedido):
         if not turno_abierto:
             raise Exception("No hay ningún turno de caja abierto en este momento. ¡Abran la caja primero!")
             
-        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
         # 2. Armamos la lista de pagos a procesar (sea 1 solo o mixto)
         pagos_a_procesar = []
