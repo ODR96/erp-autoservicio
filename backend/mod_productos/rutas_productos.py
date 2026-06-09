@@ -99,10 +99,9 @@ def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, aler
     cursor.execute('''
         SELECT 
             p.id, p.codigo_barras, p.nombre, p.categoria_id, p.unidad_medida, p.proveedor_habitual_id,
-            p.costo_sin_iva, p.precio_venta_final, p.dias_alerta_vencimiento, p.stock_minimo_alerta,
+            p.costo_sin_iva, p.porcentaje_iva, p.precio_venta_final, p.dias_alerta_vencimiento, p.stock_minimo_alerta,
             (SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo') as stock_total,
-            (SELECT COUNT(id) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible > 0) as cantidad_lotes,
-            (SELECT precio_oferta_unitario FROM promociones_volumen WHERE producto_id = p.id LIMIT 1) as precio_promo,
+(           SELECT COUNT(id) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible != 0) as cantidad_lotes,            (SELECT precio_oferta_unitario FROM promociones_volumen WHERE producto_id = p.id LIMIT 1) as precio_promo,
             (SELECT cantidad_minima FROM promociones_volumen WHERE producto_id = p.id LIMIT 1) as cant_promo,
             (SELECT MIN(fecha_vencimiento) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible > 0) as prox_vencimiento,
             (SELECT COUNT(*) FROM productos_combos WHERE producto_padre_id = p.id) as es_combo
@@ -195,7 +194,7 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar):
         if conexion: conexion.close()
         return {"error": str(e)}
     
-# --- 7. VER UN SOLO PRODUCTO (Versión Corregida) ---
+# --- 7. VER UN SOLO PRODUCTO (Con Aspirador Automático de Lotes) ---
 @router.get("/ver/{producto_id}")
 def ver_producto_por_id(producto_id: int):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
@@ -215,12 +214,55 @@ def ver_producto_por_id(producto_id: int):
         # 2. Reglas mayoristas
         cursor.execute("SELECT cantidad_minima as cantidad, precio_oferta_unitario as precio FROM promociones_volumen WHERE producto_id = ?", (producto_id,))
         resultado["reglas_mayoristas"] = [dict(r) for r in cursor.fetchall()]
-        
-        # 3. Lotes activos
-        cursor.execute("SELECT id as lote_id, numero_lote_proveedor as lote, fecha_ingreso as ingreso, fecha_vencimiento as vence, cantidad_disponible as stock, costo_real_ingreso as costo FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible > 0", (producto_id,))
+
+        # =================================================================
+        # 🧹 EL ASPIRADOR DE DEUDAS AUTOMÁTICO (Consolidador de Lotes)
+        # =================================================================
+        # Sumamos todos los lotes negativos que andan flotando
+        cursor.execute("SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible < 0", (producto_id,))
+        suma_negativos = cursor.fetchone()[0]
+
+        if suma_negativos and suma_negativos < 0:
+            deuda_total = abs(suma_negativos)
+
+            # Buscamos lotes positivos para "pagar" la deuda (del más viejo al más nuevo)
+            cursor.execute("SELECT id, cantidad_disponible FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible > 0 ORDER BY fecha_ingreso ASC", (producto_id,))
+            lotes_positivos = cursor.fetchall()
+
+            for lp in lotes_positivos:
+                if deuda_total <= 0: break
+                disp = lp['cantidad_disponible']
+
+                if disp >= deuda_total:
+                    # Este lote positivo tiene suficiente para cubrir toda la deuda junta
+                    cursor.execute("UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible - ? WHERE id = ?", (deuda_total, lp['id']))
+                    deuda_total = 0
+                else:
+                    # Este lote se vacía pagando parte de la deuda, y seguimos con el próximo
+                    cursor.execute("UPDATE lotes_stock SET cantidad_disponible = 0 WHERE id = ?", (lp['id'],))
+                    deuda_total -= disp
+
+            # Borramos TODOS los lotes negativos viejos y esparcidos
+            cursor.execute("DELETE FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible < 0", (producto_id,))
+
+            # Limpiamos los lotes positivos que hayan quedado en 0 exacto por pagar la deuda
+            cursor.execute("DELETE FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible = 0", (producto_id,))
+
+            # Si no alcanzó la mercadería positiva y sigue habiendo deuda, creamos 1 solo lote unificado
+            if deuda_total > 0:
+                cursor.execute('''
+                    INSERT INTO lotes_stock (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento, cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
+                    VALUES (?, 'VENTA_SIN_STOCK', DATE('now'), '2099-12-31', 0, ?, 0, 'Activo')
+                ''', (producto_id, -deuda_total))
+
+            conexion.commit() # Guardamos la limpieza en la base de datos
+        # =================================================================
+
+        # 3. Lotes activos (Ahora sí, limpios y ordenados)
+        cursor.execute("SELECT id as lote_id, numero_lote_proveedor as lote, fecha_ingreso as ingreso, fecha_vencimiento as vence, cantidad_disponible as stock, costo_real_ingreso as costo FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible != 0 ORDER BY fecha_ingreso ASC", (producto_id,))
         resultado["lotes"] = [dict(l) for l in cursor.fetchall()]
 
-        # 4. Componentes del combo (PARCHE: Ahora sí con la conexión abierta)
+        # 4. Componentes del combo 
         cursor.execute('''
             SELECT p.id, p.nombre, pc.cantidad_hijo as cantidad 
             FROM productos_combos pc
@@ -229,7 +271,7 @@ def ver_producto_por_id(producto_id: int):
         ''', (producto_id,))
         resultado["componentes_combo"] = [dict(c) for c in cursor.fetchall()]
 
-        conexion.close() # <--- AHORA SÍ, cerramos al final de todo
+        conexion.close() 
         return resultado
         
     except Exception as e:

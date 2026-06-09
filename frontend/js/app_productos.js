@@ -183,6 +183,11 @@ document.querySelector('[data-bs-target="#modalNuevoProducto"]').addEventListene
             document.getElementById('selectCategoria').value = '1';
             document.getElementById('selectProveedor').value = '1';
             document.getElementById('inputMargen').value = '40'; 
+            let campoNuevoIva = document.getElementById('inputIva');
+                campoNuevoIva.value = '21.0'; 
+                if (campoNuevoIva.selectedIndex === -1) {
+                    campoNuevoIva.value = '21'; 
+                }
             document.getElementById('inputAlertaStock').value = '5'; 
             document.getElementById('inputDiasAlerta').value = '10';
             
@@ -844,15 +849,35 @@ const codigoActual = p.codigo_barras || "";
         document.getElementById('inputCosto').value = p.costo_sin_iva;
 // --- BLINDAJE DEL IVA ---
         let ivaLimpio = p.porcentaje_iva;
-        if (ivaLimpio === null || ivaLimpio === undefined) ivaLimpio = 21; // Si viene vacío, asume 21
+        if (ivaLimpio === null || ivaLimpio === undefined || ivaLimpio === "") ivaLimpio = 21; // Si viene vacío, asume 21
         if (ivaLimpio > 0 && ivaLimpio <= 1) ivaLimpio = ivaLimpio * 100;  // Si Python manda 0.21, lo convierte a 21
 
-        // Lo pasamos por parseFloat y toString para matar los decimales fantasma (ej: de "21.0" a "21")
-        document.getElementById('inputIva').value = parseFloat(ivaLimpio).toString();
-        // ------------------------       
-        document.getElementById('inputPrecioVenta').value = p.precio_venta_final;
-        document.getElementById('inputMargen').value = (((p.precio_venta_final / p.costo_sin_iva) - 1) * 100).toFixed(2);
+        let ivaFinal = parseFloat(ivaLimpio);
+        let campoIva = document.getElementById('inputIva');
+        
+        // Intento 1: Buscar como número entero/limpio (Ej: "21" o "10.5")
+        campoIva.value = ivaFinal; 
+        
+        // Intento 2: Si falló y quedó vacío, buscar con un decimal (Ej: "21.0")
+        if (campoIva.value === "" || campoIva.selectedIndex === -1) {
+            campoIva.value = ivaFinal.toFixed(1); 
+        }
+        
+        // Intento 3: Si sigue fallando, buscar con dos decimales (Ej: "21.00")
+        if (campoIva.value === "" || campoIva.selectedIndex === -1) {
+            campoIva.value = ivaFinal.toFixed(2); 
+        }
 
+        document.getElementById('inputPrecioVenta').value = p.precio_venta_final;
+
+        // ---> LA MATEMÁTICA CORRECTA DEL MARGEN <---
+        let costoConIva = p.costo_sin_iva * (1 + (ivaFinal / 100));
+        
+        if (costoConIva > 0) {
+            document.getElementById('inputMargen').value = (((p.precio_venta_final / costoConIva) - 1) * 100).toFixed(2);
+        } else {
+            document.getElementById('inputMargen').value = 0;
+        }
         document.getElementById('inputAlertaStock').value = p.stock_minimo_alerta || 5;
         document.getElementById('inputDiasAlerta').value = p.dias_alerta_vencimiento || 10;
         

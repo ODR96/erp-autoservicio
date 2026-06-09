@@ -33,7 +33,12 @@ class LoginRequest(BaseModel):
     pin_secreto: str
 
 def verificar_pin(pin_plano, pin_hasheado):
-    return pwd_context.verify(pin_plano, pin_hasheado)
+    try:
+        # 1. Intenta compararlo usando el motor de encriptación
+        return pwd_context.verify(pin_plano, pin_hasheado)
+    except ValueError:
+        # 2. Si falla porque el texto no está encriptado (cargado a mano en BD), lo compara directo
+        return pin_plano == str(pin_hasheado)
 
 def obtener_hash_pin(pin):
     return pwd_context.hash(pin)
