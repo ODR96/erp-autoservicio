@@ -145,6 +145,21 @@ async function cargarDolar() {
 }
 
 // ========================================================
+// DETECTOR INTELIGENTE DE DIRECCIÓN (Local vs Nube)
+// ========================================================
+// ========================================================
+// DETECTOR INTELIGENTE DE DIRECCIÓN (Local vs Nube)
+// ========================================================
+function obtenerBaseUrl() {
+    // Si la barra de direcciones dice 'localhost' o un número IP local, estás en el negocio
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')) {
+        return 'http://localhost:8000';
+    }
+    // Si estás en internet, le apunta directo al motor de Render
+    return 'https://erp-autoservicio-backend.onrender.com'; 
+}
+
+// ========================================================
 // NUEVA FUNCIÓN: LÓGICA DEL BOTÓN DE SINCRONIZACIÓN
 // ========================================================
 async function forzarSincronizacion() {
@@ -152,20 +167,18 @@ async function forzarSincronizacion() {
     const htmlOriginal = btn.innerHTML;
 
     try {
-        // 1. Ponemos el botón a girar para que sepas que está trabajando
         btn.disabled = true;
         btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Sincronizando...`;
 
-        // 2. Le pegamos a la nueva ruta que armamos en Python
-        // Asegurate de que el puerto (8000) coincida con tu servidor local
-        const respuesta = await fetch('http://localhost:8000/sync/forzar', {
+        // ---> LA MAGIA: Ahora usa la dirección inteligente en vez de localhost fijo <---
+        const baseUrl = obtenerBaseUrl();
+        const respuesta = await fetch(`${baseUrl}/sync/forzar`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
 
         if (!respuesta.ok) throw new Error("Error en el servidor");
 
-        // 3. Éxito: Pintamos el botón de verde por 3 segundos
         btn.classList.replace('btn-outline-primary', 'btn-success');
         btn.innerHTML = `<i class="bi bi-check-circle-fill"></i> ¡Listo!`;
         
@@ -178,7 +191,6 @@ async function forzarSincronizacion() {
     } catch (error) {
         console.error("Error al sincronizar:", error);
         
-        // 4. Error: Pintamos el botón de rojo por 3 segundos
         btn.classList.replace('btn-outline-primary', 'btn-danger');
         btn.innerHTML = `<i class="bi bi-x-circle-fill"></i> Error`;
         
