@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import sqlite3
+from fastapi import BackgroundTasks
+from sincronizador import subir_todo_a_la_nube
 
 router = APIRouter()
 
@@ -87,9 +89,9 @@ def registrar_movimiento(mov: MovimientoCaja):
         conexion.close()
         return {"error": "No se pudo registrar el movimiento", "detalle": str(e)}
 
-# --- 4. CIERRE Z (Arqueo Final Blindado y Corregido) ---
+# --- 4. CIERRE Z (Arqueo Final Blindado, Corregido y con Sincronización) ---
 @router.put("/cerrar")
-def cerrar_turno(cierre: CierreCaja):
+def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks): # <-- GATILLO 1: Parámetro agregado
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -100,10 +102,11 @@ def cerrar_turno(cierre: CierreCaja):
         if not turno:
             raise Exception("Ese turno no existe o ya fue cerrado.")
             
-        fecha_cierre = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # GATILLO 2: Le inyectamos ZONA_AR para que no se desfase en la nube
+        fecha_cierre = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         fecha_apertura = turno['fecha_hora_apertura']
         
-# 1. Ventas en Efectivo (Ignorando las Anuladas)
+        # 1. Ventas en Efectivo (Ignorando las Anuladas)
         cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND fecha_hora >= ? AND estado = 'COMPLETADA'", (fecha_apertura,))
         ventas_efectivo = cursor.fetchone()[0] or 0.0
         
@@ -138,8 +141,11 @@ def cerrar_turno(cierre: CierreCaja):
         conexion.commit()
         conexion.close()
         
+        # ---> GATILLO 3: EL CAMIÓN DE MUDANZA SE DISPARA DE FONDO <---
+        background_tasks.add_task(subir_todo_a_la_nube)
+        
         return {
-            "mensaje": "¡Cierre Z realizado con éxito!",
+            "mensaje": "¡Cierre Z realizado con éxito! Sincronizando datos con la nube...",
             "resumen": {
                 "fondo_inicial": turno['monto_inicial'],
                 "ventas_en_efectivo": ventas_efectivo,
@@ -154,7 +160,8 @@ def cerrar_turno(cierre: CierreCaja):
             }
         }
     except Exception as e:
-        conexion.close()
+        if conexion:
+            conexion.close()
         return {"error": str(e)}
 
 # --- 5. INFORME X (Datos Reales al Momento) ---

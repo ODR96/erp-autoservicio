@@ -4,11 +4,9 @@
 // PATOVICA GLOBAL: VERIFICACIÓN DE PERMISOS DE ADMINISTRACIÓN
 // ========================================================
 (function verificarPermisosGlobales() {
-    // Leemos las llaves modernas del nuevo Login
     const token = localStorage.getItem('token');
     const rol = localStorage.getItem('usuario_rol') || localStorage.getItem('rol');
     
-    // 1. Si no hay sesión, a la calle (al index)
     if (!token) {
         window.location.href = "index.html";
         return;
@@ -16,14 +14,12 @@
 
     const rutaActual = window.location.pathname.toLowerCase();
 
-    // 2. REGLA DE CAJERO: Cero administración
     if (rol === 'CAJERO' && rutaActual.includes('admin_')) {
         alert("ACCESO DENEGADO: Tu rol de CAJERO no te permite entrar a la administración.");
         window.location.href = "pos.html"; 
         return;
     }
 
-    // 3. REGLA DE ENCARGADO: Puede entrar al depósito, pero no a la oficina del dueño
     if (rol === 'ENCARGADO') {
         const zonasProhibidas = [
             'admin_cajas.html', 
@@ -46,7 +42,6 @@ function inyectarLayout() {
     const rol = localStorage.getItem('usuario_rol') || 'ADMIN';
     const esAdmin = rol === 'ADMIN';
 
-    // LA MAGIA: Leemos el nombre del local
     const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio" };
     const nombreLocal = config.nombre_negocio;
 
@@ -55,7 +50,8 @@ function inyectarLayout() {
             <div class="sidebar-header">
                 <i class="bi bi-shop display-4 text-warning"></i>
                 <h5 class="mt-2 fw-bold mb-0">ERP Gestión</h5>
-                <small class="text-warning">${nombreLocal}</small> </div>
+                <small class="text-warning">${nombreLocal}</small> 
+            </div>
             <div class="sidebar-menu">
                 <a href="#" class="menu-item"><i class="bi bi-speedometer2"></i> Dashboard</a>
                 <a href="pos.html" class="menu-item"><i class="bi bi-display"></i> Abrir POS (Caja)</a>
@@ -74,12 +70,22 @@ function inyectarLayout() {
         </div>
     `;
 
-    // 3. EL CÓDIGO DE TU NAVBAR (Con Menú Desplegable para Cerrar Sesión)
+    // --- NUEVO: BOTÓN DE SINCRONIZACIÓN (Solo Admin) ---
+    const botonSyncHTML = esAdmin ? `
+        <button id="btnSyncNube" onclick="forzarSincronizacion()" class="btn btn-outline-primary btn-sm rounded-pill px-3 d-flex align-items-center gap-2 fw-bold shadow-sm" title="Subir datos a la Nube">
+            <i class="bi bi-cloud-arrow-up-fill fs-6"></i> 
+            <span class="d-none d-md-inline">Sincronizar</span>
+        </button>
+    ` : '';
+
     const navbarHTML = `
         <div class="top-navbar d-print-none">
             <div><span class="text-muted fw-bold d-none d-md-inline">Módulo de Inventario (Autoservicio)</span></div>
             
             <div class="d-flex align-items-center gap-3">
+                
+                ${botonSyncHTML}
+
                 <div id="cajaDolar" class="d-none d-md-flex align-items-center gap-2 px-3 py-1 bg-light border rounded-pill text-success fw-bold small">
                     <i class="bi bi-currency-dollar"></i> Cargando...
                 </div>
@@ -106,14 +112,12 @@ function inyectarLayout() {
         </div>
     `;
 
-    // 4. REEMPLAZO QUIRÚRGICO
     const sidePlaceholder = document.getElementById('layout-sidebar-placeholder');
     if (sidePlaceholder) sidePlaceholder.outerHTML = sidebarHTML;
 
     const navPlaceholder = document.getElementById('layout-navbar-placeholder');
     if (navPlaceholder) navPlaceholder.outerHTML = navbarHTML;
 
-    // 5. DETECTOR AUTOMÁTICO DE PÁGINA
     const urlActual = window.location.pathname;
     document.querySelectorAll('.sidebar-menu .menu-item').forEach(link => {
         const href = link.getAttribute('href');
@@ -140,12 +144,57 @@ async function cargarDolar() {
     }
 }
 
+// ========================================================
+// NUEVA FUNCIÓN: LÓGICA DEL BOTÓN DE SINCRONIZACIÓN
+// ========================================================
+async function forzarSincronizacion() {
+    const btn = document.getElementById('btnSyncNube');
+    const htmlOriginal = btn.innerHTML;
+
+    try {
+        // 1. Ponemos el botón a girar para que sepas que está trabajando
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Sincronizando...`;
+
+        // 2. Le pegamos a la nueva ruta que armamos en Python
+        // Asegurate de que el puerto (8000) coincida con tu servidor local
+        const respuesta = await fetch('http://localhost:8000/sync/forzar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!respuesta.ok) throw new Error("Error en el servidor");
+
+        // 3. Éxito: Pintamos el botón de verde por 3 segundos
+        btn.classList.replace('btn-outline-primary', 'btn-success');
+        btn.innerHTML = `<i class="bi bi-check-circle-fill"></i> ¡Listo!`;
+        
+        setTimeout(() => {
+            btn.classList.replace('btn-success', 'btn-outline-primary');
+            btn.innerHTML = htmlOriginal;
+            btn.disabled = false;
+        }, 3000);
+
+    } catch (error) {
+        console.error("Error al sincronizar:", error);
+        
+        // 4. Error: Pintamos el botón de rojo por 3 segundos
+        btn.classList.replace('btn-outline-primary', 'btn-danger');
+        btn.innerHTML = `<i class="bi bi-x-circle-fill"></i> Error`;
+        
+        setTimeout(() => {
+            btn.classList.replace('btn-danger', 'btn-outline-primary');
+            btn.innerHTML = htmlOriginal;
+            btn.disabled = false;
+        }, 3000);
+    }
+}
+
 function cerrarSesionGlobal() {
     localStorage.clear();
     window.location.href = 'index.html';
 }
 
-// Para que el botón hamburguesa aparezca solo en celulares
 const style = document.createElement('style');
 style.innerHTML = `@media (max-width: 768px) { .btn-hamburguesa { display: block !important; } .titulo-modulo-desktop, .cotizacion-dolar { display: none !important; } .sidebar { position: fixed; left: -260px; top: 0; height: 100vh; z-index: 1050; transition: left 0.3s; } .sidebar.mostrar { left: 0; } .sidebar-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 1040; } .sidebar-backdrop.mostrar { display: block; } }`;
 document.head.appendChild(style);
