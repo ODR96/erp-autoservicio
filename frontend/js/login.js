@@ -5,7 +5,7 @@ async function intentarAcceso() {
     if (!usuario || !pin) return;
 
     try {
-        const res = await fetch('https://erp-autoservicio-backend.onrender.com/', {
+        const res = await fetch('https://erp-autoservicio-backend.onrender.com/usuarios/login/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ codigo_credencial: usuario, pin_secreto: pin })
