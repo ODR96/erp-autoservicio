@@ -147,9 +147,7 @@ async function cargarDolar() {
 // ========================================================
 // DETECTOR INTELIGENTE DE DIRECCIÓN (Local vs Nube)
 // ========================================================
-// ========================================================
-// DETECTOR INTELIGENTE DE DIRECCIÓN (Local vs Nube)
-// ========================================================
+
 function obtenerBaseUrl() {
     // Si la barra de direcciones dice 'localhost' o un número IP local, estás en el negocio
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')) {
