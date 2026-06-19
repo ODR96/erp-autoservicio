@@ -47,12 +47,11 @@ app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
 
 app.add_middleware(
     CORSMiddleware,
-    # Acá le damos la lista VIP (Reemplazá el link de Vercel por el tuyo real)
     allow_origins=[
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "https://erp-autoservicio.vercel.app/" 
-    ], 
+        "https://erp-autoservicio.vercel.app" # <--- TU LINK EXACTO, SIN BARRA AL FINAL
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
