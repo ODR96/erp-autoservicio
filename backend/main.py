@@ -47,7 +47,7 @@ app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://erp-autoservicio.vercel.app/"], 
+    allow_origins=["https://erp-autoservicio-backend.onrender.com/usuarios/login"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
