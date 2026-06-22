@@ -5,6 +5,7 @@ import subprocess
 import asyncio
 from contextlib import asynccontextmanager
 import os
+import sqlite3
 
 from backend.mod_productos.rutas_productos import router as router_productos
 from backend.mod_lotes.rutas_lotes import router as router_lotes
@@ -20,24 +21,50 @@ from backend.mod_config.rutas_config import router as router_config
 from backend.mod_sincronizacion.rutas_sync import router as rutas_sync
 from sincronizador import subir_todo_a_la_nube
 
-# --- 1. DEFINIMOS EL LATIDO Y EL CICLO DE VIDA ---
+# --- 0. SALVAVIDAS PARA RENDER ---
+def inicializar_base_vacia():
+    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    cursor = conexion.cursor()
+    # Le creamos la tabla vacía a Render para que no explote
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre_completo TEXT,
+            rol TEXT,
+            codigo_barras_credencial TEXT,
+            pin_secreto TEXT,
+            estado TEXT DEFAULT 'ACTIVO'
+        )
+    ''')
+    conexion.commit()
+    conexion.close()
+
+# --- 1. DEFINIMOS EL LATIDO INTELIGENTE ---
 async def latido_sincronizacion():
+    # Render automáticamente tiene una variable de entorno llamada RENDER
+    es_nube = os.environ.get("RENDER") is not None
+    
     while True:
         await asyncio.sleep(900)  
-        print("⏳ [Latido Automático] Sincronizando con la nube (Doble Vía)...")
-        try:
-            await asyncio.to_thread(subir_todo_a_la_nube)
-            print("✅ [Latido Automático] Sincronización exitosa.")
-        except Exception as e:
-            print(f"❌ [Latido Automático] Error en la sincronización: {e}")
+        if es_nube:
+            print("☁️ [Nube] Soy Render. No subo datos para no pisar la información real.")
+            # Más adelante acá haremos que Render descargue la info
+        else:
+            print("🏪 [Local] Soy el Mostrador. Subiendo datos frescos a Supabase...")
+            try:
+                await asyncio.to_thread(subir_todo_a_la_nube)
+                print("✅ [Latido Automático] Sincronización exitosa.")
+            except Exception as e:
+                print(f"❌ [Latido Automático] Error en la sincronización: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    inicializar_base_vacia() # Corremos el salvavidas antes de arrancar
     tarea_latido = asyncio.create_task(latido_sincronizacion())
     yield
     tarea_latido.cancel()
 
-# --- 2. CREAMOS LA APP (Una sola vez) ---
+# --- 2. CREAMOS LA APP ---
 app = FastAPI(title="ERP Autoservicio 20 de Junio", lifespan=lifespan)
 
 # --- 3. CONFIGURACIONES DE CARPETAS Y PERMISOS ---

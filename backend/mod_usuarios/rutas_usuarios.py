@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List
@@ -5,8 +6,12 @@ import sqlite3
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
+from supabase import create_client, Client
 
 router = APIRouter()
+
+SUPABASE_URL = "https://fxbxkvagnpuoibtifwjw.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4YnhrdmFnbnB1b2lidGlmd2p3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3OTU5NCwiZXhwIjoyMDk2OTU1NTk0fQ.aO0s-A3FwMExlJezGNGu_EUNINa8vgE7gHUbBTmRLpY"
 
 # --- CONFIGURACIÓN DE SEGURIDAD BANCARIA ---
 SECRET_KEY = "clave_secreta_super_robusta_autoservicio_20_de_junio" 
@@ -70,24 +75,41 @@ def crear_usuario(u: UsuarioNuevo):
         conexion.close()
         raise HTTPException(status_code=400, detail=f"Error al crear usuario: {e}")
 
-# --- 2. LOGIN (Generación del Token JWT) ---
 @router.post("/login")
 def iniciar_sesion(credenciales: LoginRequest):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
-    conexion.row_factory = sqlite3.Row
-    cursor = conexion.cursor()
+    # Detectamos si estamos en internet (Render) o en el mostrador
+    es_nube = os.environ.get("RENDER") is not None
     
-    cursor.execute('''
-        SELECT id, nombre_completo, rol, pin_secreto 
-        FROM usuarios 
-        WHERE codigo_barras_credencial = ? AND estado = 'ACTIVO'
-    ''', (credenciales.codigo_credencial,))
-    
-    usuario = cursor.fetchone()
-    conexion.close()
-    
-    # Comparamos el PIN plano que escribió el cajero con el Hash indescifrable
-    if not usuario or not verificar_pin(credenciales.pin_secreto, usuario['pin_secreto']):
+    if es_nube:
+        # ☁️ MODO VIAJE: Buscamos el usuario directo en Supabase
+        nube: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        respuesta = nube.table('usuarios').select('id, nombre_completo, rol, pin_secreto').eq('codigo_barras_credencial', credenciales.codigo_credencial).eq('estado', 'ACTIVO').execute()
+        
+        if not respuesta.data:
+            raise HTTPException(status_code=401, detail="Credencial o PIN incorrecto.")
+        usuario = respuesta.data[0] # Tomamos el primer resultado
+        
+    else:
+        # 🏪 MODO LOCAL: Buscamos en el archivo físico a la velocidad de la luz
+        conexion = sqlite3.connect('autoservicio_20dejunio.db')
+        conexion.row_factory = sqlite3.Row
+        cursor = conexion.cursor()
+        
+        cursor.execute('''
+            SELECT id, nombre_completo, rol, pin_secreto 
+            FROM usuarios 
+            WHERE codigo_barras_credencial = ? AND estado = 'ACTIVO'
+        ''', (credenciales.codigo_credencial,))
+        
+        fila = cursor.fetchone()
+        conexion.close()
+        
+        if not fila:
+            raise HTTPException(status_code=401, detail="Credencial o PIN incorrecto.")
+        usuario = dict(fila) # Lo convertimos a diccionario para que sea igual que la nube
+        
+    # Comparamos el PIN plano que escribiste con el Hash encriptado de la base
+    if not verificar_pin(credenciales.pin_secreto, usuario['pin_secreto']):
         raise HTTPException(status_code=401, detail="Credencial o PIN incorrecto.")
         
     # Si todo está bien, armamos la pulsera VIP digital
