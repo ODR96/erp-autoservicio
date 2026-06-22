@@ -29,8 +29,8 @@ def inicializar_base_vacia():
         try:
             from supabase import create_client
             # Acá pegá las mismas dos credenciales que tenés en tu sincronizador.py
-            nube = create_client("https://fxbxkvagnpuoibtifwjw.supabase.co", "TU_KEY_LARGA_DE_SUPABASE") 
-            
+# Credenciales reales para que Render pueda descargar tu base de datos
+            nube = create_client("https://fxbxkvagnpuoibtifwjw.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4YnhrdmFnbnB1b2lidGlmd2p3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3OTU5NCwiZXhwIjoyMDk2OTU1NTk0fQ.aO0s-A3FwMExlJezGNGu_EUNINa8vgE7gHUbBTmRLpY")            
             res = nube.storage.from_('backups').download('autoservicio_20dejunio.db')
             with open('autoservicio_20dejunio.db', 'wb') as f:
                 f.write(res)
