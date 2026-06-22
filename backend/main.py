@@ -118,3 +118,22 @@ app.include_router(rutas_sync, prefix="/sync")
 @app.get("/")
 def leer_raiz():
     return {"mensaje": "¡El motor principal está encendido y modularizado!"}
+
+@app.get("/radiografia")
+def ver_estado_nube():
+    try:
+        import sqlite3
+        conexion = sqlite3.connect('autoservicio_20dejunio.db')
+        cursor = conexion.cursor()
+        cursor.execute("SELECT count(*) FROM productos")
+        prods = cursor.fetchone()[0]
+        cursor.execute("SELECT count(*) FROM usuarios")
+        usrs = cursor.fetchone()[0]
+        conexion.close()
+        return {
+            "estado": "Render está funcionando perfecto", 
+            "cantidad_productos_en_la_nube": prods, 
+            "cantidad_usuarios_en_la_nube": usrs
+        }
+    except Exception as e:
+        return {"estado": "ERROR", "detalle": str(e)}
