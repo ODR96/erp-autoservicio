@@ -37,13 +37,13 @@ class LoginRequest(BaseModel):
     codigo_credencial: str
     pin_secreto: str
 
-def verificar_pin(pin_plano, pin_hasheado):
-    try:
-        # 1. Intenta compararlo usando el motor de encriptación
-        return pwd_context.verify(pin_plano, pin_hasheado)
-    except ValueError:
-        # 2. Si falla porque el texto no está encriptado (cargado a mano en BD), lo compara directo
-        return pin_plano == str(pin_hasheado)
+# def verificar_pin(pin_plano, pin_hasheado):
+#     try:
+#         # 1. Intenta compararlo usando el motor de encriptación
+#         return pwd_context.verify(pin_plano, pin_hasheado)
+#     except ValueError:
+#         # 2. Si falla porque el texto no está encriptado (cargado a mano en BD), lo compara directo
+#         return pin_plano == str(pin_hasheado)
 
 def obtener_hash_pin(pin):
     return pwd_context.hash(pin)
@@ -75,44 +75,65 @@ def crear_usuario(u: UsuarioNuevo):
         conexion.close()
         raise HTTPException(status_code=400, detail=f"Error al crear usuario: {e}")
 
+def verificar_pin(pin_plano, pin_hasheado):
+    try:
+        # Forzamos a que sean textos por si Supabase los guardó como números
+        if pwd_context.verify(str(pin_plano), str(pin_hasheado)):
+            return True
+    except Exception as e:
+        print(f"⚠️ Aviso al verificar hash: {e}")
+        
+    # Si falla el motor, lo comparamos como texto plano asegurando el formato
+    return str(pin_plano).strip() == str(pin_hasheado).strip()
+
 @router.post("/login")
 def iniciar_sesion(credenciales: LoginRequest):
-    # Detectamos si estamos en internet (Render) o en el mostrador
     es_nube = os.environ.get("RENDER") is not None
+    print(f"🔍 [LOGIN] Intento de acceso - Usuario: {credenciales.codigo_credencial} | Nube: {es_nube}")
     
     if es_nube:
-        # ☁️ MODO VIAJE: Buscamos el usuario directo en Supabase
         nube: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        respuesta = nube.table('usuarios').select('id, nombre_completo, rol, pin_secreto').eq('codigo_barras_credencial', credenciales.codigo_credencial).eq('estado', 'ACTIVO').execute()
+        # Sacamos el filtro de 'ACTIVO' temporalmente para ver exactamente qué trae la base
+        respuesta = nube.table('usuarios').select('*').eq('codigo_barras_credencial', credenciales.codigo_credencial).execute()
+        
+        print(f"📦 [SUPABASE RESPUESTA]: {respuesta.data}")
         
         if not respuesta.data:
-            raise HTTPException(status_code=401, detail="Credencial o PIN incorrecto.")
-        usuario = respuesta.data[0] # Tomamos el primer resultado
+            raise HTTPException(status_code=401, detail="El usuario no existe en la nube. Revisa Supabase.")
         
+        usuario = respuesta.data[0]
+        
+        if usuario.get('estado') != 'ACTIVO':
+            raise HTTPException(status_code=401, detail=f"Usuario encontrado pero su estado es: {usuario.get('estado')}")
+            
     else:
-        # 🏪 MODO LOCAL: Buscamos en el archivo físico a la velocidad de la luz
         conexion = sqlite3.connect('autoservicio_20dejunio.db')
         conexion.row_factory = sqlite3.Row
         cursor = conexion.cursor()
         
         cursor.execute('''
-            SELECT id, nombre_completo, rol, pin_secreto 
+            SELECT id, nombre_completo, rol, pin_secreto, estado 
             FROM usuarios 
-            WHERE codigo_barras_credencial = ? AND estado = 'ACTIVO'
+            WHERE codigo_barras_credencial = ?
         ''', (credenciales.codigo_credencial,))
         
         fila = cursor.fetchone()
         conexion.close()
         
         if not fila:
-            raise HTTPException(status_code=401, detail="Credencial o PIN incorrecto.")
-        usuario = dict(fila) # Lo convertimos a diccionario para que sea igual que la nube
+            raise HTTPException(status_code=401, detail="No se encontró el usuario en el local.")
+        usuario = dict(fila)
         
-    # Comparamos el PIN plano que escribiste con el Hash encriptado de la base
+        if usuario.get('estado') != 'ACTIVO':
+            raise HTTPException(status_code=401, detail="Usuario inactivo en el local.")
+        
+    # Verificación final del PIN
     if not verificar_pin(credenciales.pin_secreto, usuario['pin_secreto']):
+        print(f"❌ [LOGIN RECHAZADO] El PIN no coincide para {usuario.get('nombre_completo')}")
         raise HTTPException(status_code=401, detail="Credencial o PIN incorrecto.")
         
-    # Si todo está bien, armamos la pulsera VIP digital
+    print(f"✅ [LOGIN EXITOSO] Bienvenido {usuario.get('nombre_completo')}")
+    
     datos_token = {"sub": str(usuario['id']), "rol": usuario['rol']}
     token = crear_token_acceso(datos_token)
         
