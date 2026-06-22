@@ -117,6 +117,20 @@ def subir_todo_a_la_nube():
             
         except Exception as e:
             print(f"   ❌ ERROR FATAL al subir {tabla}: {e}\n")
+            
+    # --- SUBIDA DEL ARCHIVO FÍSICO AL STORAGE ---
+    print("☁️ Subiendo copia de seguridad del archivo completo a Supabase Storage...")
+    try:
+        # Borramos el backup viejo para no acumular basura
+        try: nube.storage.from_('backups').remove(['autoservicio_20dejunio.db'])
+        except: pass
+        
+        # Subimos el archivo fresco
+        with open('autoservicio_20dejunio.db', 'rb') as f:
+            nube.storage.from_('backups').upload('autoservicio_20dejunio.db', f)
+        print("✅ Backup guardado a salvo en la nube.")
+    except Exception as e:
+        print("⚠️ No se pudo subir el archivo físico:", e)
 
     local.close()
     return {"status": "success", "mensaje": "Sincronización a la nube completada."}

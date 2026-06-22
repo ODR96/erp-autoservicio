@@ -23,21 +23,23 @@ from sincronizador import subir_todo_a_la_nube
 
 # --- 0. SALVAVIDAS PARA RENDER ---
 def inicializar_base_vacia():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
-    cursor = conexion.cursor()
-    # Le creamos la tabla vacía a Render para que no explote
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre_completo TEXT,
-            rol TEXT,
-            codigo_barras_credencial TEXT,
-            pin_secreto TEXT,
-            estado TEXT DEFAULT 'ACTIVO'
-        )
-    ''')
-    conexion.commit()
-    conexion.close()
+    es_nube = os.environ.get("RENDER") is not None
+    if es_nube:
+        print("📥 [Render] Descargando la base de datos maestra desde Supabase Storage...")
+        try:
+            from supabase import create_client
+            # Acá pegá las mismas dos credenciales que tenés en tu sincronizador.py
+            nube = create_client("https://fxbxkvagnpuoibtifwjw.supabase.co", "TU_KEY_LARGA_DE_SUPABASE") 
+            
+            res = nube.storage.from_('backups').download('autoservicio_20dejunio.db')
+            with open('autoservicio_20dejunio.db', 'wb') as f:
+                f.write(res)
+            print("✅ [Render] Base clonada. ¡Vercel ya tiene todos los productos y cajas!")
+        except Exception as e:
+            print(f"⚠️ Error al descargar el clon: {e}")
+            # Si falla (ej: es la primera vez y el local aún no subió el archivo), armamos el salvavidas
+            conexion = sqlite3.connect('autoservicio_20dejunio.db')
+            conexion.execute("CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre_completo TEXT, rol TEXT, codigo_barras_credencial TEXT, pin_secreto TEXT, estado TEXT DEFAULT 'ACTIVO')")
 
 # --- 1. DEFINIMOS EL LATIDO INTELIGENTE ---
 async def latido_sincronizacion():

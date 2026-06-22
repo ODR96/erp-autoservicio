@@ -1,3 +1,10 @@
+function obtenerBaseUrl() {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')) {
+        return 'http://localhost:8000';
+    }
+    return 'https://erp-autoservicio-backend.onrender.com'; // Acordate: sin barra final
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     cargarConfiguracionActual();
 
@@ -18,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function cargarConfiguracionActual() {
     try {
-        const res = await fetch('http://localhost:8000/config/leer');
+        const res = await fetch('${baseUrl}/config/leer');
         const config = await res.json();
         if (config.error) throw new Error(config.error);
 
@@ -31,7 +38,7 @@ async function cargarConfiguracionActual() {
         document.getElementById('confMsj').value = config.mensaje_ticket || '';
 
         if (config.ruta_logo) {
-            document.getElementById('previewLogo').src = `http://localhost:8000/static/logos/${config.ruta_logo}?t=${new Date().getTime()}`;
+            document.getElementById('previewLogo').src = `${baseUrl}/static/logos/${config.ruta_logo}?t=${new Date().getTime()}`;
         }
     } catch (e) { console.error("Error al cargar config", e); }
 }
@@ -50,7 +57,7 @@ async function guardarConfiguracion(event) {
     formData.append('mensaje_ticket', document.getElementById('confMsj').value);
 
     try {
-        const res = await fetch('http://localhost:8000/config/actualizar_datos', { method: 'PUT', body: formData });
+        const res = await fetch('${baseUrl}/config/actualizar_datos', { method: 'PUT', body: formData });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
@@ -72,11 +79,46 @@ async function subirLogo() {
     const formData = new FormData(); formData.append("archivo", input.files[0]);
     Swal.fire({ title: 'Subiendo...', didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetch('http://localhost:8000/config/subir_logo', { method: 'POST', body: formData });
+        const res = await fetch('${baseUrl}/config/subir_logo', { method: 'POST', body: formData });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         Swal.fire('¡Logo Actualizado!', '', 'success');
         cargarConfiguracionActual();
     } catch (e) { Swal.fire('Error', e.message, 'error'); }
 }
-function descargarBackup() { Swal.fire('En Desarrollo', 'Próximamente.', 'info'); }
+function descargarBackup() {
+    Swal.fire({
+        title: 'Empaquetando...',
+        text: 'Preparando tu base de datos',
+        timer: 1500,
+        showConfirmButton: false
+    }).then(() => {
+        const baseUrl = obtenerBaseUrl();
+        // Esto le dice al navegador que descargue el archivo directamente
+        window.open(`${baseUrl}/config/descargar_backup`, '_blank');
+    });
+}
+async function actualizarSistema() {
+    Swal.fire({ 
+        title: 'Actualizando Sistema...', 
+        text: 'Descargando las últimas mejoras de la nube al equipo físico.', 
+        allowOutsideClick: false,
+        didOpen: () => { Swal.showLoading() }
+    });
+
+    try {
+        const baseUrl = obtenerBaseUrl(); 
+        const res = await fetch(`${baseUrl}/actualizar-sistema`, { method: 'POST' });
+        const data = await res.json();
+
+        if (res.ok) {
+            Swal.fire('¡Actualizado!', data.mensaje, 'success').then(() => {
+                window.location.reload(); 
+            });
+        } else {
+            Swal.fire('Error', data.error || 'Fallo en la actualización', 'error');
+        }
+    } catch (e) {
+        Swal.fire('Error', 'No se pudo contactar al servidor para actualizar.', 'error');
+    }
+}

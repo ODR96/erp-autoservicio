@@ -1,4 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi.responses import FileResponse
+from datetime import datetime
 from pydantic import BaseModel
 import sqlite3
 import shutil
@@ -100,3 +102,12 @@ def obtener_configuracion():
     config = cursor.fetchone()
     conexion.close()
     return dict(config)
+
+@router.get("/descargar_backup")
+def descargar_base_datos():
+    fecha = datetime.now().strftime("%Y%m%d_%H%M")
+    return FileResponse(
+        path="autoservicio_20dejunio.db", 
+        filename=f"Autoservicio_Backup_{fecha}.db", 
+        media_type="application/x-sqlite3"
+    )
