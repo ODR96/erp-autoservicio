@@ -18,7 +18,7 @@ inputBusqueda.addEventListener("input", async (e) => {
     if (query.length < 2) return;
 
     // Buscamos en el backend
-    const resp = await fetch(`http://127.0.0.1:8000/productos/buscar?termino=${query}`);
+    const resp = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${query}`);
     const productos = await resp.json();
     
     // Si hay un solo resultado y es código exacto, lo agregamos directo (Escáner láser)

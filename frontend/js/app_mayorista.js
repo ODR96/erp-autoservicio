@@ -790,7 +790,7 @@ function marcarComoEntregado(docId) {
             Swal.fire({ title: 'Procesando entrega...', didOpen: () => Swal.showLoading() });
             try {
                 // Llamamos a la ruta que ya tenés creada en Python
-                const res = await fetch(`http://localhost:8000/deposito/entregar/${docId}`, {
+                const res = await fetch(`${obtenerBaseUrl()}/deposito/entregar/${docId}`, {
                     method: 'PUT' // O PUT, dependiendo de cómo lo hayas definido en FastAPI
                 });
                 const data = await res.json();

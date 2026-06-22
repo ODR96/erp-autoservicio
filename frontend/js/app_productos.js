@@ -1469,7 +1469,7 @@ document.addEventListener('keydown', async (e) => {
         if (bufferEscaneo.length > 2) { 
             try {
                 Swal.fire({ title: 'Buscando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                const res = await fetch(`http://localhost:8000/productos/codigo/${bufferEscaneo}`);
+                const resp = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${query}`);
                 const prod = await res.json();
 
                 if (prod.error) {

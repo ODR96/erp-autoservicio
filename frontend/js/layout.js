@@ -1,10 +1,8 @@
 // frontend/js/layout.js
 function obtenerBaseUrl() {
-    // Si la barra de direcciones dice 'localhost' o un número IP local, estás en el negocio
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')) {
-        return `${obtenerBaseUrl()}`;
+        return 'http://localhost:8000';
     }
-    // Si estás en internet, le apunta directo al motor de Render
     return 'https://erp-autoservicio-backend.onrender.com'; 
 }
 
