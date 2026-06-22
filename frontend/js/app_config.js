@@ -2,7 +2,7 @@ function obtenerBaseUrl() {
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')) {
         return 'http://localhost:8000';
     }
-    return 'https://erp-autoservicio-backend.onrender.com'; // Acordate: sin barra final
+    return 'https://erp-autoservicio-backend.onrender.com'; 
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -25,7 +25,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function cargarConfiguracionActual() {
     try {
-        const res = await fetch('${baseUrl}/config/leer');
+        const baseUrl = obtenerBaseUrl();
+        const res = await fetch(`${baseUrl}/config/leer`);
         const config = await res.json();
         if (config.error) throw new Error(config.error);
 
@@ -49,7 +50,7 @@ async function guardarConfiguracion(event) {
 
     const formData = new FormData();
     formData.append('nombre_negocio', document.getElementById('confNombre').value);
-    formData.append('cuit', document.getElementById('confCuit').value); // <-- ACÁ VIAJA EL CUIT
+    formData.append('cuit', document.getElementById('confCuit').value);
     formData.append('condicion_iva', document.getElementById('confIva').value);
     formData.append('telefono', document.getElementById('confTel').value);
     formData.append('direccion', document.getElementById('confDir').value);
@@ -57,11 +58,11 @@ async function guardarConfiguracion(event) {
     formData.append('mensaje_ticket', document.getElementById('confMsj').value);
 
     try {
-        const res = await fetch('${baseUrl}/config/actualizar_datos', { method: 'PUT', body: formData });
+        const baseUrl = obtenerBaseUrl();
+        const res = await fetch(`${baseUrl}/config/actualizar_datos`, { method: 'PUT', body: formData });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
-        // Actualizamos la memoria del navegador para que cambie el Layout y los Tickets al instante
         localStorage.setItem('config_negocio', JSON.stringify({
             nombre_negocio: document.getElementById('confNombre').value,
             direccion: document.getElementById('confDir').value,
@@ -79,13 +80,15 @@ async function subirLogo() {
     const formData = new FormData(); formData.append("archivo", input.files[0]);
     Swal.fire({ title: 'Subiendo...', didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetch('${baseUrl}/config/subir_logo', { method: 'POST', body: formData });
+        const baseUrl = obtenerBaseUrl();
+        const res = await fetch(`${baseUrl}/config/subir_logo`, { method: 'POST', body: formData });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         Swal.fire('¡Logo Actualizado!', '', 'success');
         cargarConfiguracionActual();
     } catch (e) { Swal.fire('Error', e.message, 'error'); }
 }
+
 function descargarBackup() {
     Swal.fire({
         title: 'Empaquetando...',
@@ -94,10 +97,10 @@ function descargarBackup() {
         showConfirmButton: false
     }).then(() => {
         const baseUrl = obtenerBaseUrl();
-        // Esto le dice al navegador que descargue el archivo directamente
         window.open(`${baseUrl}/config/descargar_backup`, '_blank');
     });
 }
+
 async function actualizarSistema() {
     Swal.fire({ 
         title: 'Actualizando Sistema...', 
