@@ -1,10 +1,22 @@
+import os
 from fastapi import APIRouter, BackgroundTasks
 from sincronizador import subir_todo_a_la_nube
 
 router = APIRouter()
 
-@router.post("/forzar-nube")
+# 1. Corregimos el nombre a "/forzar" para que el Javascript lo encuentre
+@router.post("/forzar")
 def forzar_sincronizacion(background_tasks: BackgroundTasks):
-    # La tarea se va al fondo para que la página web no se quede "pensando" y trabada
-    background_tasks.add_task(subir_todo_a_la_nube)
-    return {"mensaje": "Sincronización iniciada en segundo plano."}
+    es_nube = os.environ.get("RENDER") is not None
+    
+    if es_nube:
+        # 2. BLINDAJE: Si se aprieta desde Vercel/Celular, no hacemos nada y avisamos.
+        return {
+            "mensaje": "Estás conectado a la Nube. La subida maestra de ventas y cajas la hace automáticamente la computadora del mostrador local."
+        }
+    else:
+        # 3. Si se aprieta en la PC física, arranca el camión de mudanza
+        background_tasks.add_task(subir_todo_a_la_nube)
+        return {
+            "mensaje": "¡Sincronización iniciada! Subiendo las ventas, stock y backup a la nube en segundo plano..."
+        }
