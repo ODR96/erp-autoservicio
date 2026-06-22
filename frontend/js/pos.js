@@ -71,7 +71,7 @@ async function finalizarVenta() {
         items: carrito.map(p => ({ producto_id: p.id, cantidad: p.cantidad }))
     };
 
-    const resp = await fetch("http://127.0.0.1:8000/ventas/cobrar", {
+    const resp = await fetch(`${obtenerBaseUrl()}`/ventas/cobrar", {
         method: "POST",
         headers: { 
             "Content-Type": "application/json",

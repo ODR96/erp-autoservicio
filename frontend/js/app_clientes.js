@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function cargarClientes() {
     try {
-        const res = await fetch('http://localhost:8000/clientes/listado');
+        const res = await fetch(`${obtenerBaseUrl()}`/clientes/listado');
         const data = await res.json();
         clientesGlobales = data.clientes || [];
         filtrarClientesUI(); 
@@ -385,7 +385,7 @@ async function guardarCliente() {
                 body: JSON.stringify(payload)
             });
         } else {
-            res = await fetch('http://localhost:8000/clientes/registrar', {
+            res = await fetch(`${obtenerBaseUrl()}`/clientes/registrar', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)

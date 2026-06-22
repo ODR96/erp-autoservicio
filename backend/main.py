@@ -78,7 +78,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:8000",
-        "http://127.0.0.1:8000",
+        `${obtenerBaseUrl()}`",
         "https://erp-autoservicio.vercel.app" # <--- TU LINK EXACTO, SIN BARRA AL FINAL
     ],
     allow_credentials=True,

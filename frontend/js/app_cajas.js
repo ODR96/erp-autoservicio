@@ -16,7 +16,7 @@ async function cargarMonitor() {
     const contenedor = document.getElementById('contenedorMonitorVivo');
     
     try {
-        const response = await fetch('http://localhost:8000/caja/monitor_vivo');
+        const response = await fetch(`${obtenerBaseUrl()}`/caja/monitor_vivo');
         const data = await response.json();
         
         if (data.error) throw new Error(data.error);
@@ -89,7 +89,7 @@ async function cargarMonitor() {
 async function cargarEmpleados() {
     const tbody = document.getElementById('tablaEmpleadosBody');
     try {
-        const response = await fetch('http://localhost:8000/usuarios/listar');
+        const response = await fetch(`${obtenerBaseUrl()}`/usuarios/listar');
         const data = await response.json();
         
         if (data.error) throw new Error(data.error);
@@ -163,7 +163,7 @@ async function guardarEmpleado() {
     if(idEditando === '' && !pin) return Swal.fire('Atención', 'El PIN es obligatorio para un empleado nuevo', 'warning');
     
     try {
-        let url = 'http://localhost:8000/usuarios/crear';
+        let url = `${obtenerBaseUrl()}`/usuarios/crear';
         let metodo = 'POST';
 
         // Si estamos editando, cambiamos la ruta y el método

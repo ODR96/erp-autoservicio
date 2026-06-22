@@ -9,7 +9,7 @@ let colaEtiquetasActual = [];
 // ==========================================
 async function cargarCategoriasGlobales() {
     try {
-        const res = await fetch('http://localhost:8000/productos/categorias');
+        const res = await fetch(`${obtenerBaseUrl()}`/productos/categorias');
         const data = await res.json();
         categoriasGlobales = data.categorias || [];
 
@@ -46,7 +46,7 @@ async function cargarCategoriasGlobales() {
 
 async function cargarProveedoresGlobales() {
     try {
-        const res = await fetch('http://localhost:8000/proveedores/listado');
+        const res = await fetch(`${obtenerBaseUrl()}`/proveedores/listado');
         const data = await res.json();
         const proveedoresReales = Array.isArray(data) ? data : (data.proveedores || []);
 
@@ -98,7 +98,7 @@ async function crearCategoriaUI() {
     const nombre = document.getElementById('nuevaCatNombre').value.trim();
     if (!nombre) return;
     try {
-        await fetch('http://localhost:8000/productos/categorias/crear', { 
+        await fetch(`${obtenerBaseUrl()}`/productos/categorias/crear', { 
             method: 'POST', headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ nombre: nombre }) 
         });
@@ -204,7 +204,7 @@ async function cargarCatalogo() {
                 let filtroElemento = document.getElementById('filtroEstado');
                 let filtroSelect = filtroElemento ? filtroElemento.value : '1';
                 
-                let url = 'http://localhost:8000/productos/listar';
+                let url = `${obtenerBaseUrl()}`/productos/listar';
                 if (filtroSelect === 'critico') { 
                     url += '?estado=1&alerta_stock=true'; 
                 } else if (filtroSelect === 'vencimiento') {
@@ -331,7 +331,7 @@ async function abrirModalExportar() {
 // ========================================================
 async function generarCodigoInterno() {
     try {
-        const res = await fetch('http://localhost:8000/productos/generar_codigo_interno');
+        const res = await fetch(`${obtenerBaseUrl()}`/productos/generar_codigo_interno');
         const data = await res.json();
         if (data.codigo) { document.getElementById('inputCodigo').value = data.codigo; }
         else { Swal.fire('Error', 'Fallo al buscar código en la base.', 'warning'); }
@@ -487,7 +487,7 @@ function toggleOpcionesA4() {
     if (document.getElementById('selectEtiquetaFormato').value === "Oferta A4") { document.getElementById('panelExtraA4').classList.remove('d-none'); }
     else { document.getElementById('panelExtraA4').classList.add('d-none'); document.getElementById('inputEtiquetaTexto').value = ""; document.getElementById('inputEtiquetaPrecioFalso').value = ""; }
 }
-async function cargarColaEtiquetas() { try { const data = await (await fetch('http://localhost:8000/productos/etiquetas/listar')).json(); colaEtiquetasActual = data.cola || []; dibujarColaEtiquetas(); } catch (e) { } }
+async function cargarColaEtiquetas() { try { const data = await (await fetch(`${obtenerBaseUrl()}`/productos/etiquetas/listar')).json(); colaEtiquetasActual = data.cola || []; dibujarColaEtiquetas(); } catch (e) { } }
 
 async function agregarEtiquetaManual() {
     // PARCHE: Ahora usamos la memoria del buscador inteligente
@@ -500,7 +500,7 @@ async function agregarEtiquetaManual() {
     if (!sId || cant <= 0) return Swal.fire('Error', 'Busque y seleccione un producto primero.', 'warning');
 
     try {
-        await fetch('http://localhost:8000/productos/etiquetas/encolar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ producto_id: sId, tipo_cartel: form, cantidad_copias: cant, texto_personalizado: txt }) });
+        await fetch(`${obtenerBaseUrl()}`/productos/etiquetas/encolar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ producto_id: sId, tipo_cartel: form, cantidad_copias: cant, texto_personalizado: txt }) });
 
         // Limpiamos los inputs y el buscador
         document.getElementById('inputEtiquetaTexto').value = "";
@@ -519,9 +519,9 @@ async function encolarMasivoCarteleria() {
     let fils = productosGlobales; if (ft.startsWith('cat')) fils = fils.filter(p => p.categoria_id === fId); if (txt) fils = fils.filter(p => p.nombre.toLowerCase().includes(txt));
     if (fils.length === 0) return Swal.fire('Sin resultados', '', 'info');
     Swal.fire({ title: 'Encolando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-    try { for (let p of fils) { await fetch('http://localhost:8000/productos/etiquetas/encolar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ producto_id: p.id, tipo_cartel: 'Cenefa', cantidad_copias: 1 }) }); } Swal.fire('¡Éxito!', `Encoladas.`, 'success'); cargarColaEtiquetas(); } catch (e) { }
+    try { for (let p of fils) { await fetch(`${obtenerBaseUrl()}`/productos/etiquetas/encolar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ producto_id: p.id, tipo_cartel: 'Cenefa', cantidad_copias: 1 }) }); } Swal.fire('¡Éxito!', `Encoladas.`, 'success'); cargarColaEtiquetas(); } catch (e) { }
 }
-async function vaciarColaEtiquetas() { try { await fetch('http://localhost:8000/productos/etiquetas/vaciar', { method: 'DELETE' }); cargarColaEtiquetas(); } catch (e) { } }
+async function vaciarColaEtiquetas() { try { await fetch(`${obtenerBaseUrl()}`/productos/etiquetas/vaciar', { method: 'DELETE' }); cargarColaEtiquetas(); } catch (e) { } }
 async function eliminarDeColaFront(id) { try { await fetch(`http://localhost:8000/productos/etiquetas/eliminar/${id}`, { method: 'DELETE' }); cargarColaEtiquetas(); } catch (e) { } }
 function cargarFotoTemporal(event, idx) { const r = new FileReader(); r.onload = e => { colaEtiquetasActual[idx].foto_temporal = e.target.result; dibujarColaEtiquetas(); }; r.readAsDataURL(event.target.files[0]); }
 
@@ -652,7 +652,7 @@ async function agregarLoteRapido() {
     const c = parseFloat(document.getElementById('inputCostoLote').value) || 0;
     
     try { 
-        await fetch('http://localhost:8000/lotes/ingresar', { 
+        await fetch(`${obtenerBaseUrl()}`/lotes/ingresar', { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ producto_id: productoEditandoId, numero_lote_proveedor: lote, fecha_vencimiento: v, cantidad_inicial: cant, costo_real_ingreso: c }) 
@@ -786,7 +786,7 @@ async function confirmarAjusteMasivo() {
     const esFijo = document.getElementById('masivaTipoFijo').checked; 
     
     try { 
-        await fetch('http://localhost:8000/productos/actualizacion_masiva', { 
+        await fetch(`${obtenerBaseUrl()}`/productos/actualizacion_masiva', { 
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ 
                 porcentaje: valorNum, 
@@ -1009,7 +1009,7 @@ async function guardarProductoCompleto() {
     try {
         let res;
         if (productoEditandoId === null) {
-            res = await fetch('http://localhost:8000/productos/crear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+            res = await fetch(`${obtenerBaseUrl()}`/productos/crear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
         } else { 
             res = await fetch(`http://localhost:8000/productos/actualizar/${productoEditandoId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }); 
         }
@@ -1073,7 +1073,7 @@ async function confirmarMerma() {
     const usuarioId = localStorage.getItem('usuario_id') || 1;
 
     try {
-        const res = await fetch('http://localhost:8000/lotes/baja_manual', {
+        const res = await fetch(`${obtenerBaseUrl()}`/lotes/baja_manual', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ lote_id: loteId, cantidad_a_bajar: cantidad, motivo: motivoCompleto, usuario_id: parseInt(usuarioId) })
@@ -1093,7 +1093,7 @@ async function confirmarMerma() {
 // --- CARGAR BOTONES POS ---
 async function cargarBotonesPOS() {
     try {
-        const res = await fetch('http://localhost:8000/productos/categorias_pos');
+        const res = await fetch(`${obtenerBaseUrl()}`/productos/categorias_pos');
         const data = await res.json();
         const tbody = document.getElementById('tablaCategoriasPOS');
         tbody.innerHTML = '';
@@ -1238,7 +1238,7 @@ function dibujarTablaComponentes() {
 // --- CARGAR PESTAÑA CENTRAL DE COMBOS ---
 async function cargarListadoCombos() {
     try {
-        const res = await fetch('http://localhost:8000/productos/listar_combos');
+        const res = await fetch(`${obtenerBaseUrl()}`/productos/listar_combos');
         const data = await res.json();
         const tbody = document.getElementById('tablaListadoCombos');
         tbody.innerHTML = '';

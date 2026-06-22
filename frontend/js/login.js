@@ -3,7 +3,7 @@
 // ========================================================
 function obtenerBaseUrl() {
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')) {
-        return 'http://localhost:8000';
+        return `${obtenerBaseUrl()}`';
     }
     return 'https://erp-autoservicio-backend.onrender.com'; 
 }

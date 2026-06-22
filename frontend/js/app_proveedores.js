@@ -9,7 +9,7 @@ let provSeleccionadoParaPago = null;
 // ==========================================
 async function cargarProveedores() {
     try {
-        const res = await fetch('http://localhost:8000/proveedores/listado');
+        const res = await fetch(`${obtenerBaseUrl()}`/proveedores/listado');
         const data = await res.json();
         
         proveedoresGlobales = Array.isArray(data) ? data : (data.proveedores || []);
@@ -114,7 +114,7 @@ async function guardarProveedor() {
 
     if (!payload.nombre_comercial) return Swal.fire('Error', 'El nombre comercial es obligatorio', 'warning');
 
-    const url = id ? `http://localhost:8000/proveedores/actualizar/${id}` : 'http://localhost:8000/proveedores/alta';
+    const url = id ? `http://localhost:8000/proveedores/actualizar/${id}` : `${obtenerBaseUrl()}`/proveedores/alta';
     const metodo = id ? 'PUT' : 'POST';
 
     try {
@@ -345,7 +345,7 @@ async function confirmarIngresoMercaderia() {
             items: facturaActualItems
         };
 
-        const res = await fetch('http://localhost:8000/proveedores/cargar_factura', {
+        const res = await fetch(`${obtenerBaseUrl()}`/proveedores/cargar_factura', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -433,7 +433,7 @@ async function registrarPagoProveedor() {
 
     try {
         // LA RUTA CORRECTA ES /pagar
-        const res = await fetch('http://localhost:8000/proveedores/pagar', {
+        const res = await fetch(`${obtenerBaseUrl()}`/proveedores/pagar', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)

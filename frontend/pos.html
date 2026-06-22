@@ -958,7 +958,7 @@
 
             try {
                 Swal.fire({ title: 'Verificando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                const res = await fetch('http://localhost:8000/usuarios/autorizar', {
+                const res = await fetch(`${obtenerBaseUrl()}`/usuarios/autorizar', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ pin_secreto: pin, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
                 });
@@ -982,7 +982,7 @@
             Swal.fire({ title: 'Verificando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
             try {
-                const res = await fetch('http://localhost:8000/usuarios/login', {
+                const res = await fetch(`${obtenerBaseUrl()}`/usuarios/login', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ codigo_credencial: cred, pin_secreto: pin })
                 });
@@ -1050,7 +1050,7 @@
 
             // 4. Verificamos el estado de la caja
             try {
-                const res = await fetch('http://localhost:8000/caja/estado?caja_id=1');
+                const res = await fetch(`${obtenerBaseUrl()}`/caja/estado?caja_id=1');
                 const data = await res.json();
 
                 if (data.estado === 'ABIERTO') {
@@ -1193,7 +1193,7 @@
 
             try {
                 const payload = { caja_id: 1, usuario_id: empleadoLogueado.id, monto_inicial: monto };
-                const response = await fetch('http://localhost:8000/caja/abrir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const response = await fetch(`${obtenerBaseUrl()}`/caja/abrir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                 const data = await response.json();
                 if (data.error) throw new Error(data.error);
 
@@ -1554,7 +1554,7 @@
             };
 
             try {
-                const response = await fetch('http://localhost:8000/ventas/cobrar', {
+                const response = await fetch(`${obtenerBaseUrl()}`/ventas/cobrar', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadVenta)
                 });
                 const data = await response.json();
@@ -1629,7 +1629,7 @@
             modalDeuda.show();
 
             try {
-                const res = await fetch('http://localhost:8000/clientes/listado');
+                const res = await fetch(`${obtenerBaseUrl()}`/clientes/listado');
                 const data = await res.json();
                 clientesGlobalesPOS = data.clientes || data; // Soporta ambos formatos
                 setTimeout(() => document.getElementById("inputBuscarFiado").focus(), 500);
@@ -1845,7 +1845,7 @@
             modalSeleccionCliente.show();
             document.getElementById('listaClientesAsignacion').innerHTML = '<div class="text-center p-3 text-muted">Cargando clientes...</div>';
             try {
-                const res = await fetch('http://localhost:8000/clientes/listado');
+                const res = await fetch(`${obtenerBaseUrl()}`/clientes/listado');
                 const data = await res.json();
                 clientesGlobalesPOS = data.clientes || data;
                 filtrarClientesAsignacion();
@@ -1950,7 +1950,7 @@
             // VERIFICACIÓN CON EL BACKEND EN VEZ DE 1234
             Swal.fire({ title: 'Autorizando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
             try {
-                const resAuth = await fetch('http://localhost:8000/usuarios/autorizar', {
+                const resAuth = await fetch(`${obtenerBaseUrl()}`/usuarios/autorizar', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ pin_secreto: pin, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
                 });
@@ -1961,7 +1961,7 @@
 
             Swal.fire({ title: 'Guardando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
             try {
-                const res = await fetch('http://localhost:8000/clientes/registrar', {
+                const res = await fetch(`${obtenerBaseUrl()}`/clientes/registrar', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ nombre_completo: nombre, cuit: dni, telefono_whatsapp: "", limite_credito: limite })
                 });
@@ -2072,7 +2072,7 @@
                         if (!pinEl || !pinEl.value) { Swal.showValidationMessage('Ingrese su PIN secreto'); return false; }
 
                         try {
-                            const resAuth = await fetch('http://localhost:8000/usuarios/autorizar', {
+                            const resAuth = await fetch(`${obtenerBaseUrl()}`/usuarios/autorizar', {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ pin_secreto: pinEl.value, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
                             });
@@ -2089,7 +2089,7 @@
 
             if (formValues) {
                 try {
-                    await fetch('http://localhost:8000/caja/movimiento', {
+                    await fetch(`${obtenerBaseUrl()}`/caja/movimiento', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -2369,7 +2369,7 @@
             if (montoDeclarado !== undefined) {
                 Swal.fire({ title: 'Cerrando caja...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
                 try {
-                    const res = await fetch('http://localhost:8000/caja/cerrar', {
+                    const res = await fetch(`${obtenerBaseUrl()}`/caja/cerrar', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ turno_id: turnoActualId, monto_final_declarado: montoDeclarado })
@@ -2401,7 +2401,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
             try {
                 const res = await fetch(`http://localhost:8000/ventas/ticket/${ticketId}`);
                 const ticket = await res.json();
-                const resConfig = await fetch('http://localhost:8000/config/leer');
+                const resConfig = await fetch(`${obtenerBaseUrl()}`/config/leer');
                 const config = await resConfig.json();
                 if (ticket.error) return Swal.fire('Error', ticket.error, 'error');
 
@@ -2679,7 +2679,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
         // ===== CARGAR CATEGORÍAS RÁPIDAS DESDE PYTHON =====
         async function cargarCategoriasRapidas() {
             try {
-                const res = await fetch('http://localhost:8000/productos/categorias_pos');
+                const res = await fetch(`${obtenerBaseUrl()}`/productos/categorias_pos');
                 const data = await res.json();
 
                 if (data.error) throw new Error(data.error);
@@ -2899,7 +2899,7 @@ async function abrirCobroPedidoMayorista() {
         // PROCEDEMOS A GUARDAR EN LA BASE DE DATOS
         Swal.fire({ title: 'Guardando en caja...', didOpen: () => Swal.showLoading() });
         
-        const resCobro = await fetch('http://localhost:8000/caja/cobrar_pedido', {
+        const resCobro = await fetch(`${obtenerBaseUrl()}`/caja/cobrar_pedido', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
