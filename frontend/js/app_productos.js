@@ -98,10 +98,10 @@ async function crearCategoriaUI() {
     const nombre = document.getElementById('nuevaCatNombre').value.trim();
     if (!nombre) return;
     try {
-        await fetch(`${obtenerBaseUrl()}/productos/categorias/crear', { 
+        await fetch(`${obtenerBaseUrl()}/productos/categorias/crear`, { 
             method: 'POST', headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ nombre: nombre }) 
-        }`);
+        });
         await cargarCategoriasGlobales(); // Recargamos la memoria
         gestionarCategoriasUI(); // Recargamos el cuadrito de SweetAlert
     } catch (e) { Swal.fire('Error', 'No se pudo crear.', 'error'); }
@@ -110,7 +110,7 @@ async function crearCategoriaUI() {
 async function borrarCategoria(id, nombre) {
     if(!(await Swal.fire({title: `¿Borrar rubro ${nombre}?`, icon: 'warning', showCancelButton: true})).isConfirmed) return;
     try {
-        await fetch(`http://localhost:8000/productos/categorias/eliminar/${id}`, { method: 'DELETE' });
+        await fetch(`${obtenerBaseUrl()}/productos/categorias/eliminar/${id}`, { method: 'DELETE' });
         await cargarCategoriasGlobales();
         gestionarCategoriasUI();
     } catch (e) { Swal.fire('Error', 'No se pudo borrar.', 'error'); }
@@ -204,7 +204,7 @@ async function cargarCatalogo() {
                 let filtroElemento = document.getElementById('filtroEstado');
                 let filtroSelect = filtroElemento ? filtroElemento.value : '1';
                 
-                let url = `${obtenerBaseUrl()}`/productos/listar``;
+                let url = `${obtenerBaseUrl()}/productos/listar`;
                 if (filtroSelect === 'critico') { 
                     url += '?estado=1&alerta_stock=true'; 
                 } else if (filtroSelect === 'vencimiento') {
@@ -522,7 +522,7 @@ async function encolarMasivoCarteleria() {
     try { for (let p of fils) { await fetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ producto_id: p.id, tipo_cartel: 'Cenefa', cantidad_copias: 1 }) }); } Swal.fire('¡Éxito!', `Encoladas.`, 'success'); cargarColaEtiquetas(); } catch (e) { }
 }
 async function vaciarColaEtiquetas() { try { await fetch(`${obtenerBaseUrl()}/productos/etiquetas/vaciar`, { method: 'DELETE' }); cargarColaEtiquetas(); } catch (e) { } }
-async function eliminarDeColaFront(id) { try { await fetch(`http://localhost:8000/productos/etiquetas/eliminar/${id}`, { method: 'DELETE' }); cargarColaEtiquetas(); } catch (e) { } }
+async function eliminarDeColaFront(id) { try { await fetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${id}`, { method: 'DELETE' }); cargarColaEtiquetas(); } catch (e) { } }
 function cargarFotoTemporal(event, idx) { const r = new FileReader(); r.onload = e => { colaEtiquetasActual[idx].foto_temporal = e.target.result; dibujarColaEtiquetas(); }; r.readAsDataURL(event.target.files[0]); }
 
 function dibujarColaEtiquetas() {
@@ -652,11 +652,11 @@ async function agregarLoteRapido() {
     const c = parseFloat(document.getElementById('inputCostoLote').value) || 0;
     
     try { 
-        await fetch(`${obtenerBaseUrl()}/lotes/ingresar, { 
+        await fetch(`${obtenerBaseUrl()}/lotes/ingresar`, { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ producto_id: productoEditandoId, numero_lote_proveedor: lote, fecha_vencimiento: v, cantidad_inicial: cant, costo_real_ingreso: c }) 
-        }`); 
+        }); 
         
         Swal.fire({ 
             target: document.getElementById('modalNuevoProducto'),
@@ -786,7 +786,7 @@ async function confirmarAjusteMasivo() {
     const esFijo = document.getElementById('masivaTipoFijo').checked; 
     
     try { 
-        await fetch(`${obtenerBaseUrl()}/productos/actualizacion_masiva, { 
+        await fetch(`${obtenerBaseUrl()}/productos/actualizacion_masiva`, { 
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ 
                 porcentaje: valorNum, 
@@ -797,7 +797,7 @@ async function confirmarAjusteMasivo() {
                 es_monto_fijo: esFijo,
                 excluir_ids: idsExcluidosMasiva // <-- Mandamos la lista negra a Python
             }) 
-        }`); 
+        }); 
         Swal.fire('¡Aplicado!', '', 'success'); limpiarSimulacion(); cargarCatalogo(); cambiarPestana('catalogo'); 
     } catch (e) { } 
 }
@@ -809,7 +809,7 @@ cambiarPestanaAbm(pestana);
     document.querySelectorAll('#modalNuevoProducto input').forEach(i => i.value = '');
 
     try {
-        const response = await fetch(`http://localhost:8000/productos/ver/${id}`);
+        const response = await fetch(`${obtenerBaseUrl()}/productos/ver/${id}`);
         const p = await response.json(); 
         if (p.error) throw new Error(p.error);
 
@@ -936,7 +936,7 @@ const rolActual = localStorage.getItem('usuario_rol');
         componentesComboActual = p.componentes_combo || [];
         dibujarTablaComponentes();
 try {
-            const resHist = await fetch(`http://localhost:8000/productos/movimientos/${id}`);
+            const resHist = await fetch(`${obtenerBaseUrl()}/productos/movimientos/${id}`);
             const dataHist = await resHist.json();
             
             const tbHist = document.getElementById('tablaHistorialProd');
@@ -1026,15 +1026,15 @@ async function guardarProductoCompleto() {
     }
 }
 
-async function desactivarProducto(id, n) { if ((await Swal.fire({ title: '¿Ocultar?', icon: 'warning', showCancelButton: true })).isConfirmed) { await fetch(`http://localhost:8000/productos/eliminar/${id}`, { method: 'DELETE' }); cargarCatalogo(); cargarListadoCombos(); } }
-async function restaurarProducto(id, n) { if ((await Swal.fire({ title: '¿Restaurar?', icon: 'question', showCancelButton: true })).isConfirmed) { await fetch(`http://localhost:8000/productos/restaurar/${id}`, { method: 'PUT' }); cargarCatalogo(); cargarListadoCombos(); } }
+async function desactivarProducto(id, n) { if ((await Swal.fire({ title: '¿Ocultar?', icon: 'warning', showCancelButton: true })).isConfirmed) { await fetch(`${obtenerBaseUrl()}/productos/eliminar/${id}`, { method: 'DELETE' }); cargarCatalogo(); cargarListadoCombos(); } }
+async function restaurarProducto(id, n) { if ((await Swal.fire({ title: '¿Restaurar?', icon: 'question', showCancelButton: true })).isConfirmed) { await fetch(`${obtenerBaseUrl()}/productos/restaurar/${id}`, { method: 'PUT' }); cargarCatalogo(); cargarListadoCombos(); } }
 
 // ==========================================
 // SISTEMA DE MERMAS (RECUPERADO)
 // ==========================================
 async function abrirModalMerma(id, nombre) {
     try {
-        const res = await fetch(`http://localhost:8000/productos/ver/${id}`);
+        const res = await fetch(`${obtenerBaseUrl()}/productos/ver/${id}`);
         const prod = await res.json();
 
         document.getElementById('mermaNombreProducto').innerText = nombre;
@@ -1073,11 +1073,11 @@ async function confirmarMerma() {
     const usuarioId = localStorage.getItem('usuario_id') || 1;
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/lotes/baja_manual, {
+        const res = await fetch(`${obtenerBaseUrl()}/lotes/baja_manual`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ lote_id: loteId, cantidad_a_bajar: cantidad, motivo: motivoCompleto, usuario_id: parseInt(usuarioId) })
-        }`);
+        });
 
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -1128,7 +1128,7 @@ async function guardarBotonPOS(id, iconoActual) {
     const color = document.getElementById(`colorPOS_${id}`).value;
 
     try {
-        await fetch(`http://localhost:8000/productos/categorias_pos/${id}`, {
+        await fetch(`${obtenerBaseUrl()}/productos/categorias_pos/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nombre: nombre, palabra_clave: clave, icono: iconoActual, color_fondo: color })
@@ -1354,7 +1354,7 @@ async function corregirLoteUI(id, lote, vence, stock, costo) {
     if (formValues) {
         try {
             // ARREGLO: La ruta correcta es /productos/lotes/actualizar
-            const res = await fetch(`http://localhost:8000/productos/lotes/actualizar/${id}`, {
+            const res = await fetch(`${obtenerBaseUrl()}/productos/lotes/actualizar/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formValues)
@@ -1383,7 +1383,7 @@ async function eliminarLoteUI(id) {
     if (confirm.isConfirmed) {
         try {
             // ARREGLO: La ruta correcta es /productos/lotes/eliminar
-            const res = await fetch(`http://localhost:8000/productos/lotes/eliminar/${id}`, { method: 'DELETE' });
+            const res = await fetch(`${obtenerBaseUrl()}/productos/lotes/eliminar/${id}`, { method: 'DELETE' });
             const data = await res.json();
             
             // DETECTOR DE MENTIRAS
