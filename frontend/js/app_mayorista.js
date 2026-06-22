@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // --- 1. CARGAR CLIENTES ---
 async function cargarClientesMay() {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}`/clientes/listado');
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/listado`);
         const data = await res.json();
         clientesMayGlobales = data.clientes || [];
         
@@ -271,11 +271,11 @@ async function procesarDocumento(tipoDoc) {
     Swal.fire({ title: 'Generando Documento...', didOpen: () => Swal.showLoading() });
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}`/deposito/crear', {
+        const res = await fetch(`${obtenerBaseUrl()}/deposito/crear, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)
-        });
+        }`);
         const data = await res.json();
         
         if (data.error) throw new Error(data.error);
@@ -318,7 +318,7 @@ async function imprimirRemitoA5(docId) {
         if (data.error) throw new Error(data.error);
 
         // 2. EL REY DE LA CONFIGURACIÓN: Leemos los ajustes en vivo desde Python
-        const resConfig = await fetch(`${obtenerBaseUrl()}`/config/leer');
+        const resConfig = await fetch(`${obtenerBaseUrl()}/config/leer`);
         const config = await resConfig.json();
         if (config.error) throw new Error("No se pudo leer la configuración del negocio.");
 
@@ -547,7 +547,7 @@ async function cargarMonitorPedidos() {
     tbody.innerHTML = '<tr><td colspan="7" class="py-4"><div class="spinner-border text-primary"></div></td></tr>';
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}`/deposito/listar');
+        const res = await fetch(`${obtenerBaseUrl()}/deposito/listar`);
         const data = await res.json();
         monitorDataGlobal = data.documentos || [];
         dibujarMonitor(monitorDataGlobal);
