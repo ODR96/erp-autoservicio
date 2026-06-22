@@ -203,7 +203,7 @@ async function darDeBajaEmpleado(id, nombre) {
 
     if (confirm.isConfirmed) {
         try {
-            await fetch(`http://localhost:8000/usuarios/baja/${id}`, { method: 'DELETE' });
+            await fetch(`${obtenerBaseUrl()}/usuarios/baja/${id}`, { method: 'DELETE' });
             Swal.fire('Bloqueado', 'Empleado dado de baja.', 'success');
             cargarEmpleados();
         } catch (e) {
@@ -225,7 +225,7 @@ async function reactivarEmpleado(id, nombre) {
 
     if (confirm.isConfirmed) {
         try {
-            await fetch(`http://localhost:8000/usuarios/alta/${id}`, { method: 'PUT' });
+            await fetch(`${obtenerBaseUrl()}/usuarios/alta/${id}`, { method: 'PUT' });
             Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Usuario reactivado', showConfirmButton: false, timer: 1500 });
             cargarEmpleados();
         } catch (e) {

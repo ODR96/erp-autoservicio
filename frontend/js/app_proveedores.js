@@ -128,13 +128,13 @@ async function guardarProveedor() {
 async function darDeBajaProveedor(id, nombre) {
     const res = await Swal.fire({ title: `¿Dar de baja a ${nombre}?`, text: "No podrás cargarle más facturas hasta restaurarlo.", icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', confirmButtonText: 'Sí, desactivar' });
     if (res.isConfirmed) {
-        await fetch(`http://localhost:8000/proveedores/baja/${id}`, { method: 'DELETE' });
+        await fetch(`${obtenerBaseUrl()}/proveedores/baja/${id}`, { method: 'DELETE' });
         cargarProveedores();
     }
 }
 
 async function reactivarProveedor(id) {
-    await fetch(`http://localhost:8000/proveedores/reactivar/${id}`, { method: 'PUT' });
+    await fetch(`${obtenerBaseUrl()}/proveedores/reactivar/${id}`, { method: 'PUT' });
     cargarProveedores();
 }
 
@@ -168,7 +168,7 @@ document.getElementById('inputScanCompra')?.addEventListener('keypress', async f
 
 async function buscarParaCompra(query) {
     try {
-        const res = await fetch(`http://localhost:8000/productos/buscar?termino=${encodeURIComponent(query)}`);
+        const res = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
         const data = await res.json(); 
 
         // PARCHE A PRUEBA DE BALAS: Atajamos el dato venga como venga
@@ -469,7 +469,7 @@ async function verHistorialPagos() {
 
     Swal.fire({ title: 'Cargando pagos...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetch(`http://localhost:8000/proveedores/historial_pagos/${provSeleccionadoParaPago}`);
+        const res = await fetch(`${obtenerBaseUrl()}/proveedores/historial_pagos/${provSeleccionadoParaPago}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
@@ -508,7 +508,7 @@ async function verHistorialPagos() {
 async function verHistorialProveedor(id, nombre) {
     Swal.fire({ title: 'Cargando historial...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetch(`http://localhost:8000/proveedores/historial/${id}`);
+        const res = await fetch(`${obtenerBaseUrl()}/proveedores/historial/${id}`);
         const data = await res.json();
         
         if (data.error) throw new Error(data.error);
@@ -555,7 +555,7 @@ async function verHistorialProveedor(id, nombre) {
 // --- VER EL DESGLOSE CON NAVEGACIÓN E IMPRESIÓN ---
 async function verDetalleFactura(compraId, numFactura, proveedorId, nombreProveedor) {
     try {
-        const res = await fetch(`http://localhost:8000/proveedores/factura_detalle/${compraId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/proveedores/factura_detalle/${compraId}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 

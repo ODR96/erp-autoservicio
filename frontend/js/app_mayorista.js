@@ -49,7 +49,7 @@ async function buscarProductoMay(termino) {
     Swal.fire({ title: 'Buscando...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
     
     try {
-        const res = await fetch(`http://localhost:8000/productos/buscar?q=${termino}`);
+        const res = await fetch(`${obtenerBaseUrl()}/productos/buscar?q=${termino}`);
         const data = await res.json();
         
         if (data.error || !data.productos || data.productos.length === 0) {
@@ -271,11 +271,11 @@ async function procesarDocumento(tipoDoc) {
     Swal.fire({ title: 'Generando Documento...', didOpen: () => Swal.showLoading() });
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/deposito/crear, {
+        const res = await fetch(`${obtenerBaseUrl()}/deposito/crear`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)
-        }`);
+        });
         const data = await res.json();
         
         if (data.error) throw new Error(data.error);
@@ -313,7 +313,7 @@ async function imprimirRemitoA5(docId) {
         Swal.fire({ title: 'Generando comprobante...', didOpen: () => Swal.showLoading() });
         
         // 1. Traemos los datos del pedido/presupuesto
-        const res = await fetch(`http://localhost:8000/deposito/documento/${docId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/deposito/documento/${docId}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
@@ -333,7 +333,7 @@ async function imprimirRemitoA5(docId) {
             if (config.ruta_logo.startsWith("data:image")) {
                 rutaSegura = config.ruta_logo; // Si es código directo de Base de Datos
             } else {
-                rutaSegura = `http://localhost:8000/static/logos/${config.ruta_logo}?t=${new Date().getTime()}`; // Si es un archivo subido
+                rutaSegura = `${obtenerBaseUrl()}/static/logos/${config.ruta_logo}?t=${new Date().getTime()}`; // Si es un archivo subido
             }
         }
 
@@ -525,7 +525,7 @@ function convertirAPedido(docId) {
         if (result.isConfirmed) {
             Swal.fire({ title: 'Convirtiendo...', didOpen: () => Swal.showLoading() });
             try {
-                const res = await fetch(`http://localhost:8000/deposito/convertir_presupuesto/${docId}`, {
+                const res = await fetch(`${obtenerBaseUrl()}/deposito/convertir_presupuesto/${docId}`, {
                     method: 'POST'
                 });
                 const data = await res.json();
@@ -624,7 +624,7 @@ async function verDetallePedido(docId) {
         Swal.fire({ title: 'Buscando detalle...', didOpen: () => Swal.showLoading() });
         
         // Usamos la ruta que ya teníamos para la impresora, pero la mostramos en pantalla
-        const res = await fetch(`http://localhost:8000/deposito/documento/${docId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/deposito/documento/${docId}`);
         const data = await res.json();
         
         if (data.error) throw new Error(data.error);
@@ -697,7 +697,7 @@ async function imprimirPicking(docId) {
         Swal.fire({ title: 'Generando Hoja de Armado...', didOpen: () => Swal.showLoading() });
         
         // Reutilizamos la ruta que ya te trae el documento entero
-        const res = await fetch(`http://localhost:8000/deposito/documento/${docId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/deposito/documento/${docId}`);
         const data = await res.json();
         
         if (data.error) throw new Error(data.error);

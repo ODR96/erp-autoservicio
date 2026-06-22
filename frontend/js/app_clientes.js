@@ -180,7 +180,7 @@ async function cargarHistorialCliente(id) {
     tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></td></tr>';
     
     try {
-        const res = await fetch(`http://localhost:8000/clientes/historial/${id}`);
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/historial/${id}`);
         const data = await res.json();
         
         tbody.innerHTML = '';
@@ -224,7 +224,7 @@ async function cargarHistorialCliente(id) {
 async function verDetalleTicketAdmin(ventaId) {
     Swal.fire({ title: 'Buscando Remito...', didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetch(`http://localhost:8000/ventas/ticket/${ventaId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
         const data = await res.json();
         
         if (data.error) throw new Error(data.error);
@@ -270,7 +270,7 @@ async function registrarPagoCliente() {
     Swal.fire({ title: 'Procesando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     try {
-        const res = await fetch(`http://localhost:8000/clientes/pagar_deuda/${clienteSeleccionadoId}`, {
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/pagar_deuda/${clienteSeleccionadoId}`, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
@@ -379,7 +379,7 @@ async function guardarCliente() {
     try {
         let res;
         if (clienteEditandoId) {
-            res = await fetch(`http://localhost:8000/clientes/actualizar/${clienteEditandoId}`, {
+            res = await fetch(`${obtenerBaseUrl()}/clientes/actualizar/${clienteEditandoId}`, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
@@ -445,7 +445,7 @@ async function imprimirResumenCuenta() {
     Swal.fire({ title: 'Generando Resumen...', didOpen: () => Swal.showLoading() });
 
     try {
-        const res = await fetch(`http://localhost:8000/clientes/historial/${clienteSeleccionadoId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/historial/${clienteSeleccionadoId}`);
         const data = await res.json();
         
         // Invertimos la lista para que arranque del más viejo al más nuevo (como un resumen de banco real)
@@ -534,7 +534,7 @@ async function aplicarRecargoManual() {
     if (formValues) {
         Swal.fire({ title: 'Aplicando...', didOpen: () => Swal.showLoading() });
         try {
-            await fetch(`http://localhost:8000/clientes/aplicar_recargo/${clienteSeleccionadoId}`, {
+            await fetch(`${obtenerBaseUrl()}/clientes/aplicar_recargo/${clienteSeleccionadoId}`, {
                 method: 'PUT', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ monto: formValues.monto, motivo: formValues.motivo, usuario_id: 1 })
             });
@@ -550,7 +550,7 @@ async function recalcularDeudaInflacion() {
     Swal.fire({ title: 'Analizando tickets...', text: 'Calculando precios actuales de góndola...', didOpen: () => Swal.showLoading() });
 
     try {
-        const res = await fetch(`http://localhost:8000/clientes/simular_actualizacion/${clienteSeleccionadoId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/simular_actualizacion/${clienteSeleccionadoId}`);
         const data = await res.json();
         
         if (data.error) return Swal.fire('Aviso', data.error, 'info');
@@ -569,7 +569,7 @@ async function recalcularDeudaInflacion() {
 
         if (confirm.isConfirmed) {
             Swal.fire({ title: 'Actualizando...', didOpen: () => Swal.showLoading() });
-            await fetch(`http://localhost:8000/clientes/aplicar_recargo/${clienteSeleccionadoId}`, {
+            await fetch(`${obtenerBaseUrl()}/clientes/aplicar_recargo/${clienteSeleccionadoId}`, {
                 method: 'PUT', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ monto: data.diferencia, motivo: "Ajuste por Inflación (Actualización a precio de góndola)", usuario_id: 1 })
             });
