@@ -1,0 +1,23 @@
+import sqlite3
+from supabase import create_client, Client
+
+SUPABASE_URL = "https://fxbxkvagnpuoibtifwjw.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4YnhrdmFnbnB1b2lidGlmd2p3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3OTU5NCwiZXhwIjoyMDk2OTU1NTk0fQ.aO0s-A3FwMExlJezGNGu_EUNINa8vgE7gHUbBTmRLpY"
+nube: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def replicar_fila_a_nube(nombre_tabla: str, id_fila: int):
+    try:
+        # 1. Leemos el dato que acabás de guardar desde la tablet
+        conexion = sqlite3.connect('autoservicio_20dejunio.db')
+        conexion.row_factory = sqlite3.Row
+        cursor = conexion.cursor()
+        cursor.execute(f"SELECT * FROM {nombre_tabla} WHERE id = ?", (id_fila,))
+        fila = dict(cursor.fetchone())
+        conexion.close()
+
+        # 2. Lo inyectamos directo en el disco duro de Supabase (PostgreSQL)
+        nube.table(nombre_tabla).upsert(fila).execute()
+        print(f"☁️ [TABLET/OFICINA] '{nombre_tabla}' (ID: {id_fila}) guardado a salvo en Supabase.")
+        
+    except Exception as e:
+        print(f"⚠️ Error del robot replicador en {nombre_tabla}: {e}")

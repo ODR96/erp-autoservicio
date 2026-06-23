@@ -5,11 +5,11 @@ from supabase import create_client, Client
 # 1. TUS CREDENCIALES DE LA NUBE
 # =====================================================================
 SUPABASE_URL = "https://fxbxkvagnpuoibtifwjw.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4YnhrdmFnbnB1b2lidGlmd2p3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3OTU5NCwiZXhwIjoyMDk2OTU1NTk0fQ.aO0s-A3FwMExlJezGNGu_EUNINa8vgE7gHUbBTmRLpY" # La que dice service_role
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4YnhrdmFnbnB1b2lidGlmd2p3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3OTU5NCwiZXhwIjoyMDk2OTU1NTk0fQ.aO0s-A3FwMExlJezGNGu_EUNINa8vgE7gHUbBTmRLpY"
 nube: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =====================================================================
-# 2. EL ORDEN DE CARGA (Para no romper las reglas de dependencia)
+# 2. EL ORDEN DE CARGA
 # =====================================================================
 TABLAS_ORDENADAS = [
     'configuracion_local', 'configuracion_negocio',
@@ -25,54 +25,46 @@ TABLAS_ORDENADAS = [
     'productos_solicitados_faltantes', 'movimientos_clientes'
 ]
 
-def descargar_cambios_de_la_nube():
-    print("⏬ Buscando actualizaciones de precios y productos en la nube...")
-    
+def descargar_novedades_oficina():
+    print("📥 Buscando actualizaciones de precios de la tablet/oficina...")
     local = sqlite3.connect('autoservicio_20dejunio.db')
-    local.row_factory = sqlite3.Row
     cursor = local.cursor()
-    
     try:
-        # 1. Traemos todo el catálogo de productos desde Supabase
-        respuesta = nube.table('productos').select('*').execute()
-        productos_nube = respuesta.data
-        
+        # 1. Traemos el catálogo fresco de Supabase
+        res = nube.table('productos').select('*').execute()
+        productos_nube = res.data
+
+        # 2. Los metemos a la fuerza en el SQLite del mostrador (Solo columnas reales)
         for p in productos_nube:
-            # 2. Verificamos si el producto ya existe en el local
-            cursor.execute("SELECT id FROM productos WHERE id = ?", (p['id'],))
-            existe = cursor.fetchone()
+            cursor.execute('''
+                INSERT OR REPLACE INTO productos (
+                    id, codigo_barras, nombre, categoria_id, proveedor_habitual_id, 
+                    costo_sin_iva, porcentaje_iva, precio_venta_final, 
+                    stock_minimo_alerta, dias_alerta_vencimiento, unidad_medida, activo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                p['id'], p.get('codigo_barras',''), p['nombre'], p.get('categoria_id',1), 
+                p.get('proveedor_habitual_id',0), p.get('costo_sin_iva',0), 
+                p.get('porcentaje_iva',21), p.get('precio_venta_final',0), 
+                p.get('stock_minimo_alerta',5), p.get('dias_alerta_vencimiento',0), 
+                p.get('unidad_medida','Unidad'), p.get('activo',1)
+            ))
             
-            if existe:
-                # Si existe, le pisamos los precios y datos con lo que dictamina la nube
-                cursor.execute('''
-                    UPDATE productos 
-                    SET nombre = ?, codigo_barras = ?, costo_sin_iva = ?, 
-                        precio_venta_final = ?, activo = ?
-                    WHERE id = ?
-                ''', (p['nombre'], p['codigo_barras'], p['costo_sin_iva'], 
-                      p['precio_venta_final'], p['activo'], p['id']))
-            else:
-                # Si lo creaste nuevo desde tu casa, el local lo inserta virgen
-                cursor.execute('''
-                    INSERT INTO productos (id, codigo_barras, nombre, costo_sin_iva, precio_venta_final, activo)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (p['id'], p['codigo_barras'], p['nombre'], p['costo_sin_iva'], p['precio_venta_final'], p['activo']))
-                
         local.commit()
-        print("✅ Precios y catálogo local sincronizados con el dueño.")
-        
+        print("✅ Catálogo actualizado en el mostrador.")
     except Exception as e:
-        print("❌ Error al descargar datos de la nube:", e)
+        print(f"⚠️ Error descargando novedades: {e}")
         local.rollback()
     finally:
         local.close()
 
 def subir_todo_a_la_nube():
-    print("🚚 Arrancando el camión de mudanza gigante...\n")
+    print("\n🚚 Arrancando el camión de mudanza gigante...\n")
     
-    descargar_cambios_de_la_nube()
+    # 1. Primero descargamos lo que hiciste desde tu casa
+    descargar_novedades_oficina()
     
-    # Conectamos a la base local
+    # 2. Conectamos a la base local para subir ventas y cajas
     local = sqlite3.connect('autoservicio_20dejunio.db')
     local.row_factory = sqlite3.Row
     cursor = local.cursor()
@@ -81,13 +73,11 @@ def subir_todo_a_la_nube():
         print(f"📦 Revisando tabla: {tabla}...")
         
         try:
-            # 1. Chequeamos si la tabla existe en tu computadora
             cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{tabla}'")
             if not cursor.fetchone():
                 print(f"   ⚠️ La tabla no existe en local. Saltando...\n")
                 continue
 
-            # 2. Traemos toda la información
             cursor.execute(f"SELECT * FROM {tabla}")
             registros = [dict(row) for row in cursor.fetchall()]
 
@@ -95,21 +85,18 @@ def subir_todo_a_la_nube():
                 print("   - Está vacía. Saltando al siguiente.\n")
                 continue
 
-            # 3. Limpieza de datos (A Supabase no le gustan los valores nulos en columnas matemáticas)
+            # Limpieza de nulos
             for r in registros:
                 for clave, valor in r.items():
-                    # Si hay un campo vacío que debería tener texto, le ponemos cadena vacía
                     if valor is None:
                         r[clave] = None
 
-            # 4. Subimos los datos en paquetes de 500 para que no se corte por internet lento
+            # Subida en paquetes de 500
             tamaño_lote = 500
             total_subidos = 0
             
             for i in range(0, len(registros), tamaño_lote):
                 paquete = registros[i:i + tamaño_lote]
-                
-                # upsert = Si el ID no existe lo crea, si ya existe lo actualiza
                 nube.table(tabla).upsert(paquete).execute()
                 total_subidos += len(paquete)
 
@@ -121,11 +108,9 @@ def subir_todo_a_la_nube():
     # --- SUBIDA DEL ARCHIVO FÍSICO AL STORAGE ---
     print("☁️ Subiendo copia de seguridad del archivo completo a Supabase Storage...")
     try:
-        # Borramos el backup viejo para no acumular basura
         try: nube.storage.from_('backups').remove(['autoservicio_20dejunio.db'])
         except: pass
         
-        # Subimos el archivo fresco
         with open('autoservicio_20dejunio.db', 'rb') as f:
             nube.storage.from_('backups').upload('autoservicio_20dejunio.db', f)
         print("✅ Backup guardado a salvo en la nube.")

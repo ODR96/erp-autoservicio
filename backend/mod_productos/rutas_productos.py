@@ -3,6 +3,9 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 import sqlite3
 from datetime import datetime, timezone, timedelta, date
+import os
+from fastapi import BackgroundTasks
+from backend.replicador import replicar_fila_a_nube
 
 router = APIRouter()
 
@@ -49,7 +52,7 @@ class CategoriaPOS(BaseModel):
     color_fondo: str = "#ffffff"
 
 @router.post("/crear")
-def crear_producto(producto: ProductoNuevo):
+def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -66,6 +69,9 @@ def crear_producto(producto: ProductoNuevo):
         ''', (producto.codigo_barras, producto.nombre, producto.categoria_id, producto.proveedor_habitual_id, producto.costo_sin_iva, producto.porcentaje_iva, producto.precio_venta_final, producto.stock_minimo_alerta, producto.dias_alerta_vencimiento, producto.unidad_medida))
         
         nuevo_id = cursor.lastrowid 
+        
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'productos', nuevo_id)
         
         if producto.cantidad_inicial > 0:
             cursor.execute('''
@@ -155,7 +161,7 @@ def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, aler
 
 # --- 3. ACTUALIZAR PRODUCTO CORREGIDO ---
 @router.put("/actualizar/{producto_id}")
-def actualizar_producto(producto_id: int, datos: ProductoActualizar):
+def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -189,6 +195,10 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar):
         for r in datos.reglas_mayoristas:
             cursor.execute("INSERT INTO promociones_volumen (producto_id, cantidad_minima, precio_oferta_unitario) VALUES (?, ?, ?)", (producto_id, r['cantidad'], r['precio']))
             
+            
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'productos', producto_id)
+        
         conexion.commit()
         conexion.close()
         return {"mensaje": "Actualizado correctamente."}
