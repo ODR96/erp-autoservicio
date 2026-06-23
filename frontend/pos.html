@@ -1139,8 +1139,14 @@
             }
         }
 
-        async function confirmarAnulacion(ventaId, ticket) {
-            // Alerta de seguridad antes de anular (comillas simples limpias)
+async function confirmarAnulacion(ventaId, ticket) {
+            // EL PATOVICA DIGITAL: Pedir PIN si no es Admin o Encargado
+            if (!empleadoLogueado || (empleadoLogueado.rol !== 'ADMIN' && empleadoLogueado.rol !== 'ENCARGADO')) {
+                const autorizadoPor = await solicitarAutorizacion(`Anular el Ticket ${ticket} descontará plata de la caja. Requiere autorización de Supervisor.`);
+                if (!autorizadoPor) return; // Si falla el PIN, se cancela la anulación
+            }
+
+            // Alerta de seguridad antes de anular
             const confirm = await Swal.fire({
                 title: '¿Anular Ticket ' + ticket + '?',
                 text: 'El stock de los productos regresará a la estantería y la plata se descontará de la caja. Esta acción quedará registrada.',
@@ -1154,7 +1160,8 @@
 
             if (confirm.isConfirmed) {
                 try {
-                    const res = await fetch(`http://localhost:8000/ventas/anular/${ventaId}`, { method: 'PUT' });
+                    // LLamada a tu backend para anular
+                    const res = await fetch(`${obtenerBaseUrl()}/ventas/anular/${ventaId}`, { method: 'PUT' });
                     const data = await res.json();
 
                     if (data.error) throw new Error(data.error);
@@ -2251,9 +2258,9 @@
             const esCierreZ = (tipo === 'Z' || tipo === 'z');
             const tituloReporte = esCierreZ ? "CIERRE Z (FINAL)" : "ARQUEO X (PARCIAL)";
 
-            const empleado = JSON.parse(localStorage.getItem('empleado_pos'));
-            const nombreCajero = empleado ? empleado.nombre : "Turno";
-
+            const nombreCajero = (typeof empleadoLogueado !== 'undefined' && empleadoLogueado && empleadoLogueado.nombre) 
+                                ? empleadoLogueado.nombre 
+                                : (localStorage.getItem('usuario_nombre') || "Caja Principal");
             // Mapeo ampliado (agregamos más opciones para atrapar los fiados)
             const fondoIni = d.fondo_inicial ?? 0;
             const vEfectivo = d.ventas_en_efectivo ?? d.efectivo ?? 0;
@@ -2392,8 +2399,11 @@
 
                     cajaAbierta = false;
                     turnoActualId = null;
-                    setTimeout(() => { window.location.href = "admin_cajas.html"; }, 2000);
-                } catch (e) {
+                    setTimeout(() => { 
+                        localStorage.removeItem('empleado_pos');
+                        localStorage.removeItem('token_pos');
+                        window.location.href = "index.html"; 
+                    }, 2000);                } catch (e) {
                     Swal.fire('Error al cerrar caja', e.message, 'error');
                 }
             }
