@@ -177,6 +177,10 @@ async function forzarSincronizacion() {
 
         btn.classList.replace('btn-outline-primary', 'btn-success');
         btn.innerHTML = `<i class="bi bi-check-circle-fill"></i> ¡Listo!`;
+
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
         
         setTimeout(() => {
             btn.classList.replace('btn-success', 'btn-outline-primary');

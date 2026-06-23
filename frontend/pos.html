@@ -358,6 +358,9 @@
                     onclick="modalGestion.show()">
                     <i class="bi bi-safe"></i> Caja (F10)
                 </button>
+                <button class="btn btn-outline-light border-0 me-2" onclick="actualizarCajaRapido()" title="Actualizar precios y permisos desde la Nube">
+                    <i class="bi bi-arrow-clockwise fs-3"></i>
+                </button>
                 <div class="text-end lh-1">
                     <strong class="fs-4" id="reloj">00:00</strong><br>
                     <small class="text-light" id="fecha">--/--/----</small>
@@ -2722,6 +2725,16 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
             modalPagoMixto.show();
             setTimeout(() => document.getElementById('mixtoEfectivo').focus(), 500);
         }
+
+        async function actualizarCajaRapido() {
+    Swal.fire({ title: 'Actualizando...', timer: 2000, showConfirmButton: false });
+    try {
+        await fetch(`${obtenerBaseUrl()}/sync/actualizar-rapido`, { method: 'POST' });
+        // Después de 2 segundos, los permisos nuevos ya están en la PC local
+    } catch (e) {
+        console.error("Error al actualizar", e);
+    }
+}
 
         function calcularMixto() {
             const ef = parseFloat(document.getElementById('mixtoEfectivo').value) || 0;
