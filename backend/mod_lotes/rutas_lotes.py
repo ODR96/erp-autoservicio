@@ -115,7 +115,7 @@ def dar_baja_manual(datos: BajaManual, background_tasks: BackgroundTasks):
             VALUES (?, ?, ?, 'Baja Manual / Merma', ?, ?, ?)
         ''', (producto_id, datos.lote_id, datos.cantidad_a_bajar, datos.motivo, datos.usuario_id, fecha_actual))
         if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', baja.lote_id)
+            background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', datos.lote_id)
         conexion.commit()
         conexion.close()
         
