@@ -301,12 +301,14 @@ def ver_producto_por_id(producto_id: int):
 
 # --- 4. BORRAR (D - Borrado Lógico) ---
 @router.delete("/eliminar/{producto_id}")
-def desactivar_producto(producto_id: int):
+def desactivar_producto(producto_id: int, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
         # En vez de borrar, lo "apagamos" poniendo activo en 0
         cursor.execute("UPDATE productos SET activo = 0 WHERE id = ?", (producto_id,))
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'productos', producto_id)
         conexion.commit()
         conexion.close()
         return {"mensaje": "Producto dado de baja del catálogo."}
@@ -315,12 +317,14 @@ def desactivar_producto(producto_id: int):
         return {"error": "No se pudo eliminar", "detalle": str(e)}
     
 @router.put("/restaurar/{producto_id}")
-def restaurar_producto(producto_id: int):
+def restaurar_producto(producto_id: int, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
         # Lo volvemos a prender poniendo activo en 1
         cursor.execute("UPDATE productos SET activo = 1 WHERE id = ?", (producto_id,))
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'productos', producto_id)
         conexion.commit()
         conexion.close()
         return {"mensaje": f"¡Producto {producto_id} restaurado y visible nuevamente!"}
@@ -420,7 +424,7 @@ class ActualizacionMasiva(BaseModel):
 
 # --- RUTINA DE AUMENTO MASIVO ---
 @router.put("/actualizacion_masiva")
-def actualizar_precios_masivamente(datos: ActualizacionMasiva):
+def actualizar_precios_masivamente(datos: ActualizacionMasiva, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
@@ -457,12 +461,20 @@ def actualizar_precios_masivamente(datos: ActualizacionMasiva):
             query += f" AND id NOT IN ({placeholders})"
             parametros.extend(datos.excluir_ids)
             
+        # --- LA MAGIA: LE PEDIMOS A SQLITE QUE NOS DEVUELVA LOS IDs AFECTADOS ---
+        query += " RETURNING id"
         cursor.execute(query, tuple(parametros))
-        filas_afectadas = cursor.rowcount  
+        afectados = cursor.fetchall()
+        filas_afectadas = len(afectados)
+        
+        # --- LE MANDAMOS TODA LA LISTA AL ROBOT ---
+        if os.environ.get("RENDER") is not None:
+            for fila in afectados:
+                background_tasks.add_task(replicar_fila_a_nube, 'productos', fila[0])
         
         conexion.commit()
         conexion.close()
-        return {"mensaje": f"¡Éxito! Se actualizaron {filas_afectadas} productos."}
+        return {"mensaje": f"¡Éxito! Se actualizaron {filas_afectadas} productos y se subieron a la Nube."}
         
     except Exception as e:
         conexion.close()
@@ -633,7 +645,7 @@ def listar_categorias_pos():
         return {"error": str(e)}
 
 @router.put("/categorias_pos/{cat_id}")
-def editar_categoria_pos(cat_id: int, cat: CategoriaPOS):
+def editar_categoria_pos(cat_id: int, cat: CategoriaPOS, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
@@ -642,6 +654,8 @@ def editar_categoria_pos(cat_id: int, cat: CategoriaPOS):
             SET nombre = ?, palabra_clave = ?, icono = ?, color_fondo = ?
             WHERE id = ?
         ''', (cat.nombre, cat.palabra_clave, cat.icono, cat.color_fondo, cat_id))
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'categorias_pos', cat_id)
         conexion.commit()
         conexion.close()
         return {"mensaje": "Categoría actualizada correctamente"}

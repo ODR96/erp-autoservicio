@@ -71,6 +71,15 @@ def descargar_novedades_oficina():
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (u['id'], u['nombre_completo'], u['rol'], u.get('codigo_barras_credencial',''), u.get('pin_secreto',''), u.get('estado','ACTIVO')))
             
+        # 6. Categorías de la Caja POS
+        res_cat_pos = nube.table('categorias_pos').select('*').execute()
+        for c in res_cat_pos.data:
+            cursor.execute('''
+                INSERT OR REPLACE INTO categorias_pos (id, nombre, palabra_clave, icono, color_fondo) 
+                VALUES (?, ?, ?, ?, ?)
+            ''', (c['id'], c['nombre'], c.get('palabra_clave',''), c.get('icono','bi-box'), c.get('color_fondo','#ffffff')))
+            
+            
         local.commit()
         print("✅ ¡Todas las novedades aplicadas en el mostrador!")
     except Exception as e:
