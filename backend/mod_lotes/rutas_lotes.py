@@ -84,7 +84,7 @@ def listar_lotes_activos():
 
 # --- 3. BAJA MANUAL DE STOCK (Mejorada para reportes) ---
 @router.put("/baja_manual")
-def dar_baja_manual(datos: BajaManual):
+def dar_baja_manual(datos: BajaManual, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
@@ -114,7 +114,8 @@ def dar_baja_manual(datos: BajaManual):
             (producto_id, lote_id, cantidad, tipo_movimiento, motivo, usuario_id, fecha_hora)
             VALUES (?, ?, ?, 'Baja Manual / Merma', ?, ?, ?)
         ''', (producto_id, datos.lote_id, datos.cantidad_a_bajar, datos.motivo, datos.usuario_id, fecha_actual))
-        
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', baja.lote_id)
         conexion.commit()
         conexion.close()
         
