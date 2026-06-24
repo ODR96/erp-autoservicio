@@ -695,8 +695,9 @@ def listar_combos_armados():
         return {"error": str(e)}
     
 # --- GESTIÓN DIRECTA DE LOTES (CORRECCIÓN DE ERRORES) ---
+# Acordate de sumarle "background_tasks: BackgroundTasks" arriba
 @router.put("/lotes/actualizar/{lote_id}")
-def actualizar_lote_individual(lote_id: int, datos: dict):
+def actualizar_lote_individual(lote_id: int, datos: dict, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
@@ -705,6 +706,11 @@ def actualizar_lote_individual(lote_id: int, datos: dict):
             SET numero_lote_proveedor = ?, fecha_vencimiento = ?, cantidad_disponible = ?, costo_real_ingreso = ?
             WHERE id = ?
         ''', (datos['lote'], datos['vence'], datos['stock'], datos['costo'], lote_id))
+        
+        # --- EL ROBOT EN ACCIÓN (Para que la nube guarde tu cambio de stock) ---
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', lote_id)
+
         conexion.commit()
         conexion.close()
         return {"mensaje": "Lote corregido correctamente."}

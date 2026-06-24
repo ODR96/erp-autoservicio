@@ -40,15 +40,20 @@ def descargar_novedades_oficina():
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (p['id'], p.get('codigo_barras',''), p['nombre'], p.get('categoria_id',1), p.get('proveedor_habitual_id',0), p.get('costo_sin_iva',0), p.get('porcentaje_iva',21), p.get('precio_venta_final',0), p.get('stock_minimo_alerta',5), p.get('dias_alerta_vencimiento',0), p.get('unidad_medida','Unidad'), p.get('activo',1)))
 
-        # 2. Lotes (Stock Inicial) - ¡CORREGIDO cantidad_disponible!
         res_lotes = nube.table('lotes_stock').select('*').execute()
         for L in res_lotes.data:
+            # CAMBIADO A "REPLACE": El local ahora acepta las correcciones manuales de la nube
             cursor.execute('''
-                INSERT OR IGNORE INTO lotes_stock (
+                INSERT OR REPLACE INTO lotes_stock (
                     id, producto_id, numero_lote_proveedor, fecha_vencimiento,
-                    cantidad_inicial, cantidad_disponible, costo_real_ingreso, fecha_ingreso, activo
+                    cantidad_inicial, cantidad_disponible, costo_real_ingreso, fecha_ingreso, estado_lote
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (L['id'], L['producto_id'], L.get('numero_lote_proveedor','INICIAL'), L.get('fecha_vencimiento','2099-12-31'), L.get('cantidad_inicial',0), L.get('cantidad_disponible',0), L.get('costo_real_ingreso',0), L.get('fecha_ingreso', '2024-01-01'), L.get('activo',1)))
+            ''', (
+                L['id'], L['producto_id'], L.get('numero_lote_proveedor','INICIAL'),
+                L.get('fecha_vencimiento','2099-12-31'), L.get('cantidad_inicial',0),
+                L.get('cantidad_disponible',0), L.get('costo_real_ingreso',0),
+                L.get('fecha_ingreso', '2024-01-01'), L.get('estado_lote','Activo')
+            ))
             
         # 3. Categorías
         res_cat = nube.table('categorias_productos').select('*').execute()
