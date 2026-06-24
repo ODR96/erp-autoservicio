@@ -24,34 +24,55 @@ TABLAS_ORDENADAS = [
     'movimientos_stock', 'registro_mermas',
     'productos_solicitados_faltantes', 'movimientos_clientes'
 ]
-
 def descargar_novedades_oficina():
-    print("📥 Buscando actualizaciones de precios de la tablet/oficina...")
+    print("📥 Buscando actualizaciones de la oficina (Precios, Stock, Usuarios, Proveedores)...")
     local = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = local.cursor()
     try:
-        # 1. Traemos el catálogo fresco de Supabase
-        res = nube.table('productos').select('*').execute()
-        productos_nube = res.data
-
-        # 2. Los metemos a la fuerza en el SQLite del mostrador (Solo columnas reales)
-        for p in productos_nube:
+        # 1. Productos
+        res_prod = nube.table('productos').select('*').execute()
+        for p in res_prod.data:
             cursor.execute('''
                 INSERT OR REPLACE INTO productos (
                     id, codigo_barras, nombre, categoria_id, proveedor_habitual_id, 
                     costo_sin_iva, porcentaje_iva, precio_venta_final, 
                     stock_minimo_alerta, dias_alerta_vencimiento, unidad_medida, activo
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                p['id'], p.get('codigo_barras',''), p['nombre'], p.get('categoria_id',1), 
-                p.get('proveedor_habitual_id',0), p.get('costo_sin_iva',0), 
-                p.get('porcentaje_iva',21), p.get('precio_venta_final',0), 
-                p.get('stock_minimo_alerta',5), p.get('dias_alerta_vencimiento',0), 
-                p.get('unidad_medida','Unidad'), p.get('activo',1)
-            ))
+            ''', (p['id'], p.get('codigo_barras',''), p['nombre'], p.get('categoria_id',1), p.get('proveedor_habitual_id',0), p.get('costo_sin_iva',0), p.get('porcentaje_iva',21), p.get('precio_venta_final',0), p.get('stock_minimo_alerta',5), p.get('dias_alerta_vencimiento',0), p.get('unidad_medida','Unidad'), p.get('activo',1)))
+
+        # 2. Lotes (Stock Inicial) - ¡CORREGIDO cantidad_disponible!
+        res_lotes = nube.table('lotes_stock').select('*').execute()
+        for L in res_lotes.data:
+            cursor.execute('''
+                INSERT OR IGNORE INTO lotes_stock (
+                    id, producto_id, numero_lote_proveedor, fecha_vencimiento,
+                    cantidad_inicial, cantidad_disponible, costo_real_ingreso, fecha_ingreso, activo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (L['id'], L['producto_id'], L.get('numero_lote_proveedor','INICIAL'), L.get('fecha_vencimiento','2099-12-31'), L.get('cantidad_inicial',0), L.get('cantidad_disponible',0), L.get('costo_real_ingreso',0), L.get('fecha_ingreso', '2024-01-01'), L.get('activo',1)))
+            
+        # 3. Categorías
+        res_cat = nube.table('categorias_productos').select('*').execute()
+        for c in res_cat.data:
+            cursor.execute("INSERT OR REPLACE INTO categorias_productos (id, nombre) VALUES (?, ?)", (c['id'], c['nombre']))
+
+        # 4. Proveedores
+        res_prov = nube.table('proveedores').select('*').execute()
+        for p in res_prov.data:
+            cursor.execute('''
+                INSERT OR REPLACE INTO proveedores (id, nombre_comercial, cuit, telefono_vendedor, observaciones, activo) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (p['id'], p['nombre_comercial'], p.get('cuit',''), p.get('telefono_vendedor',''), p.get('observaciones',''), p.get('activo',1)))
+
+        # 5. Usuarios
+        res_usr = nube.table('usuarios').select('*').execute()
+        for u in res_usr.data:
+            cursor.execute('''
+                INSERT OR REPLACE INTO usuarios (id, nombre_completo, rol, codigo_barras_credencial, pin_secreto, estado) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (u['id'], u['nombre_completo'], u['rol'], u.get('codigo_barras_credencial',''), u.get('pin_secreto',''), u.get('estado','ACTIVO')))
             
         local.commit()
-        print("✅ Catálogo actualizado en el mostrador.")
+        print("✅ ¡Todas las novedades aplicadas en el mostrador!")
     except Exception as e:
         print(f"⚠️ Error descargando novedades: {e}")
         local.rollback()

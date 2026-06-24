@@ -2,6 +2,9 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from datetime import date, datetime, timezone, timedelta
 import sqlite3
+import os
+from fastapi import BackgroundTasks
+from backend.replicador import replicar_fila_a_nube
 
 router = APIRouter()
 
@@ -24,7 +27,7 @@ class BajaManual(BaseModel):
 
 # --- 1. INGRESAR MERCADERÍA AL DEPÓSITO ---
 @router.post("/ingresar")
-def ingresar_lote(lote: LoteNuevo):
+def ingresar_lote(lote: LoteNuevo, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
@@ -46,7 +49,13 @@ def ingresar_lote(lote: LoteNuevo):
         
         cursor.execute('UPDATE productos SET costo_sin_iva = ? WHERE id = ?', (lote.costo_real_ingreso, lote.producto_id))
         
+        lote_id = cursor.lastrowid
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', lote_id)
+            background_tasks.add_task(replicar_fila_a_nube, 'productos', lote.producto_id) # Porque le cambiaste el costo!
+        
         conexion.commit()
+        
         conexion.close()
         return {"mensaje": "¡Mercadería ingresada y costo actualizado!"}
     except Exception as e:

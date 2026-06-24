@@ -69,15 +69,21 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
         ''', (producto.codigo_barras, producto.nombre, producto.categoria_id, producto.proveedor_habitual_id, producto.costo_sin_iva, producto.porcentaje_iva, producto.precio_venta_final, producto.stock_minimo_alerta, producto.dias_alerta_vencimiento, producto.unidad_medida))
         
         nuevo_id = cursor.lastrowid 
-        
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'productos', nuevo_id)
-        
+        lote_id = None
         if producto.cantidad_inicial > 0:
             cursor.execute('''
                 INSERT INTO lotes_stock (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento, cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Activo')
             ''', (nuevo_id, producto.numero_lote_proveedor, date.today().isoformat(), producto.fecha_vencimiento, producto.cantidad_inicial, producto.cantidad_inicial, producto.costo_real_ingreso))
+            
+            lote_id = cursor.lastrowid # Atrapamos el ID del lote
+            
+        # 2. Ahora sí, EL ROBOT sube todo a la Nube (si estamos en la oficina)
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'productos', nuevo_id)
+            if lote_id:
+                # Si se creó un lote, le pedimos al robot que también lo suba
+                background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', lote_id)
 
         # Guardamos Combos y Promos
         for comp in producto.componentes_combo:
@@ -506,12 +512,16 @@ def listar_categorias_activas():
         return {"error": str(e)}
 
 @router.post("/categorias/crear")
-def crear_categoria(cat: CategoriaNueva):
+def crear_categoria(cat: CategoriaNueva, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
         cursor.execute("INSERT INTO categorias_productos (nombre) VALUES (?)", (cat.nombre,))
         nuevo_id = cursor.lastrowid
+        
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'categorias_productos', nuevo_id)
+            
         conexion.commit()
         conexion.close()
         return {"mensaje": "Categoría creada", "id": nuevo_id, "nombre": cat.nombre}

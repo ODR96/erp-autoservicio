@@ -7,6 +7,9 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
 from supabase import create_client, Client
+import os
+from fastapi import BackgroundTasks
+from backend.replicador import replicar_fila_a_nube
 
 router = APIRouter()
 
@@ -57,7 +60,7 @@ def crear_token_acceso(data: dict):
 
 # --- 1. CREAR USUARIO (Con PIN Encriptado) ---
 @router.post("/crear")
-def crear_usuario(u: UsuarioNuevo):
+def crear_usuario(u: UsuarioNuevo, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
@@ -68,6 +71,9 @@ def crear_usuario(u: UsuarioNuevo):
             INSERT INTO usuarios (nombre_completo, rol, codigo_barras_credencial, pin_secreto)
             VALUES (?, ?, ?, ?)
         ''', (u.nombre_completo, u.rol, u.codigo_barras_credencial, pin_seguro))
+        
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'usuarios', u) # Usar prov_id en el actualizar
         conexion.commit()
         conexion.close()
         return {"mensaje": f"Usuario {u.nombre_completo} creado con seguridad de alto nivel."}
@@ -203,7 +209,7 @@ def listar_usuarios():
     
     # --- 5. ACTUALIZAR EMPLEADO ---
 @router.put("/actualizar/{usuario_id}")
-def actualizar_usuario(usuario_id: int, u: UsuarioActualizar):
+def actualizar_usuario(usuario_id: int, u: UsuarioActualizar, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     try:
@@ -219,6 +225,8 @@ def actualizar_usuario(usuario_id: int, u: UsuarioActualizar):
                 UPDATE usuarios SET nombre_completo = ?, rol = ?, codigo_barras_credencial = ? WHERE id = ?
             ''', (u.nombre_completo, u.rol, u.codigo_barras_credencial, usuario_id))
             
+        if os.environ.get("RENDER") is not None:
+            background_tasks.add_task(replicar_fila_a_nube, 'proveedores', usuario_id) # Usar prov_id en el actualizar
         conexion.commit()
         conexion.close()
         return {"mensaje": "Empleado actualizado correctamente"}
