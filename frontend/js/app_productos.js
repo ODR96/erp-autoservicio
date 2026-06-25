@@ -1090,6 +1090,25 @@ async function confirmarMerma() {
     }
 }
 
+async function forzarDescargaRapida() {
+    try {
+        Swal.fire({ title: 'Descargando...', text: 'Buscando cambios en la nube', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        
+        // Acá ponés la ruta exacta que usaba la flechita de tu POS
+        const res = await fetch(`${obtenerBaseUrl()}/sync/actualizar-rapido`, { method: 'POST' }); 
+        
+        if (!res.ok) throw new Error("Fallo en la descarga");
+        
+        // Recargamos las memorias para que la tabla muestre los precios nuevos
+        await cargarCategoriasGlobales();
+        await cargarCatalogo(); 
+        
+        Swal.fire('¡Actualizado!', 'Tu catálogo ya tiene los datos de la nube.', 'success');
+    } catch (e) {
+        Swal.fire('Error', 'No se pudo conectar rápido con la nube.', 'error');
+    }
+}
+
 // --- CARGAR BOTONES POS ---
 async function cargarBotonesPOS() {
     try {
