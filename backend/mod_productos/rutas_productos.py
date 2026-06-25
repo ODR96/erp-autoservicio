@@ -79,11 +79,10 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
             lote_id = cursor.lastrowid # Atrapamos el ID del lote
             
         # 2. Ahora sí, EL ROBOT sube todo a la Nube (si estamos en la oficina)
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'productos', nuevo_id)
-            if lote_id:
+        background_tasks.add_task(replicar_fila_a_nube, 'productos', nuevo_id)
+        if lote_id:
                 # Si se creó un lote, le pedimos al robot que también lo suba
-                background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', lote_id)
+            background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', lote_id)
 
         # Guardamos Combos y Promos
         for comp in producto.componentes_combo:
@@ -202,8 +201,7 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
             cursor.execute("INSERT INTO promociones_volumen (producto_id, cantidad_minima, precio_oferta_unitario) VALUES (?, ?, ?)", (producto_id, r['cantidad'], r['precio']))
             
             
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'productos', producto_id)
+        background_tasks.add_task(replicar_fila_a_nube, 'productos', producto_id)
         
         conexion.commit()
         conexion.close()
@@ -307,8 +305,7 @@ def desactivar_producto(producto_id: int, background_tasks: BackgroundTasks):
     try:
         # En vez de borrar, lo "apagamos" poniendo activo en 0
         cursor.execute("UPDATE productos SET activo = 0 WHERE id = ?", (producto_id,))
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'productos', producto_id)
+        background_tasks.add_task(replicar_fila_a_nube, 'productos', producto_id)
         conexion.commit()
         conexion.close()
         return {"mensaje": "Producto dado de baja del catálogo."}
@@ -531,8 +528,7 @@ def crear_categoria(cat: CategoriaNueva, background_tasks: BackgroundTasks):
         cursor.execute("INSERT INTO categorias_productos (nombre) VALUES (?)", (cat.nombre,))
         nuevo_id = cursor.lastrowid
         
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'categorias_productos', nuevo_id)
+        background_tasks.add_task(replicar_fila_a_nube, 'categorias_productos', nuevo_id)
             
         conexion.commit()
         conexion.close()
@@ -708,8 +704,7 @@ def actualizar_lote_individual(lote_id: int, datos: dict, background_tasks: Back
         ''', (datos['lote'], datos['vence'], datos['stock'], datos['costo'], lote_id))
         
         # --- EL ROBOT EN ACCIÓN (Para que la nube guarde tu cambio de stock) ---
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', lote_id)
+        background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', lote_id)
 
         conexion.commit()
         conexion.close()
