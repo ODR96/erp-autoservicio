@@ -99,6 +99,18 @@ def descargar_novedades_oficina():
             ''', (c['id'], c['nombre'], c.get('palabra_clave',''), c.get('icono','bi-box'), c.get('color_fondo','#ffffff')))
             
             
+        # 7. Promociones y Reglas Mayoristas (Sincronización en Espejo)
+        # Como las promos se borran y se vuelven a crear al editarlas, 
+        # limpiamos el mostrador y bajamos la foto exacta de la nube.
+        cursor.execute("DELETE FROM promociones_volumen")
+        res_promos = nube.table('promociones_volumen').select('producto_id, cantidad_minima, precio_oferta_unitario').execute()
+        
+        for promo in res_promos.data:
+            cursor.execute('''
+                INSERT INTO promociones_volumen (producto_id, cantidad_minima, precio_oferta_unitario) 
+                VALUES (?, ?, ?)
+            ''', (promo['producto_id'], promo.get('cantidad_minima', 0), promo.get('precio_oferta_unitario', 0)))
+            
         local.commit()
         print("✅ ¡Todas las novedades aplicadas en el mostrador!")
     except Exception as e:
