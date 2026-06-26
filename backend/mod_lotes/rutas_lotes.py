@@ -50,9 +50,8 @@ def ingresar_lote(lote: LoteNuevo, background_tasks: BackgroundTasks):
         cursor.execute('UPDATE productos SET costo_sin_iva = ? WHERE id = ?', (lote.costo_real_ingreso, lote.producto_id))
         
         lote_id = cursor.lastrowid
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', lote_id)
-            background_tasks.add_task(replicar_fila_a_nube, 'productos', lote.producto_id) # Porque le cambiaste el costo!
+        background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', lote_id)
+        background_tasks.add_task(replicar_fila_a_nube, 'productos', lote.producto_id) # Porque le cambiaste el costo!
         
         conexion.commit()
         
@@ -114,8 +113,8 @@ def dar_baja_manual(datos: BajaManual, background_tasks: BackgroundTasks):
             (producto_id, lote_id, cantidad, tipo_movimiento, motivo, usuario_id, fecha_hora)
             VALUES (?, ?, ?, 'Baja Manual / Merma', ?, ?, ?)
         ''', (producto_id, datos.lote_id, datos.cantidad_a_bajar, datos.motivo, datos.usuario_id, fecha_actual))
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', datos.lote_id)
+        
+        background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', datos.lote_id)
         conexion.commit()
         conexion.close()
         

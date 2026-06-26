@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime, timezone, timedelta, date
 import os
 from fastapi import BackgroundTasks
-from backend.replicador import replicar_fila_a_nube
+from backend.replicador import replicar_fila_a_nube, replicar_dependencias_producto
 
 router = APIRouter()
 
@@ -80,10 +80,10 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
             
         # 2. Ahora sí, EL ROBOT sube todo a la Nube (si estamos en la oficina)
         background_tasks.add_task(replicar_fila_a_nube, 'productos', nuevo_id)
+        background_tasks.add_task(replicar_dependencias_producto, nuevo_id)
         if lote_id:
                 # Si se creó un lote, le pedimos al robot que también lo suba
             background_tasks.add_task(replicar_fila_a_nube, 'lotes_stock', lote_id)
-
         # Guardamos Combos y Promos
         for comp in producto.componentes_combo:
             cursor.execute("INSERT INTO productos_combos (producto_padre_id, producto_hijo_id, cantidad_hijo) VALUES (?, ?, ?)", (nuevo_id, comp['id'], comp['cantidad']))
@@ -202,6 +202,7 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
             
             
         background_tasks.add_task(replicar_fila_a_nube, 'productos', producto_id)
+        background_tasks.add_task(replicar_dependencias_producto, producto_id)
         
         conexion.commit()
         conexion.close()

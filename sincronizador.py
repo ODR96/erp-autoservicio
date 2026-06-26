@@ -122,8 +122,6 @@ def descargar_novedades_oficina():
 def subir_todo_a_la_nube():
     print("\n🚚 Arrancando el camión de mudanza gigante...\n")
     
-    # 1. Primero descargamos lo que hiciste desde tu casa
-    descargar_novedades_oficina()
     
     # 2. Conectamos a la base local para subir ventas y cajas
     local = sqlite3.connect('autoservicio_20dejunio.db')

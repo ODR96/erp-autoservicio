@@ -21,3 +21,28 @@ def replicar_fila_a_nube(nombre_tabla: str, id_fila: int):
         
     except Exception as e:
         print(f"⚠️ Error del robot replicador en {nombre_tabla}: {e}")
+        
+def replicar_dependencias_producto(producto_id: int):
+    try:
+        conexion = sqlite3.connect('autoservicio_20dejunio.db')
+        conexion.row_factory = sqlite3.Row
+        cursor = conexion.cursor()
+        
+        # Leemos las promos y combos del disco local
+        cursor.execute("SELECT * FROM promociones_volumen WHERE producto_id = ?", (producto_id,))
+        promos = [dict(row) for row in cursor.fetchall()]
+        
+        cursor.execute("SELECT * FROM productos_combos WHERE producto_padre_id = ?", (producto_id,))
+        combos = [dict(row) for row in cursor.fetchall()]
+        conexion.close()
+        
+        # En Supabase: Borramos lo viejo y subimos lo nuevo
+        nube.table('promociones_volumen').delete().eq('producto_id', producto_id).execute()
+        nube.table('productos_combos').delete().eq('producto_padre_id', producto_id).execute()
+        
+        if promos: nube.table('promociones_volumen').insert(promos).execute()
+        if combos: nube.table('productos_combos').insert(combos).execute()
+            
+        print(f"☁️ Reglas Mayoristas y Combos del producto {producto_id} sincronizados.")
+    except Exception as e:
+        print(f"⚠️ Error al replicar combos/promos: {e}")
