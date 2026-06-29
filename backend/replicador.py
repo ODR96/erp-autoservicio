@@ -1,4 +1,5 @@
 import sqlite3
+import urllib.request
 from supabase import create_client, Client
 
 SUPABASE_URL = "https://fxbxkvagnpuoibtifwjw.supabase.co"
@@ -18,6 +19,14 @@ def replicar_fila_a_nube(nombre_tabla: str, id_fila: int):
         # 2. Lo inyectamos directo en el disco duro de Supabase (PostgreSQL)
         nube.table(nombre_tabla).upsert(fila).execute()
         print(f"☁️ [TABLET/OFICINA] '{nombre_tabla}' (ID: {id_fila}) guardado a salvo en Supabase.")
+        # -------------------------------------------------------------
+        # 3. NUEVO: EL GRITO DEL WALKIE-TALKIE A RENDER
+        # -------------------------------------------------------------
+        try:
+            # Le damos 2 segundos. Si Render está dormido, cortamos para no congelar tu mostrador.
+            urllib.request.urlopen("https://erp-autoservicio-backend.onrender.com/sync/aviso-cambio", timeout=2)
+        except Exception:
+            pass # Si da error de timeout, no pasa nada, el ping ya viajó y lo va a despertar.
         
     except Exception as e:
         print(f"⚠️ Error del robot replicador en {nombre_tabla}: {e}")
@@ -44,5 +53,14 @@ def replicar_dependencias_producto(producto_id: int):
         if combos: nube.table('productos_combos').insert(combos).execute()
             
         print(f"☁️ Reglas Mayoristas y Combos del producto {producto_id} sincronizados.")
+        
+        # -------------------------------------------------------------
+        # 3. NUEVO: EL GRITO DEL WALKIE-TALKIE A RENDER
+        # -------------------------------------------------------------
+        try:
+            # Le damos 2 segundos. Si Render está dormido, cortamos para no congelar tu mostrador.
+            urllib.request.urlopen("https://erp-autoservicio-backend.onrender.com/sync/aviso-cambio", timeout=2)
+        except Exception:
+            pass # Si da error de timeout, no pasa nada, el ping ya viajó y lo va a despertar.
     except Exception as e:
         print(f"⚠️ Error al replicar combos/promos: {e}")

@@ -19,7 +19,9 @@ from backend.mod_reportes.rutas_reportes import router as router_reportes
 from backend.mod_usuarios.rutas_usuarios import router as router_usuarios
 from backend.mod_config.rutas_config import router as router_config
 from backend.mod_sincronizacion.rutas_sync import router as rutas_sync
-from sincronizador import subir_todo_a_la_nube
+from sincronizador import subir_todo_a_la_nube, descargar_novedades_oficina 
+from fastapi import BackgroundTasks
+
 
 # --- 0. SALVAVIDAS PARA RENDER ---
 def inicializar_base_vacia():
@@ -137,3 +139,10 @@ def ver_estado_nube():
         }
     except Exception as e:
         return {"estado": "ERROR", "detalle": str(e)}
+    
+# ESTE ES EL RECEPTOR DEL WALKIE-TALKIE
+@app.get("/sync/aviso-cambio")
+def aviso_de_cambio(background_tasks: BackgroundTasks):
+    # Render recibe el grito y actualiza su memoria interna en segundo plano
+    background_tasks.add_task(descargar_novedades_oficina)
+    return {"mensaje": "Enterado. Actualizando la Nube..."}

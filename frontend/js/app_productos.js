@@ -484,9 +484,22 @@ function llenarSelectEtiquetas() {
     }
 }
 function toggleOpcionesA4() {
-    if (document.getElementById('selectEtiquetaFormato').value === "Oferta A4") { document.getElementById('panelExtraA4').classList.remove('d-none'); }
-    else { document.getElementById('panelExtraA4').classList.add('d-none'); document.getElementById('inputEtiquetaTexto').value = ""; document.getElementById('inputEtiquetaPrecioFalso').value = ""; }
+    // Dejamos el panel extra SIEMPRE visible para poder escribir "Bulto x 6" en las cenefas
+    document.getElementById('panelExtraA4').classList.remove('d-none');
+    
+    // Ocultamos solo la caja del "Precio Falso" si es una cenefa normal
+    let inputFalso = document.getElementById('inputEtiquetaPrecioFalso');
+    if (inputFalso && inputFalso.parentElement) {
+        if (document.getElementById('selectEtiquetaFormato').value === "Oferta A4") { 
+            inputFalso.parentElement.classList.remove('d-none'); 
+        } else { 
+            inputFalso.parentElement.classList.add('d-none'); 
+            inputFalso.value = ""; 
+        }
+    }
 }
+
+
 async function cargarColaEtiquetas() { try { const data = await (await fetch(`${obtenerBaseUrl()}/productos/etiquetas/listar`)).json(); colaEtiquetasActual = data.cola || []; dibujarColaEtiquetas(); } catch (e) { } }
 
 async function agregarEtiquetaManual() {
@@ -549,76 +562,114 @@ function lanzarImpresion(filtro) {
     Swal.fire({ title: 'Generando PDF', text: `Preparando ${filtro}...`, icon: 'info', timer: 800, showConfirmButton: false }).then(() => { window.print(); document.getElementById('hojaImpresionLimpia').innerHTML = ''; });
 }
 function prepararHojaImpresion(filtro) {
-            const hoja = document.getElementById('hojaImpresionLimpia');
-            hoja.innerHTML = ''; 
+    const hoja = document.getElementById('hojaImpresionLimpia');
+    hoja.innerHTML = ''; 
 
-            let items = colaEtiquetasActual.filter(i => filtro === "Solo Cenefas" ? i.formato === "Cenefa" : i.formato === "Oferta A4");
+    let items = colaEtiquetasActual.filter(i => filtro === "Solo Cenefas" ? i.formato === "Cenefa" : i.formato === "Oferta A4");
 
-            // PARCHE: Leemos la cantidad de columnas del selector
-            const columnas = parseInt(document.getElementById('selectColumnasCenefa').value) || 2;
+    const columnas = parseInt(document.getElementById('selectColumnasCenefa').value) || 2;
 
-            let contenedorHTML = `<div class="print-container" style="${filtro === 'Solo Cenefas' ? 
-                `display: grid !important; grid-template-columns: repeat(${columnas}, 1fr) !important; gap: 4mm !important; width: 100% !important; max-width: 200mm !important; margin: 0 auto !important; padding-left: 12mm !important; padding-top: 5mm !important;` 
-                : 'display: block !important;'}">`;
+    let contenedorHTML = `<div class="print-container" style="${filtro === 'Solo Cenefas' ? 
+        `display: grid !important; grid-template-columns: repeat(${columnas}, 1fr) !important; gap: 4mm !important; width: 100% !important; max-width: 200mm !important; margin: 0 auto !important; padding-left: 12mm !important; padding-top: 5mm !important;` 
+        : 'display: block !important;'}">`;
 
-            items.forEach((item, idxItem) => {
-                let pMostrar = item.precio_falso ? item.precio_falso : item.precio_venta_final;
-                let pMostrarF = pMostrar.toLocaleString('es-AR', {minimumFractionDigits: 2});
-                let pRealF = item.precio_venta_final.toLocaleString('es-AR', {minimumFractionDigits: 2});
+    // PRIMER BUCLE: Acá se dibuja el diseño HTML
+    items.forEach((item, idxItem) => {
+        let pMostrar = item.precio_falso ? item.precio_falso : item.precio_venta_final;
+        let pMostrarF = pMostrar.toLocaleString('es-AR', {minimumFractionDigits: 2});
+        let pRealF = item.precio_venta_final.toLocaleString('es-AR', {minimumFractionDigits: 2});
 
-                let pG = productosGlobales.find(p => p.id === item.producto_id) || {}; 
-                let tU = pG.unidad_medida && pG.unidad_medida !== "Unidad" ? ` x ${pG.unidad_medida}` : '';
+        let pG = productosGlobales.find(p => p.id === item.producto_id) || {}; 
+        let tU = pG.unidad_medida && pG.unidad_medida !== "Unidad" ? ` x ${pG.unidad_medida}` : '';
 
-                for(let i=0; i < item.cantidad; i++) {
-                    if(item.formato === "Cenefa") {
-                        let prm = pG.cant_promo ? `<div style="background-color:#ffd54f !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; color:black; font-size:10px; font-weight:bold; border-radius:3px; padding:2px; margin-top:-2px; margin-bottom:2px;">Llevando ${pG.cant_promo}: $${pG.precio_promo.toFixed(2)} c/u</div>` : `<div style="font-size:10px; height:14px;"></div>`;
-                        
-                        // PARCHE PRECIOS LARGOS: Si el precio tiene muchos números, bajamos la fuente
-                        let fontSizePrecio = (columnas === 2) ? '34px' : '26px';
-                        if (pMostrarF.length > 8) fontSizePrecio = (columnas === 2) ? '28px' : '22px';
+        for(let i=0; i < item.cantidad; i++) {
+            if(item.formato === "Cenefa") {
+                // 1. Verificamos si hay texto personalizado (Ej: Bulto x 6)
+                let txtBulto = item.texto_personalizado ? `<div style="font-size:9px; font-weight:bold; color:#1a365d; background:#e2e8f0; border-radius:3px; padding:1px 4px; display:inline-block; margin-bottom:2px;">📦 ${item.texto_personalizado}</div>` : '';
+                
+                // 2. Evaluamos qué diseño usar
+                // 2. Evaluamos qué diseño usar
+                        if (pG.cant_promo) {
+                            // --- DISEÑO MAYORISTA BLINDADO (Posición Absoluta) ---
+                            let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
+                            
+                            // Ajuste automático de fuente para que no desborde
+                            let fontSizePromo = (columnas === 2) ? '26px' : '20px';
+                            if (pMayoristaF.length > 7) fontSizePromo = (columnas === 2) ? '22px' : '16px';
 
-                        contenedorHTML += `
-                            <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; padding: 2mm !important; text-align: center; overflow: hidden; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important;">
-                                <div style="font-size:11px; font-weight:bold; white-space:nowrap; overflow:hidden;">${item.nombre}${tU}</div>
-                                <div style="font-size:${fontSizePrecio}; font-weight:900; line-height:1.1; margin-top:2px; letter-spacing:-0.5px; white-space:nowrap; overflow:hidden;">$${pMostrarF}</div>
-                                ${prm}
-                                <svg id="barcode-${idxItem}-${i}" style="height:22px; margin-top:0px;"></svg>
-                                <div style="font-size:8px; margin-top:-2px; color:#555;">20 de Junio</div>
-                            </div>
-                        `;
-                    } else if (item.formato === "Oferta A4") {
-                        // (El código del Cartel A4 se mantiene igual al anterior)
-                        let im = item.foto_temporal ? `<img src="${item.foto_temporal}" style="max-height:280px; max-width:100%; object-fit:contain; margin-bottom:20px; border-radius:15px;">` : '';
-                        let tx = item.texto_personalizado ? `<div style="font-size:40px; font-weight:bold; color:#0d6efd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px;">${item.texto_personalizado}</div>` : '';
-                        let lPie = item.leyenda_inferior ? `<div style="font-size:22px; color:#555 !important; margin-top:auto; padding-top:20px;">* ${item.leyenda_inferior}</div>` : '';
-                        
-                        let bloquePrecio = item.precio_falso ? `
-                            <div style="font-size:50px; font-weight:bold; color:#888 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; text-decoration:line-through; margin-bottom:-10px;">$${pRealF}</div>
-                            <div style="font-size:115px; font-weight:900; color:#dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; line-height:0.9; text-shadow:4px 4px 0px rgba(0,0,0,0.1);">$${pMostrarF}</div>
-                        ` : `<div style="font-size:115px; font-weight:900; color:#198754 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; line-height:0.8; text-shadow:3px 3px 0px rgba(0,0,0,0.1);">$${pMostrarF}</div>`;
+                            contenedorHTML += `
+                                <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden;">
+                                    
+                                    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 6mm; font-size:10px; font-weight:bold; text-align:center; background:white; color:#333; padding-top:1px; border-bottom: 2px solid #74acdf; box-sizing: border-box; white-space:nowrap; overflow:hidden;">
+                                        ${item.nombre}${tU}
+                                    </div>
+                                    
+                                    <div style="position: absolute; top: 6mm; left: 0; width: 55%; height: 32mm; background-color:#1a365d; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 3px solid #eab308; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 2px;">
+                                        <div style="font-size:7px; text-transform:uppercase; color:#93c5fd; line-height: 1;">Precio Mayorista</div>
+                                        <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1.1; margin:2px 0; text-shadow: 1px 1px 0px rgba(0,0,0,0.3);">$${pMayoristaF}</div>
+                                        <div style="font-size:8px; background:#dc2626; padding:1px 4px; border-radius:2px; font-weight:bold; line-height: 1;">Llevando ${pG.cant_promo} o más</div>
+                                    </div>
+                                    
+                                    <div style="position: absolute; top: 6mm; left: 55%; width: 45%; height: 32mm; display:flex; flex-direction:column; justify-content:space-evenly; align-items:center; padding: 2px; box-sizing: border-box; background:white;">
+                                        <div style="text-align:center; line-height: 1; margin-top:2px;">
+                                            <div style="font-size:7px; color:#666;">Precio Minorista</div>
+                                            <div style="font-size:11px; font-weight:bold; color:#333; text-decoration:line-through;">$${pMostrarF}</div>
+                                        </div>
+                                        ${txtBulto}
+                                        <div style="width: 90%; height: 14px; margin-top:auto; margin-bottom: 2px;">
+                                            <svg id="barcode-${idxItem}-${i}" style="width:100%; height:100%; margin:0;"></svg>
+                                        </div>
+                                    </div>
+                                    
+                                </div>
+                            `;
+                        } else {
+                    // --- DISEÑO CLÁSICO (Sobrio y minimalista, sin promo) ---
+                    let fontSizePrecio = (columnas === 2) ? '34px' : '26px';
+                    if (pMostrarF.length > 8) fontSizePrecio = (columnas === 2) ? '28px' : '22px';
 
-                        contenedorHTML += `
-                            <div class="print-cartelA4" style="page-break-after: always !important; width: 100% !important; height: 95vh !important; display: flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; border: 5px solid #198754 !important; padding: 40px !important; box-sizing: border-box !important; background: white !important; clear: both;">
-                                <h1 style="font-size:110px; font-weight:900; color:#dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; text-transform:uppercase; margin-bottom:20px; line-height:0.9;">¡OFERTA!</h1>
-                                ${tx}${im}<h2 style="font-size:65px; font-weight:bold; color:#333 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px; line-height:1.1;">${item.nombre}${tU}</h2>
-                                ${bloquePrecio}${lPie}
-                            </div>
-                        `;
-                    }
+                    contenedorHTML += `
+                        <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; padding: 2mm !important; text-align: center; overflow: hidden; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important;">
+                            <div style="font-size:11px; font-weight:bold; white-space:nowrap; overflow:hidden;">${item.nombre}${tU}</div>
+                            ${txtBulto}
+                            <div style="font-size:${fontSizePrecio}; font-weight:900; line-height:1.1; margin-top:2px; letter-spacing:-0.5px; white-space:nowrap; overflow:hidden;">$${pMostrarF}</div>
+                            <svg id="barcode-${idxItem}-${i}" style="height:22px; margin-top:0px;"></svg>
+                        </div>
+                    `;
                 }
-            });
+            } else if (item.formato === "Oferta A4") {
+                let im = item.foto_temporal ? `<img src="${item.foto_temporal}" style="max-height:280px; max-width:100%; object-fit:contain; margin-bottom:20px; border-radius:15px;">` : '';
+                let tx = item.texto_personalizado ? `<div style="font-size:40px; font-weight:bold; color:#0d6efd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px;">${item.texto_personalizado}</div>` : '';
+                let lPie = item.leyenda_inferior ? `<div style="font-size:22px; color:#555 !important; margin-top:auto; padding-top:20px;">* ${item.leyenda_inferior}</div>` : '';
+                
+                let bloquePrecio = item.precio_falso ? `
+                    <div style="font-size:50px; font-weight:bold; color:#888 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; text-decoration:line-through; margin-bottom:-10px;">$${pRealF}</div>
+                    <div style="font-size:115px; font-weight:900; color:#dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; line-height:0.9; text-shadow:4px 4px 0px rgba(0,0,0,0.1);">$${pMostrarF}</div>
+                ` : `<div style="font-size:115px; font-weight:900; color:#198754 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; line-height:0.8; text-shadow:3px 3px 0px rgba(0,0,0,0.1);">$${pMostrarF}</div>`;
 
-            contenedorHTML += `</div>`;
-            hoja.innerHTML = contenedorHTML;
-
-            items.forEach((item, idxItem) => { 
-                if(item.formato === "Cenefa" && item.codigo_barras) { 
-                    for(let i=0; i < item.cantidad; i++) { 
-                        try { JsBarcode(`#barcode-${idxItem}-${i}`, item.codigo_barras, { format: "CODE128", width: 1.2, height: 22, displayValue: true, fontSize: 10, margin: 0 }); } catch (e) {} 
-                    } 
-                } 
-            });
+                contenedorHTML += `
+                    <div class="print-cartelA4" style="page-break-after: always !important; width: 100% !important; height: 95vh !important; display: flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; border: 5px solid #198754 !important; padding: 40px !important; box-sizing: border-box !important; background: white !important; clear: both;">
+                        <h1 style="font-size:110px; font-weight:900; color:#dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; text-transform:uppercase; margin-bottom:20px; line-height:0.9;">¡OFERTA!</h1>
+                        ${tx}${im}<h2 style="font-size:65px; font-weight:bold; color:#333 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px; line-height:1.1;">${item.nombre}${tU}</h2>
+                        ${bloquePrecio}${lPie}
+                    </div>
+                `;
+            }
         }
+    });
+
+    contenedorHTML += `</div>`;
+    hoja.innerHTML = contenedorHTML;
+
+    // SEGUNDO BUCLE: Acá se inyecta el código de barras real de la pistola
+    items.forEach((item, idxItem) => { 
+        if(item.formato === "Cenefa" && item.codigo_barras) { 
+            for(let i=0; i < item.cantidad; i++) { 
+                try { JsBarcode(`#barcode-${idxItem}-${i}`, item.codigo_barras, { format: "CODE128", width: 1.2, height: 22, displayValue: true, fontSize: 10, margin: 0 }); } catch (e) {} 
+            } 
+        } 
+    });
+}
 
 // ==========================================
 // 3. ABM Y CÁLCULOS
@@ -1488,7 +1539,7 @@ document.addEventListener('keydown', async (e) => {
         if (bufferEscaneo.length > 2) { 
             try {
                 Swal.fire({ title: 'Buscando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                const resp = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${query}`);
+                const resp = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${bufferEscaneo}`);
                 const prod = await res.json();
 
                 if (prod.error) {
