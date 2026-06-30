@@ -643,10 +643,10 @@ function prepararHojaImpresion(filtro) {
                                     
                                 </div>
                             `;
-                        } else {
-                            // --- DISEÑO CLÁSICO CARGADO (Estilo Supermercado) ---
-                            let fontSizePrecio = (columnas === 2) ? '30px' : '24px';
-                            if (pMostrarF.length >= 7) fontSizePrecio = (columnas === 2) ? '24px' : '18px';
+} else {
+                            // --- DISEÑO CLÁSICO (A pedido del jefe) ---
+                            let fontSizePrecio = (columnas === 2) ? '34px' : '26px';
+                            if (pMostrarF.length >= 7) fontSizePrecio = (columnas === 2) ? '26px' : '20px';
 
                             contenedorHTML += `
                                 <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden;">
@@ -655,23 +655,18 @@ function prepararHojaImpresion(filtro) {
                                         ${item.nombre}${tU}
                                     </div>
                                     
-                                    <div style="position: absolute; top: 6mm; left: 0; width: 100%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; padding: 2px 4px; box-sizing: border-box; background:white;">
-                                        
-                                        <div style="display:flex; justify-content:space-between; align-items:flex-start; width:100%;">
-                                            <div style="font-size:5px; color:#666; text-align:left; line-height:1.2;">Cód: ${item.codigo_barras || 'S/C'}<br>Origen: Argentina</div>
-                                            <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase;">Autoservicio 20 de Junio</div>
-                                        </div>
+                                    <div style="position: absolute; top: 6mm; left: 0; width: 100%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding: 2px 4px; box-sizing: border-box; background:white;">
                                         
                                         <div style="text-align:center; margin-top:auto; margin-bottom:auto;">
-                                            <div style="font-size:6px; color:#666; text-transform:uppercase; margin-bottom:1px;">Precio Unitario</div>
+                                            ${txtBulto}
                                             <div style="font-size:${fontSizePrecio}; font-weight:900; line-height:1; letter-spacing:-0.5px; color:#333;">$${pMostrarF}</div>
                                         </div>
                                         
-                                        <div style="display:flex; justify-content:space-between; align-items:flex-end; width:100%;">
-                                            <div style="flex:1; text-align:left;">${txtBulto}</div>
-                                            <div style="width: 60%; height: 16px; margin-bottom: 1px; display:flex; justify-content:flex-end; overflow:hidden;">
+                                        <div style="width: 100%; display:flex; flex-direction:column; align-items:center;">
+                                            <div style="width: 70%; height: 16px; margin-bottom: 1px; display:flex; justify-content:center; overflow:hidden;">
                                                 <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
                                             </div>
+                                            <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px;">Autoservicio 20 de Junio</div>
                                         </div>
 
                                     </div>
