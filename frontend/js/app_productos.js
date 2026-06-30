@@ -603,20 +603,14 @@ function prepararHojaImpresion(filtro) {
                 let textoCaja = (pG.unidades_por_bulto && pG.unidades_por_bulto > 1) ? `Bulto cerrado x ${pG.unidades_por_bulto} un.` : item.texto_personalizado;
 
                 let txtBulto = textoCaja ? `<div style="font-size:7.5px; font-weight:bold; color:#1a365d; background:#e2e8f0; border-radius:3px; padding:2px 5px; display:inline-block; margin-bottom:3px; text-transform:uppercase; letter-spacing:0.5px;">📦 ${textoCaja}</div>` : '';                
-                // 2. Evaluamos qué diseño usar
-                // 2. Evaluamos qué diseño usar
+// 2. Evaluamos qué diseño usar
                         if (pG.cant_promo) {
-                            // --- DISEÑO MAYORISTA (Balanceado 48/52 y sin tachar) ---
+                            // --- DISEÑO MAYORISTA (Bloque Azul ancho, texto contenido y sin tachar) ---
                             let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
                             
-                            // Truco: Achicamos dinámicamente y comprimimos a lo ancho si el número es muy largo
-                            let fontSizePromo = (columnas === 2) ? '26px' : '20px';
-                            let compresionText = '';
-                            if (pMayoristaF.length >= 7) fontSizePromo = (columnas === 2) ? '22px' : '16px';
-                            if (pMayoristaF.length >= 9) {
-                                fontSizePromo = (columnas === 2) ? '19px' : '15px';
-                                compresionText = 'transform: scaleX(0.85); transform-origin: center;';
-                            }
+                            // Letra más chica para garantizar que nunca desborde
+                            let fontSizePromo = (columnas === 2) ? '24px' : '18px';
+                            if (pMayoristaF.length >= 7) fontSizePromo = (columnas === 2) ? '18px' : '14px';
 
                             contenedorHTML += `
                                 <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden;">
@@ -625,24 +619,24 @@ function prepararHojaImpresion(filtro) {
                                         ${item.nombre}${tU}
                                     </div>
                                     
-                                    <div style="position: absolute; top: 6mm; left: 0; width: 48%; height: 32mm; background-color:#1a365d; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 3px solid #eab308; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 2px;">
-                                        <div style="font-size:6px; text-transform:uppercase; color:#93c5fd; letter-spacing: 0.5px;">Precio Mayorista</div>
-                                        <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1; margin:3px 0; letter-spacing:-1px; white-space:nowrap; ${compresionText}">$${pMayoristaF}</div>
+                                    <div style="position: absolute; top: 6mm; left: 0; width: 55%; height: 32mm; background-color:#1a365d; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 3px solid #eab308; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 2px;">
+                                        <div style="font-size:6.5px; text-transform:uppercase; color:#93c5fd; letter-spacing: 0.5px;">Precio Mayorista</div>
+                                        <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1; margin:3px 0; letter-spacing:-0.5px; white-space:nowrap;">$${pMayoristaF}</div>
                                         <div style="font-size:7px; background:#dc2626; padding:2px 5px; border-radius:3px; font-weight:bold; text-transform:uppercase;">Llevando ${pG.cant_promo} o más</div>
                                     </div>
                                     
-                                    <div style="position: absolute; top: 6mm; left: 55%; width: 45%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding: 2px 4px; box-sizing: border-box; background:white;">
+                                    <div style="position: absolute; top: 6mm; left: 55%; width: 45%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding: 2px; box-sizing: border-box; background:white;">
                                         
-                                        <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px; margin-top:2px;">Autoservicio 20 de Junio</div>
+                                        <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px; margin-top:1px;">Autoservicio 20 de Junio</div>
 
                                         <div style="text-align:center; margin-top:auto; margin-bottom:auto;">
-                                            <div style="font-size:7px; color:#666; text-transform:uppercase;">Precio Minorista</div>
-                                            <div style="font-size:13px; font-weight:bold; color:#333; text-decoration:line-through;">$${pMostrarF}</div>
+                                            <div style="font-size:6px; color:#666; text-transform:uppercase;">Precio Minorista</div>
+                                            <div style="font-size:14px; font-weight:bold; color:#333;">$${pMostrarF}</div>
                                         </div>
                                         
                                         ${txtBulto}
                                         
-                                        <div style="width: 100%; height: 18px; margin-bottom: 2px; display:flex; justify-content:center; overflow:hidden;">
+                                        <div style="width: 100%; height: 16px; margin-bottom: 2px; display:flex; justify-content:center; overflow:hidden;">
                                             <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
                                         </div>
                                     </div>
@@ -650,19 +644,40 @@ function prepararHojaImpresion(filtro) {
                                 </div>
                             `;
                         } else {
-                    // --- DISEÑO CLÁSICO (Sobrio y minimalista, sin promo) ---
-                    let fontSizePrecio = (columnas === 2) ? '34px' : '26px';
-                    if (pMostrarF.length > 8) fontSizePrecio = (columnas === 2) ? '28px' : '22px';
+                            // --- DISEÑO CLÁSICO CARGADO (Estilo Supermercado) ---
+                            let fontSizePrecio = (columnas === 2) ? '30px' : '24px';
+                            if (pMostrarF.length >= 7) fontSizePrecio = (columnas === 2) ? '24px' : '18px';
 
-                    contenedorHTML += `
-                        <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; padding: 2mm !important; text-align: center; overflow: hidden; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important;">
-                            <div style="font-size:11px; font-weight:bold; white-space:nowrap; overflow:hidden;">${item.nombre}${tU}</div>
-                            ${txtBulto}
-                            <div style="font-size:${fontSizePrecio}; font-weight:900; line-height:1.1; margin-top:2px; letter-spacing:-0.5px; white-space:nowrap; overflow:hidden;">$${pMostrarF}</div>
-                            <svg id="barcode-${idxItem}-${i}" style="height:22px; margin-top:0px;"></svg>
-                        </div>
-                    `;
-                }
+                            contenedorHTML += `
+                                <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden;">
+                                    
+                                    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 6mm; font-size:10px; font-weight:bold; text-align:center; background:white; color:#333; padding-top:1px; border-bottom: 2px solid #74acdf; box-sizing: border-box; white-space:nowrap; overflow:hidden;">
+                                        ${item.nombre}${tU}
+                                    </div>
+                                    
+                                    <div style="position: absolute; top: 6mm; left: 0; width: 100%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; padding: 2px 4px; box-sizing: border-box; background:white;">
+                                        
+                                        <div style="display:flex; justify-content:space-between; align-items:flex-start; width:100%;">
+                                            <div style="font-size:5px; color:#666; text-align:left; line-height:1.2;">Cód: ${item.codigo_barras || 'S/C'}<br>Origen: Argentina</div>
+                                            <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase;">Autoservicio 20 de Junio</div>
+                                        </div>
+                                        
+                                        <div style="text-align:center; margin-top:auto; margin-bottom:auto;">
+                                            <div style="font-size:6px; color:#666; text-transform:uppercase; margin-bottom:1px;">Precio Unitario</div>
+                                            <div style="font-size:${fontSizePrecio}; font-weight:900; line-height:1; letter-spacing:-0.5px; color:#333;">$${pMostrarF}</div>
+                                        </div>
+                                        
+                                        <div style="display:flex; justify-content:space-between; align-items:flex-end; width:100%;">
+                                            <div style="flex:1; text-align:left;">${txtBulto}</div>
+                                            <div style="width: 60%; height: 16px; margin-bottom: 1px; display:flex; justify-content:flex-end; overflow:hidden;">
+                                                <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
+                                            </div>
+                                        </div>
+
+                                    </div>
+                                </div>
+                            `;
+                        }
             } else if (item.formato === "Oferta A4") {
                 let im = item.foto_temporal ? `<img src="${item.foto_temporal}" style="max-height:280px; max-width:100%; object-fit:contain; margin-bottom:20px; border-radius:15px;">` : '';
                 let tx = item.texto_personalizado ? `<div style="font-size:40px; font-weight:bold; color:#0d6efd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px;">${item.texto_personalizado}</div>` : '';

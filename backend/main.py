@@ -23,31 +23,49 @@ from sincronizador import subir_todo_a_la_nube, descargar_novedades_oficina
 from fastapi import BackgroundTasks
 
 
+# --- 0. SALVAVIDAS Y AUTO-PARCHES PARA RENDER Y LOCAL ---
 def inicializar_base_vacia():
     es_nube = os.environ.get("RENDER") is not None
+    
+    # 1. Si es Render, primero baja el archivo viejo (que todavía no tiene la columna)
     if es_nube:
-        print("📥 [Render] Despertando: Recuperando memoria desde Supabase...")
+        print("📥 [Render] Despertando: Recuperando memoria desde Supabase Storage...")
         try:
             from supabase import create_client
             nube = create_client("https://fxbxkvagnpuoibtifwjw.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4YnhrdmFnbnB1b2lidGlmd2p3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3OTU5NCwiZXhwIjoyMDk2OTU1NTk0fQ.aO0s-A3FwMExlJezGNGu_EUNINa8vgE7gHUbBTmRLpY")            
-            
-            # PASO B: Bajar el archivo físico (Esqueleto completo con historial de ventas)
             res = nube.storage.from_('backups').download('autoservicio_20dejunio.db')
             with open('autoservicio_20dejunio.db', 'wb') as f:
                 f.write(res)
             print("✅ [Render] Backup base clonado exitosamente.")
+        except Exception as e:
+            print("⚠️ Aviso: No se encontró backup físico aún.")
 
-            # PASO A: Bajar las novedades (Precios y promos de los últimos minutos)
+    # 2. EL AUTO-PARCHE (Se ejecuta SIEMPRE, tanto en la Nube como en el Mostrador local)
+    try:
+        conexion = sqlite3.connect('autoservicio_20dejunio.db')
+        # El salvavidas original de usuarios
+        conexion.execute("CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre_completo TEXT, rol TEXT, codigo_barras_credencial TEXT, pin_secreto TEXT, estado TEXT DEFAULT 'ACTIVO')")
+        
+        # LA MAGIA: Intenta agregar la columna. Si la columna ya existe, SQLite tira error y sigue callado sin romper nada.
+        try:
+            conexion.execute("ALTER TABLE productos ADD COLUMN unidades_por_bulto INTEGER DEFAULT 1")
+            print("🔧 [Auto-Parche] Evolución aplicada: Columna 'unidades_por_bulto' agregada a SQLite.")
+        except:
+            pass # Si falla es porque la columna ya existe, está todo perfecto.
+            
+        conexion.commit()
+        conexion.close()
+    except Exception as e:
+        print("⚠️ Error en el auto-parche:", e)
+
+    # 3. Si es Render, ahora que la base ya está parchada, puede bajar los precios sin que explote
+    if es_nube:
+        try:
             print("📥 [Render] Aplicando novedades de último minuto...")
             descargar_novedades_oficina()
             print("✅ [Render] Memoria 100% curada y actualizada al segundo.")
-
         except Exception as e:
-            print(f"⚠️ Error al descargar el clon: {e}")
-            # Si falla, armamos el salvavidas
-            conexion = sqlite3.connect('autoservicio_20dejunio.db')
-            conexion.execute("CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre_completo TEXT, rol TEXT, codigo_barras_credencial TEXT, pin_secreto TEXT, estado TEXT DEFAULT 'ACTIVO')")
-            conexion.close()
+            print(f"⚠️ Error al aplicar novedades: {e}")
 
 # --- 1. DEFINIMOS EL LATIDO INTELIGENTE ---
 async def latido_sincronizacion():
