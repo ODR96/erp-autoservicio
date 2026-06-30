@@ -23,25 +23,31 @@ from sincronizador import subir_todo_a_la_nube, descargar_novedades_oficina
 from fastapi import BackgroundTasks
 
 
-# --- 0. SALVAVIDAS PARA RENDER ---
 def inicializar_base_vacia():
     es_nube = os.environ.get("RENDER") is not None
     if es_nube:
-        print("📥 [Render] Descargando la base de datos maestra desde Supabase Storage...")
+        print("📥 [Render] Despertando: Recuperando memoria desde Supabase...")
         try:
             from supabase import create_client
-            # Acá pegá las mismas dos credenciales que tenés en tu sincronizador.py
-# Credenciales reales para que Render pueda descargar tu base de datos
             nube = create_client("https://fxbxkvagnpuoibtifwjw.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4YnhrdmFnbnB1b2lidGlmd2p3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3OTU5NCwiZXhwIjoyMDk2OTU1NTk0fQ.aO0s-A3FwMExlJezGNGu_EUNINa8vgE7gHUbBTmRLpY")            
+            
+            # PASO B: Bajar el archivo físico (Esqueleto completo con historial de ventas)
             res = nube.storage.from_('backups').download('autoservicio_20dejunio.db')
             with open('autoservicio_20dejunio.db', 'wb') as f:
                 f.write(res)
-            print("✅ [Render] Base clonada. ¡Vercel ya tiene todos los productos y cajas!")
+            print("✅ [Render] Backup base clonado exitosamente.")
+
+            # PASO A: Bajar las novedades (Precios y promos de los últimos minutos)
+            print("📥 [Render] Aplicando novedades de último minuto...")
+            descargar_novedades_oficina()
+            print("✅ [Render] Memoria 100% curada y actualizada al segundo.")
+
         except Exception as e:
             print(f"⚠️ Error al descargar el clon: {e}")
-            # Si falla (ej: es la primera vez y el local aún no subió el archivo), armamos el salvavidas
+            # Si falla, armamos el salvavidas
             conexion = sqlite3.connect('autoservicio_20dejunio.db')
             conexion.execute("CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre_completo TEXT, rol TEXT, codigo_barras_credencial TEXT, pin_secreto TEXT, estado TEXT DEFAULT 'ACTIVO')")
+            conexion.close()
 
 # --- 1. DEFINIMOS EL LATIDO INTELIGENTE ---
 async def latido_sincronizacion():

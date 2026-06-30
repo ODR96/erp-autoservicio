@@ -355,6 +355,11 @@ function filtrarCatalogoFront() {
     
     // Le pasamos la lista filtrada a tu tabla para que dibuje
     dibujarTablaCatalogo(filtrados, estSelect);
+    let alturaGuardada = sessionStorage.getItem('alturaScroll');
+if (alturaGuardada) {
+    setTimeout(() => { window.scrollTo(0, parseInt(alturaGuardada)); }, 100);
+    sessionStorage.removeItem('alturaScroll');
+}
 }
 
 // Variables globales para la paginación (ponelas arriba de todo en tu archivo)
@@ -1080,6 +1085,7 @@ async function guardarProductoCompleto() {
         sessionStorage.setItem('paginaRetorno', paginaActualProd);
         cargarCatalogo(); 
         cargarColaEtiquetas();
+        sessionStorage.setItem('alturaScroll', window.scrollY);
         bootstrap.Modal.getInstance(document.getElementById('modalNuevoProducto')).hide();
     } catch (e) {
         Swal.fire('Error al guardar', e.message, 'error');

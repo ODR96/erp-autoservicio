@@ -112,6 +112,18 @@ def descargar_novedades_oficina():
             ''', (promo['producto_id'], promo.get('cantidad_minima', 0), promo.get('precio_oferta_unitario', 0)))
             
         local.commit()
+        
+        # 8. Descargar los Combos
+        cursor.execute("DELETE FROM productos_combos")
+        res_combos = nube.table('productos_combos').select('*').execute()
+        for c in res_combos.data:
+            cursor.execute('''
+                INSERT INTO productos_combos (producto_padre_id, producto_hijo_id, cantidad_hijo) 
+                VALUES (?, ?, ?)
+            ''', (c['producto_padre_id'], c['producto_hijo_id'], c['cantidad_hijo']))
+            
+        local.commit()
+        
         print("✅ ¡Todas las novedades aplicadas en el mostrador!")
     except Exception as e:
         print(f"⚠️ Error descargando novedades: {e}")
