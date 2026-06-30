@@ -339,13 +339,21 @@ async function generarCodigoInterno() {
 }
 
 function filtrarCatalogoFront() {
-    // ¡ACÁ ESTÁ LA MAGIA! Cada vez que tocás una tecla o cambiás un filtro, volvemos a la página 1
-    paginaActualProd = 1;
+    // VERIFICAMOS SI HAY UNA PÁGINA GUARDADA EN MEMORIA
+    let paginaGuardada = sessionStorage.getItem('paginaRetorno');
+    
+    if (paginaGuardada) {
+        paginaActualProd = parseInt(paginaGuardada);
+        sessionStorage.removeItem('paginaRetorno'); // La borramos para que no quede trabada
+    } else {
+        // Si no hay memoria, significa que estás buscando algo, volvemos a la 1
+        paginaActualProd = 1;
+    }
 
     let filtrados = obtenerProductosFiltradosActuales();
     let estSelect = document.getElementById('filtroEstado').value;
     
-    // Le pasamos la lista filtrada a tu tabla para que dibuje solo los primeros 50
+    // Le pasamos la lista filtrada a tu tabla para que dibuje
     dibujarTablaCatalogo(filtrados, estSelect);
 }
 
@@ -1069,6 +1077,7 @@ async function guardarProductoCompleto() {
         if (data.error) throw new Error(data.error); 
         
         await Swal.fire('¡Éxito!', 'Guardado correctamente.', 'success'); 
+        sessionStorage.setItem('paginaRetorno', paginaActualProd);
         cargarCatalogo(); 
         cargarColaEtiquetas();
         bootstrap.Modal.getInstance(document.getElementById('modalNuevoProducto')).hide();
@@ -1077,7 +1086,7 @@ async function guardarProductoCompleto() {
     }
 }
 
-async function desactivarProducto(id, n) { if ((await Swal.fire({ title: '¿Ocultar?', icon: 'warning', showCancelButton: true })).isConfirmed) { await fetch(`${obtenerBaseUrl()}/productos/eliminar/${id}`, { method: 'DELETE' }); cargarCatalogo(); cargarListadoCombos(); } }
+async function desactivarProducto(id, n) { if ((await Swal.fire({ title: '¿Ocultar?', icon: 'warning', showCancelButton: true })).isConfirmed) { await fetch(`${obtenerBaseUrl()}/productos/eliminar/${id}`, { method: 'DELETE' }); sessionStorage.setItem('paginaRetorno', paginaActualProd); cargarCatalogo(); cargarListadoCombos(); } }
 async function restaurarProducto(id, n) { if ((await Swal.fire({ title: '¿Restaurar?', icon: 'question', showCancelButton: true })).isConfirmed) { await fetch(`${obtenerBaseUrl()}/productos/restaurar/${id}`, { method: 'PUT' }); cargarCatalogo(); cargarListadoCombos(); } }
 
 // ==========================================
