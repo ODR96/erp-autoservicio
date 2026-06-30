@@ -671,22 +671,58 @@ function prepararHojaImpresion(filtro) {
                             `;
                         }
             } else if (item.formato === "Oferta A4") {
-                let im = item.foto_temporal ? `<img src="${item.foto_temporal}" style="max-height:280px; max-width:100%; object-fit:contain; margin-bottom:20px; border-radius:15px;">` : '';
-                let tx = item.texto_personalizado ? `<div style="font-size:40px; font-weight:bold; color:#0d6efd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px;">${item.texto_personalizado}</div>` : '';
-                let lPie = item.leyenda_inferior ? `<div style="font-size:22px; color:#555 !important; margin-top:auto; padding-top:20px;">* ${item.leyenda_inferior}</div>` : '';
                 
-                let bloquePrecio = item.precio_falso ? `
-                    <div style="font-size:50px; font-weight:bold; color:#888 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; text-decoration:line-through; margin-bottom:-10px;">$${pRealF}</div>
-                    <div style="font-size:115px; font-weight:900; color:#dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; line-height:0.9; text-shadow:4px 4px 0px rgba(0,0,0,0.1);">$${pMostrarF}</div>
-                ` : `<div style="font-size:115px; font-weight:900; color:#198754 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; line-height:0.8; text-shadow:3px 3px 0px rgba(0,0,0,0.1);">$${pMostrarF}</div>`;
+                if (pG.cant_promo) {
+                    // --- NUEVO: DISEÑO A4 GIGANTE PARA PROMOCIÓN MAYORISTA ---
+                    let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
+                    
+                    contenedorHTML += `
+                        <div class="print-cartelA4" style="page-break-after: always !important; width: 100% !important; height: 95vh !important; display: flex !important; flex-direction: column !important; box-sizing: border-box !important; background: white !important; border: 6px solid #1a365d !important; overflow:hidden;">
+                            
+                            <div style="flex: 1.2; background-color: #1a365d; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; padding: 20px; border-bottom: 15px solid #eab308; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
+                                <div style="font-size: 50px; text-transform: uppercase; color: #93c5fd; letter-spacing: 2px;">Precio Mayorista</div>
+                                <div style="font-size: 200px; font-weight: 900; line-height: 1; margin: 10px 0; letter-spacing:-5px;">$${pMayoristaF}</div>
+                                <div style="font-size: 45px; background: #dc2626; padding: 15px 40px; border-radius: 20px; font-weight: bold; text-transform: uppercase; box-shadow: 6px 6px 0px rgba(0,0,0,0.2);">Llevando ${pG.cant_promo} o más</div>
+                            </div>
+                            
+                            <div style="flex: 0.8; background-color: white; display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 40px; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
+                                <h2 style="font-size: 75px; font-weight: 900; color: #333 !important; text-align: center; margin-bottom: 10px; line-height: 1;">${item.nombre}${tU}</h2>
+                                
+                                <div style="text-align: center; margin: auto 0;">
+                                    <div style="font-size: 35px; color: #666; text-transform: uppercase;">Precio Minorista Unitario</div>
+                                    <div style="font-size: 90px; font-weight: bold; color: #333 !important; line-height:1; margin-bottom: 15px;">$${pMostrarF}</div>
+                                    ${textoCaja ? `<div style="font-size: 25px; font-weight: bold; color: #1a365d; background: #e2e8f0; padding: 8px 20px; border-radius: 8px; display: inline-block; text-transform: uppercase;">📦 ${textoCaja}</div>` : ''}
+                                    ${item.leyenda_inferior ? `<div style="font-size:30px; color:#555 !important; margin-top:20px;">* ${item.leyenda_inferior}</div>` : ''}
+                                </div>
+                                
+                                <div style="width: 100%; display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px;">
+                                    <div style="font-size: 30px; font-weight: 900; color: #1a365d; text-transform: uppercase; letter-spacing: 1px;">Autoservicio 20 de Junio</div>
+                                    <div style="width: 450px; height: 90px; overflow: hidden; display: flex; justify-content: flex-end;">
+                                        <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // --- DISEÑO A4 CLÁSICO (El cartel rojo normal) ---
+                    let im = item.foto_temporal ? `<img src="${item.foto_temporal}" style="max-height:280px; max-width:100%; object-fit:contain; margin-bottom:20px; border-radius:15px;">` : '';
+                    let tx = item.texto_personalizado ? `<div style="font-size:40px; font-weight:bold; color:#0d6efd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px;">${item.texto_personalizado}</div>` : '';
+                    let lPie = item.leyenda_inferior ? `<div style="font-size:22px; color:#555 !important; margin-top:auto; padding-top:20px;">* ${item.leyenda_inferior}</div>` : '';
+                    
+                    let bloquePrecio = item.precio_falso ? `
+                        <div style="font-size:50px; font-weight:bold; color:#888 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; text-decoration:line-through; margin-bottom:-10px;">$${pRealF}</div>
+                        <div style="font-size:115px; font-weight:900; color:#dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; line-height:0.9; text-shadow:4px 4px 0px rgba(0,0,0,0.1);">$${pMostrarF}</div>
+                    ` : `<div style="font-size:115px; font-weight:900; color:#198754 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; line-height:0.8; text-shadow:3px 3px 0px rgba(0,0,0,0.1);">$${pMostrarF}</div>`;
 
-                contenedorHTML += `
-                    <div class="print-cartelA4" style="page-break-after: always !important; width: 100% !important; height: 95vh !important; display: flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; border: 5px solid #198754 !important; padding: 40px !important; box-sizing: border-box !important; background: white !important; clear: both;">
-                        <h1 style="font-size:110px; font-weight:900; color:#dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; text-transform:uppercase; margin-bottom:20px; line-height:0.9;">¡OFERTA!</h1>
-                        ${tx}${im}<h2 style="font-size:65px; font-weight:bold; color:#333 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px; line-height:1.1;">${item.nombre}${tU}</h2>
-                        ${bloquePrecio}${lPie}
-                    </div>
-                `;
+                    contenedorHTML += `
+                        <div class="print-cartelA4" style="page-break-after: always !important; width: 100% !important; height: 95vh !important; display: flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; border: 5px solid #198754 !important; padding: 40px !important; box-sizing: border-box !important; background: white !important; clear: both;">
+                            <h1 style="font-size:110px; font-weight:900; color:#dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; text-transform:uppercase; margin-bottom:20px; line-height:0.9;">¡OFERTA!</h1>
+                            ${tx}${im}<h2 style="font-size:65px; font-weight:bold; color:#333 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px; line-height:1.1;">${item.nombre}${tU}</h2>
+                            ${bloquePrecio}${lPie}
+                        </div>
+                    `;
+                }
             }
         }
     });
