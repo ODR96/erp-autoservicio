@@ -114,9 +114,10 @@ def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, aler
     cursor.execute('''
         SELECT 
             p.id, p.codigo_barras, p.nombre, p.categoria_id, p.unidad_medida, p.proveedor_habitual_id,
-            p.costo_sin_iva, p.porcentaje_iva, p.precio_venta_final, p.dias_alerta_vencimiento, p.stock_minimo_alerta,
+            p.costo_sin_iva, p.porcentaje_iva, p.precio_venta_final, p.dias_alerta_vencimiento, p.stock_minimo_alerta, p.unidades_por_bulto,
             (SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo') as stock_total,
-(           SELECT COUNT(id) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible != 0) as cantidad_lotes,            (SELECT precio_oferta_unitario FROM promociones_volumen WHERE producto_id = p.id LIMIT 1) as precio_promo,
+            (SELECT COUNT(id) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible != 0) as cantidad_lotes,            
+            (SELECT precio_oferta_unitario FROM promociones_volumen WHERE producto_id = p.id LIMIT 1) as precio_promo,
             (SELECT cantidad_minima FROM promociones_volumen WHERE producto_id = p.id LIMIT 1) as cant_promo,
             (SELECT MIN(fecha_vencimiento) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible > 0) as prox_vencimiento,
             (SELECT COUNT(*) FROM productos_combos WHERE producto_padre_id = p.id) as es_combo

@@ -644,32 +644,29 @@ function prepararHojaImpresion(filtro) {
                                 </div>
                             `;
 } else {
-                            // --- DISEÑO CLÁSICO (A pedido del jefe) ---
+                            // --- DISEÑO CLÁSICO (Restaurado al original + Nombre abajo) ---
                             let fontSizePrecio = (columnas === 2) ? '34px' : '26px';
-                            if (pMostrarF.length >= 7) fontSizePrecio = (columnas === 2) ? '26px' : '20px';
+                            if (pMostrarF.length >= 7) fontSizePrecio = (columnas === 2) ? '28px' : '20px';
 
                             contenedorHTML += `
-                                <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden;">
+                                <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 3px;">
                                     
-                                    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 6mm; font-size:10px; font-weight:bold; text-align:center; background:white; color:#333; padding-top:1px; border-bottom: 2px solid #74acdf; box-sizing: border-box; white-space:nowrap; overflow:hidden;">
+                                    <div style="width: 100%; font-size:10px; font-weight:bold; text-align:center; color:#333; border-bottom: 2px solid #74acdf; padding-bottom: 1px; white-space:nowrap; overflow:hidden;">
                                         ${item.nombre}${tU}
                                     </div>
                                     
-                                    <div style="position: absolute; top: 6mm; left: 0; width: 100%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding: 2px 4px; box-sizing: border-box; background:white;">
-                                        
-                                        <div style="text-align:center; margin-top:auto; margin-bottom:auto;">
-                                            ${txtBulto}
-                                            <div style="font-size:${fontSizePrecio}; font-weight:900; line-height:1; letter-spacing:-0.5px; color:#333;">$${pMostrarF}</div>
-                                        </div>
-                                        
-                                        <div style="width: 100%; display:flex; flex-direction:column; align-items:center;">
-                                            <div style="width: 70%; height: 16px; margin-bottom: 1px; display:flex; justify-content:center; overflow:hidden;">
-                                                <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
-                                            </div>
-                                            <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px;">Autoservicio 20 de Junio</div>
-                                        </div>
-
+                                    <div style="margin-top: 2px;">${txtBulto}</div>
+                                    
+                                    <div style="font-size:${fontSizePrecio}; font-weight:900; line-height:1; letter-spacing:-0.5px; color:#333; margin-top: auto; margin-bottom: auto;">
+                                        $${pMostrarF}
                                     </div>
+                                    
+                                    <div style="width: 80%; height: 16px; display:flex; justify-content:center; overflow:hidden; margin-bottom: 1px;">
+                                        <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
+                                    </div>
+                                    
+                                    <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px;">Autoservicio 20 de Junio</div>
+
                                 </div>
                             `;
                         }
