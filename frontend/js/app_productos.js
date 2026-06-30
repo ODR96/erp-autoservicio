@@ -597,132 +597,99 @@ function prepararHojaImpresion(filtro) {
         let tU = pG.unidad_medida && pG.unidad_medida !== "Unidad" ? ` x ${pG.unidad_medida}` : '';
 
         for(let i=0; i < item.cantidad; i++) {
+            
+            // LA CAJA MÁGICA: Si hay bulto > 1, se arma sola. Si no, usa el texto manual.
+            let textoCaja = (pG.unidades_por_bulto && pG.unidades_por_bulto > 1) ? `Bulto cerrado x ${pG.unidades_por_bulto} un.` : item.texto_personalizado;
+            let txtBulto = textoCaja ? `<div style="font-size:7.5px; font-weight:bold; color:#1a365d; background:#e2e8f0; border-radius:3px; padding:2px 5px; display:inline-block; margin-bottom:3px; text-transform:uppercase; letter-spacing:0.5px;">📦 ${textoCaja}</div>` : '';                
+
             if(item.formato === "Cenefa") {
-                // 1. Verificamos si hay texto personalizado (Ej: Bulto x 6)
-// Si le pusiste más de 1 unidad al bulto, lo arma automático. Si no, usa el texto personalizado por si querés forzar otra frase.
-                let textoCaja = (pG.unidades_por_bulto && pG.unidades_por_bulto > 1) ? `Bulto cerrado x ${pG.unidades_por_bulto} un.` : item.texto_personalizado;
-
-                let txtBulto = textoCaja ? `<div style="font-size:7.5px; font-weight:bold; color:#1a365d; background:#e2e8f0; border-radius:3px; padding:2px 5px; display:inline-block; margin-bottom:3px; text-transform:uppercase; letter-spacing:0.5px;">📦 ${textoCaja}</div>` : '';                
-// 2. Evaluamos qué diseño usar
-                        if (pG.cant_promo) {
-                            // --- DISEÑO MAYORISTA (Bloque Azul ancho, texto contenido y sin tachar) ---
-                            let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
-                            
-                            // Letra más chica para garantizar que nunca desborde
-                            let fontSizePromo = (columnas === 2) ? '24px' : '18px';
-                            if (pMayoristaF.length >= 7) fontSizePromo = (columnas === 2) ? '18px' : '14px';
-
-                            contenedorHTML += `
-                                <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden;">
-                                    
-                                    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 6mm; font-size:10px; font-weight:bold; text-align:center; background:white; color:#333; padding-top:1px; border-bottom: 2px solid #74acdf; box-sizing: border-box; white-space:nowrap; overflow:hidden;">
-                                        ${item.nombre}${tU}
-                                    </div>
-                                    
-                                    <div style="position: absolute; top: 6mm; left: 0; width: 55%; height: 32mm; background-color:#1a365d; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 3px solid #eab308; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 2px;">
-                                        <div style="font-size:6.5px; text-transform:uppercase; color:#93c5fd; letter-spacing: 0.5px;">Precio Mayorista</div>
-                                        <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1; margin:3px 0; letter-spacing:-0.5px; white-space:nowrap;">$${pMayoristaF}</div>
-                                        <div style="font-size:7px; background:#dc2626; padding:2px 5px; border-radius:3px; font-weight:bold; text-transform:uppercase;">Llevando ${pG.cant_promo} o más</div>
-                                    </div>
-                                    
-                                    <div style="position: absolute; top: 6mm; left: 55%; width: 45%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding: 2px; box-sizing: border-box; background:white;">
-                                        
-                                        <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px; margin-top:1px;">Autoservicio 20 de Junio</div>
-
-                                        <div style="text-align:center; margin-top:auto; margin-bottom:auto;">
-                                            <div style="font-size:6px; color:#666; text-transform:uppercase;">Precio Minorista</div>
-                                            <div style="font-size:14px; font-weight:bold; color:#333;">$${pMostrarF}</div>
-                                        </div>
-                                        
-                                        ${txtBulto}
-                                        
-                                        <div style="width: 100%; height: 16px; margin-bottom: 2px; display:flex; justify-content:center; overflow:hidden;">
-                                            <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
-                                        </div>
-                                    </div>
-                                    
-                                </div>
-                            `;
-} else {
-                            // --- DISEÑO CLÁSICO (Restaurado al original + Nombre abajo) ---
-                            let fontSizePrecio = (columnas === 2) ? '34px' : '26px';
-                            if (pMostrarF.length >= 7) fontSizePrecio = (columnas === 2) ? '28px' : '20px';
-
-                            contenedorHTML += `
-                                <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 3px;">
-                                    
-                                    <div style="width: 100%; font-size:10px; font-weight:bold; text-align:center; color:#333; border-bottom: 2px solid #74acdf; padding-bottom: 1px; white-space:nowrap; overflow:hidden;">
-                                        ${item.nombre}${tU}
-                                    </div>
-                                    
-                                    <div style="margin-top: 2px;">${txtBulto}</div>
-                                    
-                                    <div style="font-size:${fontSizePrecio}; font-weight:900; line-height:1; letter-spacing:-0.5px; color:#333; margin-top: auto; margin-bottom: auto;">
-                                        $${pMostrarF}
-                                    </div>
-                                    
-                                    <div style="width: 80%; height: 16px; display:flex; justify-content:center; overflow:hidden; margin-bottom: 1px;">
-                                        <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
-                                    </div>
-                                    
-                                    <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px;">Autoservicio 20 de Junio</div>
-
-                                </div>
-                            `;
-                        }
-            } else if (item.formato === "Oferta A4") {
-                
                 if (pG.cant_promo) {
-                    // --- NUEVO: DISEÑO A4 GIGANTE PARA PROMOCIÓN MAYORISTA ---
+                    // --- DISEÑO CENEFA MAYORISTA ---
                     let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
-                    
+                    let fontSizePromo = (columnas === 2) ? '24px' : '18px';
+                    if (pMayoristaF.length >= 7) fontSizePromo = (columnas === 2) ? '18px' : '14px';
+
                     contenedorHTML += `
-                        <div class="print-cartelA4" style="page-break-after: always !important; width: 100% !important; height: 95vh !important; display: flex !important; flex-direction: column !important; box-sizing: border-box !important; background: white !important; border: 6px solid #1a365d !important; overflow:hidden;">
-                            
-                            <div style="flex: 1.2; background-color: #1a365d; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; padding: 20px; border-bottom: 15px solid #eab308; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
-                                <div style="font-size: 50px; text-transform: uppercase; color: #93c5fd; letter-spacing: 2px;">Precio Mayorista</div>
-                                <div style="font-size: 200px; font-weight: 900; line-height: 1; margin: 10px 0; letter-spacing:-5px;">$${pMayoristaF}</div>
-                                <div style="font-size: 45px; background: #dc2626; padding: 15px 40px; border-radius: 20px; font-weight: bold; text-transform: uppercase; box-shadow: 6px 6px 0px rgba(0,0,0,0.2);">Llevando ${pG.cant_promo} o más</div>
+                        <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden;">
+                            <div style="position: absolute; top: 0; left: 0; width: 100%; height: 6mm; font-size:10px; font-weight:bold; text-align:center; background:white; color:#333; padding-top:1px; border-bottom: 2px solid #74acdf; box-sizing: border-box; white-space:nowrap; overflow:hidden;">
+                                ${item.nombre}${tU}
                             </div>
-                            
-                            <div style="flex: 0.8; background-color: white; display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 40px; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
-                                <h2 style="font-size: 75px; font-weight: 900; color: #333 !important; text-align: center; margin-bottom: 10px; line-height: 1;">${item.nombre}${tU}</h2>
-                                
-                                <div style="text-align: center; margin: auto 0;">
-                                    <div style="font-size: 35px; color: #666; text-transform: uppercase;">Precio Minorista Unitario</div>
-                                    <div style="font-size: 90px; font-weight: bold; color: #333 !important; line-height:1; margin-bottom: 15px;">$${pMostrarF}</div>
-                                    ${textoCaja ? `<div style="font-size: 25px; font-weight: bold; color: #1a365d; background: #e2e8f0; padding: 8px 20px; border-radius: 8px; display: inline-block; text-transform: uppercase;">📦 ${textoCaja}</div>` : ''}
-                                    ${item.leyenda_inferior ? `<div style="font-size:30px; color:#555 !important; margin-top:20px;">* ${item.leyenda_inferior}</div>` : ''}
+                            <div style="position: absolute; top: 6mm; left: 0; width: 55%; height: 32mm; background-color:#1a365d; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 3px solid #eab308; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 2px;">
+                                <div style="font-size:6.5px; text-transform:uppercase; color:#93c5fd; letter-spacing: 0.5px;">Precio Mayorista</div>
+                                <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1; margin:3px 0; letter-spacing:-0.5px; white-space:nowrap;">$${pMayoristaF}</div>
+                                <div style="font-size:7px; background:#dc2626; padding:2px 5px; border-radius:3px; font-weight:bold; text-transform:uppercase;">Llevando ${pG.cant_promo} o más</div>
+                            </div>
+                            <div style="position: absolute; top: 6mm; left: 55%; width: 45%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding: 2px; box-sizing: border-box; background:white;">
+                                <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px; margin-top:1px;">Autoservicio 20 de Junio</div>
+                                <div style="text-align:center; margin-top:auto; margin-bottom:auto;">
+                                    <div style="font-size:6px; color:#666; text-transform:uppercase;">Precio Minorista</div>
+                                    <div style="font-size:14px; font-weight:bold; color:#333;">$${pMostrarF}</div>
                                 </div>
-                                
-                                <div style="width: 100%; display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px;">
-                                    <div style="font-size: 30px; font-weight: 900; color: #1a365d; text-transform: uppercase; letter-spacing: 1px;">Autoservicio 20 de Junio</div>
-                                    <div style="width: 450px; height: 90px; overflow: hidden; display: flex; justify-content: flex-end;">
-                                        <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
-                                    </div>
+                                ${txtBulto}
+                                <div style="width: 100%; height: 16px; margin-bottom: 2px; display:flex; justify-content:center; overflow:hidden;">
+                                    <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
                                 </div>
                             </div>
                         </div>
                     `;
                 } else {
-                    // --- DISEÑO A4 CLÁSICO (El cartel rojo normal) ---
-                    let im = item.foto_temporal ? `<img src="${item.foto_temporal}" style="max-height:280px; max-width:100%; object-fit:contain; margin-bottom:20px; border-radius:15px;">` : '';
-                    let tx = item.texto_personalizado ? `<div style="font-size:40px; font-weight:bold; color:#0d6efd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px;">${item.texto_personalizado}</div>` : '';
-                    let lPie = item.leyenda_inferior ? `<div style="font-size:22px; color:#555 !important; margin-top:auto; padding-top:20px;">* ${item.leyenda_inferior}</div>` : '';
-                    
-                    let bloquePrecio = item.precio_falso ? `
-                        <div style="font-size:50px; font-weight:bold; color:#888 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; text-decoration:line-through; margin-bottom:-10px;">$${pRealF}</div>
-                        <div style="font-size:115px; font-weight:900; color:#dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; line-height:0.9; text-shadow:4px 4px 0px rgba(0,0,0,0.1);">$${pMostrarF}</div>
-                    ` : `<div style="font-size:115px; font-weight:900; color:#198754 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; line-height:0.8; text-shadow:3px 3px 0px rgba(0,0,0,0.1);">$${pMostrarF}</div>`;
+                    // --- DISEÑO CENEFA CLÁSICO (Restaurado a tu gusto) ---
+                    let fontSizePrecio = (columnas === 2) ? '34px' : '26px';
+                    if (pMostrarF.length >= 7) fontSizePrecio = (columnas === 2) ? '28px' : '20px';
 
                     contenedorHTML += `
-                        <div class="print-cartelA4" style="page-break-after: always !important; width: 100% !important; height: 95vh !important; display: flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; border: 5px solid #198754 !important; padding: 40px !important; box-sizing: border-box !important; background: white !important; clear: both;">
-                            <h1 style="font-size:110px; font-weight:900; color:#dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; text-transform:uppercase; margin-bottom:20px; line-height:0.9;">¡OFERTA!</h1>
-                            ${tx}${im}<h2 style="font-size:65px; font-weight:bold; color:#333 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-bottom:20px; line-height:1.1;">${item.nombre}${tU}</h2>
-                            ${bloquePrecio}${lPie}
+                        <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 3px;">
+                            <div style="width: 100%; font-size:10px; font-weight:bold; text-align:center; color:#333; border-bottom: 2px solid #74acdf; padding-bottom: 1px; white-space:nowrap; overflow:hidden;">
+                                ${item.nombre}${tU}
+                            </div>
+                            <div style="margin-top: 2px;">${txtBulto}</div>
+                            <div style="font-size:${fontSizePrecio}; font-weight:900; line-height:1; letter-spacing:-0.5px; color:#333; margin-top: auto; margin-bottom: auto;">
+                                $${pMostrarF}
+                            </div>
+                            <div style="width: 80%; height: 16px; display:flex; justify-content:center; overflow:hidden; margin-bottom: 1px;">
+                                <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
+                            </div>
+                            <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px;">Autoservicio 20 de Junio</div>
                         </div>
                     `;
                 }
+            } else if (item.formato === "Oferta A4") {
+                
+                // --- DISEÑO CARTEL MEDIANO (Se adapta automático si es Mayorista o no) ---
+                let tx = item.texto_personalizado ? `<div style="font-size:16px; font-weight:bold; color:#dc2626; text-transform:uppercase; margin-bottom:5px;">${item.texto_personalizado}</div>` : '';
+                let lPie = item.leyenda_inferior ? `<div style="font-size:10px; color:#555; margin-top:5px;">* ${item.leyenda_inferior}</div>` : '';
+                
+                let bloquePrecio = item.precio_falso ? `
+                    <div style="font-size:18px; font-weight:bold; color:#888; text-decoration:line-through; margin-bottom:-5px;">$${pRealF}</div>
+                    <div style="font-size:65px; font-weight:900; color:#dc3545; line-height:0.9;">$${pMostrarF}</div>
+                ` : `<div style="font-size:65px; font-weight:900; color:#198754; line-height:0.9;">$${pMostrarF}</div>`;
+
+                let bloqueMayorista = '';
+                if (pG.cant_promo) {
+                    let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
+                    bloqueMayorista = `
+                        <div style="background-color: #1a365d; color: white; padding: 8px; border-radius: 8px; margin-top: 10px; text-align: center; width: 95%; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
+                            <div style="font-size: 11px; text-transform: uppercase; color: #93c5fd;">Precio Mayorista</div>
+                            <div style="font-size: 40px; font-weight: 900; line-height: 1; margin: 3px 0;">$${pMayoristaF}</div>
+                            <div style="font-size: 11px; background: #dc2626; padding: 4px 8px; border-radius: 4px; font-weight: bold; text-transform: uppercase; display: inline-block;">Llevando ${pG.cant_promo} o más</div>
+                        </div>
+                    `;
+                    bloquePrecio = `
+                        <div style="font-size:12px; color:#666; text-transform:uppercase;">Precio Minorista</div>
+                        <div style="font-size:30px; font-weight:bold; color:#333; line-height:1;">$${pMostrarF}</div>
+                    `;
+                }
+
+                contenedorHTML += `
+                    <div class="print-cartelMediano" style="width: 135mm !important; height: 95mm !important; border: 3px solid #1a365d; display: inline-flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; padding: 15px !important; box-sizing: border-box !important; background: white !important; margin: 5mm; float: left; page-break-inside: avoid;">
+                        ${tx}
+                        <h2 style="font-size:22px; font-weight:900; color:#333; margin-bottom:10px; line-height:1.1;">${item.nombre}${tU}</h2>
+                        ${txtBulto ? `<div style="margin-bottom:10px;">${txtBulto}</div>` : ''}
+                        ${bloquePrecio}
+                        ${bloqueMayorista}
+                        ${lPie}
+                    </div>
+                `;
             }
         }
     });
@@ -731,12 +698,10 @@ function prepararHojaImpresion(filtro) {
     hoja.innerHTML = contenedorHTML;
 
     // SEGUNDO BUCLE: Acá se inyecta el código de barras real de la pistola
-    // SEGUNDO BUCLE: Acá se inyecta el código de barras real de la pistola
     items.forEach((item, idxItem) => { 
         if(item.formato === "Cenefa" && item.codigo_barras) { 
             for(let i=0; i < item.cantidad; i++) { 
                 try { 
-                    // Apagamos los números para que las barras ocupen el 100% de la altura
                     JsBarcode(`#barcode-${idxItem}-${i}`, item.codigo_barras, { format: "CODE128", width: 1.2, height: 30, displayValue: false, margin: 0 }); 
                 } catch (e) {} 
             } 

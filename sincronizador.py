@@ -99,19 +99,18 @@ def descargar_novedades_oficina():
             ''', (c['id'], c['nombre'], c.get('palabra_clave',''), c.get('icono','bi-box'), c.get('color_fondo','#ffffff')))
             
             
-        # 7. Promociones y Reglas Mayoristas (Sincronización en Espejo)
-        # Como las promos se borran y se vuelven a crear al editarlas, 
-        # limpiamos el mostrador y bajamos la foto exacta de la nube.
-        cursor.execute("DELETE FROM promociones_volumen")
+
+# 7. Promociones y Reglas Mayoristas (Sincronización en Espejo)
         res_promos = nube.table('promociones_volumen').select('producto_id, cantidad_minima, precio_oferta_unitario').execute()
         
-        for promo in res_promos.data:
-            cursor.execute('''
-                INSERT INTO promociones_volumen (producto_id, cantidad_minima, precio_oferta_unitario) 
-                VALUES (?, ?, ?)
-            ''', (promo['producto_id'], promo.get('cantidad_minima', 0), promo.get('precio_oferta_unitario', 0)))
-            
-        local.commit()
+        # EL ESCUDO: Solo borramos lo local si la nube realmente tiene datos para darnos
+        if res_promos.data is not None and len(res_promos.data) > 0:
+            cursor.execute("DELETE FROM promociones_volumen")
+            for promo in res_promos.data:
+                cursor.execute('''
+                    INSERT INTO promociones_volumen (producto_id, cantidad_minima, precio_oferta_unitario) 
+                    VALUES (?, ?, ?)
+                ''', (promo['producto_id'], promo.get('cantidad_minima', 0), promo.get('precio_oferta_unitario', 0)))
         
         # 8. Descargar los Combos
         cursor.execute("DELETE FROM productos_combos")
@@ -134,8 +133,6 @@ def descargar_novedades_oficina():
 def subir_todo_a_la_nube():
     print("\n🚚 Arrancando el camión de mudanza gigante...\n")
     
-    
-    # 2. Conectamos a la base local para subir ventas y cajas
     local = sqlite3.connect('autoservicio_20dejunio.db')
     local.row_factory = sqlite3.Row
     cursor = local.cursor()
@@ -146,47 +143,54 @@ def subir_todo_a_la_nube():
         try:
             cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{tabla}'")
             if not cursor.fetchone():
-                print(f"   ⚠️ La tabla no existe en local. Saltando...\n")
                 continue
 
             cursor.execute(f"SELECT * FROM {tabla}")
             registros = [dict(row) for row in cursor.fetchall()]
 
             if not registros:
-                print("   - Está vacía. Saltando al siguiente.\n")
                 continue
 
             # Limpieza de nulos
             for r in registros:
                 for clave, valor in r.items():
-                    if valor is None:
-                        r[clave] = None
+                    if valor is None: r[clave] = None
 
-            # Subida en paquetes de 500
             tamaño_lote = 500
             total_subidos = 0
             
-            for i in range(0, len(registros), tamaño_lote):
-                paquete = registros[i:i + tamaño_lote]
-                nube.table(tabla).upsert(paquete).execute()
-                total_subidos += len(paquete)
+            # --- BLINDAJE: Para Promos y Combos (que no tienen ID), forzamos la subida ---
+            if tabla in ['promociones_volumen', 'productos_combos']:
+                try:
+                    columna_filtro = 'producto_id' if tabla == 'promociones_volumen' else 'producto_padre_id'
+                    nube.table(tabla).delete().neq(columna_filtro, -1).execute() # Limpiamos la nube
+                except:
+                    pass
+                for i in range(0, len(registros), tamaño_lote):
+                    paquete = registros[i:i + tamaño_lote]
+                    nube.table(tabla).insert(paquete).execute() # Insertamos a la fuerza
+                    total_subidos += len(paquete)
+            else:
+                # Tablas normales
+                for i in range(0, len(registros), tamaño_lote):
+                    paquete = registros[i:i + tamaño_lote]
+                    nube.table(tabla).upsert(paquete).execute()
+                    total_subidos += len(paquete)
 
             print(f"   ✅ ¡Éxito! Se subieron {total_subidos} registros a la nube.\n")
             
         except Exception as e:
             print(f"   ❌ ERROR FATAL al subir {tabla}: {e}\n")
             
-    # --- SUBIDA DEL ARCHIVO FÍSICO AL STORAGE ---
     print("☁️ Subiendo copia de seguridad del archivo completo a Supabase Storage...")
     try:
         try: nube.storage.from_('backups').remove(['autoservicio_20dejunio.db'])
         except: pass
-        
         with open('autoservicio_20dejunio.db', 'rb') as f:
             nube.storage.from_('backups').upload('autoservicio_20dejunio.db', f)
         print("✅ Backup guardado a salvo en la nube.")
     except Exception as e:
-        print("⚠️ No se pudo subir el archivo físico:", e)
+        pass
 
     local.close()
     return {"status": "success", "mensaje": "Sincronización a la nube completada."}
