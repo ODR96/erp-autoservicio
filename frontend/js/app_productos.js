@@ -178,6 +178,7 @@ document.querySelector('[data-bs-target="#modalNuevoProducto"]').addEventListene
             cambiarPestanaAbm('precios');
             
             // LIMPIR TODO
+            document.getElementById('inputUnidadesBulto').value = '1';
             document.querySelectorAll('#modalNuevoProducto input').forEach(input => input.value = '');
             document.getElementById('selectUnidadMedida').value = 'Unidad'; 
             document.getElementById('selectCategoria').value = '1';
@@ -598,17 +599,24 @@ function prepararHojaImpresion(filtro) {
         for(let i=0; i < item.cantidad; i++) {
             if(item.formato === "Cenefa") {
                 // 1. Verificamos si hay texto personalizado (Ej: Bulto x 6)
-                let txtBulto = item.texto_personalizado ? `<div style="font-size:9px; font-weight:bold; color:#1a365d; background:#e2e8f0; border-radius:3px; padding:1px 4px; display:inline-block; margin-bottom:2px;">📦 ${item.texto_personalizado}</div>` : '';
-                
+// Si le pusiste más de 1 unidad al bulto, lo arma automático. Si no, usa el texto personalizado por si querés forzar otra frase.
+                let textoCaja = (pG.unidades_por_bulto && pG.unidades_por_bulto > 1) ? `Bulto cerrado x ${pG.unidades_por_bulto} un.` : item.texto_personalizado;
+
+                let txtBulto = textoCaja ? `<div style="font-size:7.5px; font-weight:bold; color:#1a365d; background:#e2e8f0; border-radius:3px; padding:2px 5px; display:inline-block; margin-bottom:3px; text-transform:uppercase; letter-spacing:0.5px;">📦 ${textoCaja}</div>` : '';                
                 // 2. Evaluamos qué diseño usar
                 // 2. Evaluamos qué diseño usar
                         if (pG.cant_promo) {
-                            // --- DISEÑO MAYORISTA BLINDADO Y BALANCEADO ---
+                            // --- DISEÑO MAYORISTA (Balanceado 48/52 y sin tachar) ---
                             let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
                             
-                            // Ajuste automático de fuente limpio, sin sombras
+                            // Truco: Achicamos dinámicamente y comprimimos a lo ancho si el número es muy largo
                             let fontSizePromo = (columnas === 2) ? '26px' : '20px';
-                            if (pMayoristaF.length > 7) fontSizePromo = (columnas === 2) ? '22px' : '16px';
+                            let compresionText = '';
+                            if (pMayoristaF.length >= 7) fontSizePromo = (columnas === 2) ? '22px' : '16px';
+                            if (pMayoristaF.length >= 9) {
+                                fontSizePromo = (columnas === 2) ? '19px' : '15px';
+                                compresionText = 'transform: scaleX(0.85); transform-origin: center;';
+                            }
 
                             contenedorHTML += `
                                 <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px dashed #aaa; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden;">
@@ -617,10 +625,10 @@ function prepararHojaImpresion(filtro) {
                                         ${item.nombre}${tU}
                                     </div>
                                     
-                                    <div style="position: absolute; top: 6mm; left: 0; width: 55%; height: 32mm; background-color:#1a365d; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 3px solid #eab308; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 2px;">
-                                        <div style="font-size:7px; text-transform:uppercase; color:#93c5fd; letter-spacing: 0.5px;">Precio Mayorista</div>
-                                        <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1; margin:3px 0; letter-spacing:-0.5px;">$${pMayoristaF}</div>
-                                        <div style="font-size:8px; background:#dc2626; padding:2px 5px; border-radius:3px; font-weight:bold; text-transform:uppercase;">Llevando ${pG.cant_promo} o más</div>
+                                    <div style="position: absolute; top: 6mm; left: 0; width: 48%; height: 32mm; background-color:#1a365d; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 3px solid #eab308; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 2px;">
+                                        <div style="font-size:6px; text-transform:uppercase; color:#93c5fd; letter-spacing: 0.5px;">Precio Mayorista</div>
+                                        <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1; margin:3px 0; letter-spacing:-1px; white-space:nowrap; ${compresionText}">$${pMayoristaF}</div>
+                                        <div style="font-size:7px; background:#dc2626; padding:2px 5px; border-radius:3px; font-weight:bold; text-transform:uppercase;">Llevando ${pG.cant_promo} o más</div>
                                     </div>
                                     
                                     <div style="position: absolute; top: 6mm; left: 55%; width: 45%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding: 2px 4px; box-sizing: border-box; background:white;">
@@ -919,6 +927,7 @@ const codigoActual = p.codigo_barras || "";
         }, 50);
 
         document.getElementById('selectUnidadMedida').value = p.unidad_medida || 'Unidad';
+        document.getElementById('inputUnidadesBulto').value = p.unidades_por_bulto || 1;
         document.getElementById('inputCosto').value = p.costo_sin_iva;
 // --- BLINDAJE DEL IVA ---
         let ivaLimpio = p.porcentaje_iva;
@@ -1069,6 +1078,7 @@ async function guardarProductoCompleto() {
         stock_minimo_alerta: alertaStock, 
         dias_alerta_vencimiento: diasAlerta, 
         unidad_medida: document.getElementById('selectUnidadMedida').value, 
+        unidades_por_bulto: parseInt(document.getElementById('inputUnidadesBulto').value) || 1,
         componentes_combo: componentesComboActual,
         reglas_mayoristas: reglasMayoristas,
         cantidad_inicial: productoEditandoId === null ? (parseFloat(document.getElementById('inputCantLote').value) || 0) : 0,

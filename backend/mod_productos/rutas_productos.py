@@ -30,6 +30,7 @@ class ProductoNuevo(BaseModel):
     numero_lote_proveedor: str = "INICIAL"
     fecha_vencimiento: str = "2099-12-31"
     costo_real_ingreso: float = 0.0
+    unidades_por_bulto: int = 1
     
 class ProductoActualizar(BaseModel):
     codigo_barras: str
@@ -44,6 +45,7 @@ class ProductoActualizar(BaseModel):
     unidad_medida: str = "Unidad" # <-- AGREGAMOS ESTO
     componentes_combo: list = []
     reglas_mayoristas: list = []
+    unidades_por_bulto: int = 1
     
 class CategoriaPOS(BaseModel):
     nombre: str
@@ -64,9 +66,9 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
                 return {"error": "El código ya existe."}
 
         cursor.execute('''
-            INSERT INTO productos (codigo_barras, nombre, categoria_id, proveedor_habitual_id, costo_sin_iva, porcentaje_iva, precio_venta_final, stock_minimo_alerta, dias_alerta_vencimiento, unidad_medida, activo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-        ''', (producto.codigo_barras, producto.nombre, producto.categoria_id, producto.proveedor_habitual_id, producto.costo_sin_iva, producto.porcentaje_iva, producto.precio_venta_final, producto.stock_minimo_alerta, producto.dias_alerta_vencimiento, producto.unidad_medida))
+            INSERT INTO productos (codigo_barras, nombre, categoria_id, proveedor_habitual_id, costo_sin_iva, porcentaje_iva, precio_venta_final, stock_minimo_alerta, dias_alerta_vencimiento, unidad_medida, activo, unidades_por_bulto)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+        ''', (producto.codigo_barras, producto.nombre, producto.categoria_id, producto.proveedor_habitual_id, producto.costo_sin_iva, producto.porcentaje_iva, producto.precio_venta_final, producto.stock_minimo_alerta, producto.dias_alerta_vencimiento, producto.unidad_medida, producto.unidades_por_bulto))
         
         nuevo_id = cursor.lastrowid 
         lote_id = None
@@ -186,10 +188,10 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
         cursor.execute('''
             UPDATE productos 
             SET codigo_barras = ?, nombre = ?, categoria_id = ?, proveedor_habitual_id = ?, 
-                costo_sin_iva = ?, porcentaje_iva = ?, precio_venta_final = ?, stock_minimo_alerta = ?, dias_alerta_vencimiento = ?, unidad_medida = ?
+                costo_sin_iva = ?, porcentaje_iva = ?, precio_venta_final = ?, stock_minimo_alerta = ?, dias_alerta_vencimiento = ?, unidad_medida = ?, unidades_por_bulto = ?
             WHERE id = ?
         ''', (datos.codigo_barras, datos.nombre, datos.categoria_id, datos.proveedor_habitual_id, 
-              datos.costo_sin_iva, datos.porcentaje_iva, datos.precio_venta_final, datos.stock_minimo_alerta, datos.dias_alerta_vencimiento, datos.unidad_medida, producto_id))
+              datos.costo_sin_iva, datos.porcentaje_iva, datos.precio_venta_final, datos.stock_minimo_alerta, datos.dias_alerta_vencimiento, datos.unidad_medida, datos.unidades_por_bulto, producto_id))
         
         # LIMPIAR Y RE-GUARDAR COMBOS Y PROMOS (Evita duplicados)
         cursor.execute("DELETE FROM productos_combos WHERE producto_padre_id = ?", (producto_id,))

@@ -36,9 +36,9 @@ def descargar_novedades_oficina():
                 INSERT OR REPLACE INTO productos (
                     id, codigo_barras, nombre, categoria_id, proveedor_habitual_id, 
                     costo_sin_iva, porcentaje_iva, precio_venta_final, 
-                    stock_minimo_alerta, dias_alerta_vencimiento, unidad_medida, activo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (p['id'], p.get('codigo_barras',''), p['nombre'], p.get('categoria_id',1), p.get('proveedor_habitual_id',0), p.get('costo_sin_iva',0), p.get('porcentaje_iva',21), p.get('precio_venta_final',0), p.get('stock_minimo_alerta',5), p.get('dias_alerta_vencimiento',0), p.get('unidad_medida','Unidad'), p.get('activo',1)))
+                    stock_minimo_alerta, dias_alerta_vencimiento, unidad_medida, activo, unidades_por_bulto
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (p['id'], p.get('codigo_barras',''), p['nombre'], p.get('categoria_id',1), p.get('proveedor_habitual_id',0), p.get('costo_sin_iva',0), p.get('porcentaje_iva',21), p.get('precio_venta_final',0), p.get('stock_minimo_alerta',5), p.get('dias_alerta_vencimiento',0), p.get('unidad_medida','Unidad'), p.get('activo',1), p.get('unidades_por_bulto', 1)))
 
 # 2. Lotes (Stock Inteligente - Anti Colisiones)
         res_lotes = nube.table('lotes_stock').select('*').execute()

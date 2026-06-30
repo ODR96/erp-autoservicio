@@ -409,23 +409,25 @@
                     </div>
 
                     <div class="row g-3 mb-3">
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label fw-bold small">Rubro / Categoría</label>
-                            <select id="selectCategoria" class="form-select border-primary">
-                            </select>
+                            <select id="selectCategoria" class="form-select border-primary"></select>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label fw-bold small text-primary">Proveedor Habitual</label>
-                            <select id="selectProveedor" class="form-select border-primary">
-                            </select>
+                            <select id="selectProveedor" class="form-select border-primary"></select>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label fw-bold small">Unidad de Venta</label>
                             <select id="selectUnidadMedida" class="form-select">
                                 <option value="Unidad">Por Unidad</option>
                                 <option value="Kg">Por Kilo (Kg)</option>
                                 <option value="Litro">Por Litro (L)</option>
                             </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold small text-success">Unidades por Bulto</label>
+                            <input id="inputUnidadesBulto" type="number" class="form-control border-success fw-bold text-center" value="1" min="1" placeholder="Ej: 6">
                         </div>
                     </div>
 
