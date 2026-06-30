@@ -603,10 +603,10 @@ function prepararHojaImpresion(filtro) {
                 // 2. Evaluamos qué diseño usar
                 // 2. Evaluamos qué diseño usar
                         if (pG.cant_promo) {
-                            // --- DISEÑO MAYORISTA BLINDADO (Posición Absoluta) ---
+                            // --- DISEÑO MAYORISTA BLINDADO Y BALANCEADO ---
                             let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
                             
-                            // Ajuste automático de fuente para que no desborde
+                            // Ajuste automático de fuente limpio, sin sombras
                             let fontSizePromo = (columnas === 2) ? '26px' : '20px';
                             if (pMayoristaF.length > 7) fontSizePromo = (columnas === 2) ? '22px' : '16px';
 
@@ -618,19 +618,24 @@ function prepararHojaImpresion(filtro) {
                                     </div>
                                     
                                     <div style="position: absolute; top: 6mm; left: 0; width: 55%; height: 32mm; background-color:#1a365d; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 3px solid #eab308; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 2px;">
-                                        <div style="font-size:7px; text-transform:uppercase; color:#93c5fd; line-height: 1;">Precio Mayorista</div>
-                                        <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1.1; margin:2px 0; text-shadow: 1px 1px 0px rgba(0,0,0,0.3);">$${pMayoristaF}</div>
-                                        <div style="font-size:8px; background:#dc2626; padding:1px 4px; border-radius:2px; font-weight:bold; line-height: 1;">Llevando ${pG.cant_promo} o más</div>
+                                        <div style="font-size:7px; text-transform:uppercase; color:#93c5fd; letter-spacing: 0.5px;">Precio Mayorista</div>
+                                        <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1; margin:3px 0; letter-spacing:-0.5px;">$${pMayoristaF}</div>
+                                        <div style="font-size:8px; background:#dc2626; padding:2px 5px; border-radius:3px; font-weight:bold; text-transform:uppercase;">Llevando ${pG.cant_promo} o más</div>
                                     </div>
                                     
-                                    <div style="position: absolute; top: 6mm; left: 55%; width: 45%; height: 32mm; display:flex; flex-direction:column; justify-content:space-evenly; align-items:center; padding: 2px; box-sizing: border-box; background:white;">
-                                        <div style="text-align:center; line-height: 1; margin-top:2px;">
-                                            <div style="font-size:7px; color:#666;">Precio Minorista</div>
-                                            <div style="font-size:11px; font-weight:bold; color:#333; text-decoration:line-through;">$${pMostrarF}</div>
+                                    <div style="position: absolute; top: 6mm; left: 55%; width: 45%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding: 2px 4px; box-sizing: border-box; background:white;">
+                                        
+                                        <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px; margin-top:2px;">Autoservicio 20 de Junio</div>
+
+                                        <div style="text-align:center; margin-top:auto; margin-bottom:auto;">
+                                            <div style="font-size:7px; color:#666; text-transform:uppercase;">Precio Minorista</div>
+                                            <div style="font-size:13px; font-weight:bold; color:#333; text-decoration:line-through;">$${pMostrarF}</div>
                                         </div>
+                                        
                                         ${txtBulto}
-                                        <div style="width: 90%; height: 14px; margin-top:auto; margin-bottom: 2px;">
-                                            <svg id="barcode-${idxItem}-${i}" style="width:100%; height:100%; margin:0;"></svg>
+                                        
+                                        <div style="width: 100%; height: 18px; margin-bottom: 2px; display:flex; justify-content:center; overflow:hidden;">
+                                            <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
                                         </div>
                                     </div>
                                     
@@ -675,10 +680,14 @@ function prepararHojaImpresion(filtro) {
     hoja.innerHTML = contenedorHTML;
 
     // SEGUNDO BUCLE: Acá se inyecta el código de barras real de la pistola
+    // SEGUNDO BUCLE: Acá se inyecta el código de barras real de la pistola
     items.forEach((item, idxItem) => { 
         if(item.formato === "Cenefa" && item.codigo_barras) { 
             for(let i=0; i < item.cantidad; i++) { 
-                try { JsBarcode(`#barcode-${idxItem}-${i}`, item.codigo_barras, { format: "CODE128", width: 1.2, height: 22, displayValue: true, fontSize: 10, margin: 0 }); } catch (e) {} 
+                try { 
+                    // Apagamos los números para que las barras ocupen el 100% de la altura
+                    JsBarcode(`#barcode-${idxItem}-${i}`, item.codigo_barras, { format: "CODE128", width: 1.2, height: 30, displayValue: false, margin: 0 }); 
+                } catch (e) {} 
             } 
         } 
     });
