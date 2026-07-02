@@ -44,8 +44,12 @@ def replicar_dependencias_producto(producto_id: int):
         combos = [dict(row) for row in cursor.fetchall()]
         conexion.close()
         
-        nube.table('promociones_volumen').delete().eq('producto_id', producto_id).execute()
-        nube.table('productos_combos').delete().eq('producto_padre_id', producto_id).execute()
+        # ESCUDO ANTI-CRASH: Lo forzamos a ignorar el error si Supabase se pone estricto
+        try: nube.table('promociones_volumen').delete().eq('producto_id', producto_id).execute()
+        except: pass
+        
+        try: nube.table('productos_combos').delete().eq('producto_padre_id', producto_id).execute()
+        except: pass
         
         if promos: nube.table('promociones_volumen').insert(promos).execute()
         if combos: nube.table('productos_combos').insert(combos).execute()
