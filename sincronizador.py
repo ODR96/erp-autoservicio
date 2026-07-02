@@ -100,11 +100,11 @@ def descargar_novedades_oficina():
             
             
 
-# 7. Promociones y Reglas Mayoristas (Sincronización en Espejo)
+# 7. Promociones y Reglas Mayoristas (Espejo Perfecto)
         res_promos = nube.table('promociones_volumen').select('producto_id, cantidad_minima, precio_oferta_unitario').execute()
         
-        # EL ESCUDO: Solo borramos lo local si la nube realmente tiene datos para darnos
-        if res_promos.data is not None and len(res_promos.data) > 0:
+        # Eliminamos el "escudo" para que sea un espejo exacto de la nube
+        if res_promos.data is not None:
             cursor.execute("DELETE FROM promociones_volumen")
             for promo in res_promos.data:
                 cursor.execute('''
