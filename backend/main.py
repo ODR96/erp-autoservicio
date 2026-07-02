@@ -67,23 +67,23 @@ def inicializar_base_vacia():
         except Exception as e:
             print(f"⚠️ Error al aplicar novedades: {e}")
 
-# --- 1. DEFINIMOS EL LATIDO INTELIGENTE ---
+# --- 1. DEFINIMOS EL LATIDO INTELIGENTE (PURA SUBIDA) ---
+# --- 1. DEFINIMOS EL LATIDO INTELIGENTE (PURA SUBIDA OPERATIVA) ---
 async def latido_sincronizacion():
-    # Render automáticamente tiene una variable de entorno llamada RENDER
     es_nube = os.environ.get("RENDER") is not None
     
     while True:
         await asyncio.sleep(900)  
         if es_nube:
-            print("☁️ [Nube] Soy Render. No subo datos para no pisar la información real.")
-            # Más adelante acá haremos que Render descargue la info
+            print("☁️ [Nube] Soy Render. Escuchando pasivamente.")
         else:
-            print("🏪 [Local] Soy el Mostrador. Subiendo datos frescos a Supabase...")
+            print("🏪 [Local] Soy el Mostrador. Subiendo ventas y stock a Supabase...")
             try:
-                await asyncio.to_thread(subir_todo_a_la_nube)
-                print("✅ [Latido Automático] Sincronización exitosa.")
+                # Al pasarle 'True', el camión sabe que NO debe pisar el catálogo de la Nube
+                await asyncio.to_thread(subir_todo_a_la_nube, True)
+                print("✅ [Latido Automático] Respaldo operativo exitoso.")
             except Exception as e:
-                print(f"❌ [Latido Automático] Error en la sincronización: {e}")
+                print(f"❌ [Latido Automático] Error en el latido: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

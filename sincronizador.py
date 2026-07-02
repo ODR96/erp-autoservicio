@@ -130,14 +130,19 @@ def descargar_novedades_oficina():
     finally:
         local.close()
 
-def subir_todo_a_la_nube():
-    print("\n🚚 Arrancando el camión de mudanza gigante...\n")
+def subir_todo_a_la_nube(es_latido_automatico=False):
+    print("\n🚚 Arrancando el camión de mudanza...\n")
     
     local = sqlite3.connect('autoservicio_20dejunio.db')
     local.row_factory = sqlite3.Row
     cursor = local.cursor()
 
     for tabla in TABLAS_ORDENADAS:
+        
+        # EL ESCUDO ANTI-PISADAS: Si es el robot automático de 15 min, ignoramos el catálogo
+        if es_latido_automatico and tabla in ['productos', 'promociones_volumen', 'productos_combos', 'categorias_productos', 'categorias_pos', 'proveedores']:
+            continue
+
         print(f"📦 Revisando tabla: {tabla}...")
         
         try:
@@ -145,7 +150,6 @@ def subir_todo_a_la_nube():
             if not cursor.fetchone():
                 continue
 
-            # --- BLINDAJE: Filtramos el ID interno para que Supabase no lo rechace ---
             if tabla == 'promociones_volumen':
                 cursor.execute("SELECT producto_id, cantidad_minima, precio_oferta_unitario FROM promociones_volumen")
             elif tabla == 'productos_combos':
@@ -158,7 +162,6 @@ def subir_todo_a_la_nube():
             if not registros:
                 continue
 
-            # Limpieza de nulos
             for r in registros:
                 for clave, valor in r.items():
                     if valor is None: r[clave] = None
@@ -166,10 +169,8 @@ def subir_todo_a_la_nube():
             tamaño_lote = 500
             total_subidos = 0
             
-            # --- SUBIDA FORZADA PARA TABLAS SIN ID ---
             if tabla in ['promociones_volumen', 'productos_combos']:
                 try:
-                    # Usamos .gt(..., 0) que es un comando infalible para borrar todo en Supabase
                     columna_filtro = 'producto_id' if tabla == 'promociones_volumen' else 'producto_padre_id'
                     nube.table(tabla).delete().gt(columna_filtro, 0).execute() 
                 except:
@@ -179,7 +180,6 @@ def subir_todo_a_la_nube():
                     nube.table(tabla).insert(paquete).execute() 
                     total_subidos += len(paquete)
             else:
-                # Tablas normales
                 for i in range(0, len(registros), tamaño_lote):
                     paquete = registros[i:i + tamaño_lote]
                     nube.table(tabla).upsert(paquete).execute()
