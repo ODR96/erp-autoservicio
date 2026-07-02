@@ -580,31 +580,29 @@ function prepararHojaImpresion(filtro) {
     hoja.innerHTML = ''; 
 
     let items = colaEtiquetasActual.filter(i => filtro === "Solo Cenefas" ? i.formato === "Cenefa" : i.formato === "Oferta A4");
-
     const columnas = parseInt(document.getElementById('selectColumnasCenefa').value) || 2;
 
+    // --- NUEVO: Contenedor Inteligente (Reconoce si es Cenefa o Cartel A4) ---
     let contenedorHTML = `<div class="print-container" style="${filtro === 'Solo Cenefas' ? 
         `display: grid !important; grid-template-columns: repeat(${columnas}, 1fr) !important; gap: 4mm !important; width: 100% !important; max-width: 200mm !important; margin: 0 auto !important; padding-left: 12mm !important; padding-top: 5mm !important;` 
-        : 'display: block !important;'}">`;
+        : 
+        `display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 10mm !important; width: 100% !important; max-width: 200mm !important; margin: 0 auto !important; padding-left: 10mm !important; padding-top: 10mm !important;`}
+    ">`;
 
-    // PRIMER BUCLE: Acá se dibuja el diseño HTML
     items.forEach((item, idxItem) => {
         let pMostrar = item.precio_falso ? item.precio_falso : item.precio_venta_final;
         let pMostrarF = pMostrar.toLocaleString('es-AR', {minimumFractionDigits: 2});
         let pRealF = item.precio_venta_final.toLocaleString('es-AR', {minimumFractionDigits: 2});
-
         let pG = productosGlobales.find(p => p.id === item.producto_id) || {}; 
         let tU = pG.unidad_medida && pG.unidad_medida !== "Unidad" ? ` x ${pG.unidad_medida}` : '';
 
         for(let i=0; i < item.cantidad; i++) {
             
-            // LA CAJA MÁGICA: Si hay bulto > 1, se arma sola. Si no, usa el texto manual.
             let textoCaja = (pG.unidades_por_bulto && pG.unidades_por_bulto > 1) ? `Bulto cerrado x ${pG.unidades_por_bulto} un.` : item.texto_personalizado;
             let txtBulto = textoCaja ? `<div style="font-size:7.5px; font-weight:bold; color:#1a365d; background:#e2e8f0; border-radius:3px; padding:2px 5px; display:inline-block; margin-bottom:3px; text-transform:uppercase; letter-spacing:0.5px;">📦 ${textoCaja}</div>` : '';                
 
             if(item.formato === "Cenefa") {
                 if (pG.cant_promo) {
-                    // --- DISEÑO CENEFA MAYORISTA ---
                     let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
                     let fontSizePromo = (columnas === 2) ? '24px' : '18px';
                     if (pMayoristaF.length >= 7) fontSizePromo = (columnas === 2) ? '18px' : '14px';
@@ -615,9 +613,9 @@ function prepararHojaImpresion(filtro) {
                                 ${item.nombre}${tU}
                             </div>
                             <div style="position: absolute; top: 6mm; left: 0; width: 55%; height: 32mm; background-color:#1a365d; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 3px solid #eab308; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 2px;">
-                                <div style="font-size:6.5px; text-transform:uppercase; color:#93c5fd; letter-spacing: 0.5px;">Precio Mayorista</div>
-                                <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1; margin:3px 0; letter-spacing:-0.5px; white-space:nowrap;">$${pMayoristaF}</div>
-                                <div style="font-size:7px; background:#dc2626; padding:2px 5px; border-radius:3px; font-weight:bold; text-transform:uppercase;">Llevando ${pG.cant_promo} o más</div>
+                                <div style="font-size:6.5px; text-transform:uppercase; color:white; letter-spacing: 0.5px;">Precio Mayorista</div>
+                                <div style="font-size:${fontSizePromo}; font-weight:900; line-height:1; margin:3px 0; letter-spacing:-0.5px; white-space:nowrap; color:white;">$${pMayoristaF}</div>
+                                <div style="font-size:7px; background:#dc2626; padding:2px 5px; border-radius:3px; font-weight:bold; text-transform:uppercase; color:white;">Llevando ${pG.cant_promo} o más</div>
                             </div>
                             <div style="position: absolute; top: 6mm; left: 55%; width: 45%; height: 32mm; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding: 2px; box-sizing: border-box; background:white;">
                                 <div style="font-size:5px; font-weight:900; color:#1a365d; text-transform:uppercase; letter-spacing:0.5px; margin-top:1px;">Autoservicio 20 de Junio</div>
@@ -633,7 +631,6 @@ function prepararHojaImpresion(filtro) {
                         </div>
                     `;
                 } else {
-                    // --- DISEÑO CENEFA CLÁSICO (Restaurado a tu gusto) ---
                     let fontSizePrecio = (columnas === 2) ? '34px' : '26px';
                     if (pMostrarF.length >= 7) fontSizePrecio = (columnas === 2) ? '28px' : '20px';
 
@@ -655,35 +652,35 @@ function prepararHojaImpresion(filtro) {
                 }
             } else if (item.formato === "Oferta A4") {
                 
-                // --- DISEÑO CARTEL MEDIANO (Se adapta automático si es Mayorista o no) ---
-                let tx = item.texto_personalizado ? `<div style="font-size:16px; font-weight:bold; color:#dc2626; text-transform:uppercase; margin-bottom:5px;">${item.texto_personalizado}</div>` : '';
-                let lPie = item.leyenda_inferior ? `<div style="font-size:10px; color:#555; margin-top:5px;">* ${item.leyenda_inferior}</div>` : '';
+                // --- DISEÑO CARTEL MEDIANO (Aprox 13x9 cm - Entran 4 por hoja A4) ---
+                let tx = item.texto_personalizado ? `<div style="font-size:14px; font-weight:bold; color:#dc2626; text-transform:uppercase; margin-bottom:5px;">${item.texto_personalizado}</div>` : '';
+                let lPie = item.leyenda_inferior ? `<div style="font-size:9px; color:#555; margin-top:auto;">* ${item.leyenda_inferior}</div>` : '';
                 
                 let bloquePrecio = item.precio_falso ? `
-                    <div style="font-size:18px; font-weight:bold; color:#888; text-decoration:line-through; margin-bottom:-5px;">$${pRealF}</div>
-                    <div style="font-size:65px; font-weight:900; color:#dc3545; line-height:0.9;">$${pMostrarF}</div>
-                ` : `<div style="font-size:65px; font-weight:900; color:#198754; line-height:0.9;">$${pMostrarF}</div>`;
+                    <div style="font-size:16px; font-weight:bold; color:#888; text-decoration:line-through; margin-bottom:-5px;">$${pRealF}</div>
+                    <div style="font-size:55px; font-weight:900; color:#dc3545; line-height:0.9;">$${pMostrarF}</div>
+                ` : `<div style="font-size:55px; font-weight:900; color:#198754; line-height:0.9;">$${pMostrarF}</div>`;
 
                 let bloqueMayorista = '';
                 if (pG.cant_promo) {
                     let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
                     bloqueMayorista = `
-                        <div style="background-color: #1a365d; color: white; padding: 8px; border-radius: 8px; margin-top: 10px; text-align: center; width: 95%; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
-                            <div style="font-size: 11px; text-transform: uppercase; color: #93c5fd;">Precio Mayorista</div>
-                            <div style="font-size: 40px; font-weight: 900; line-height: 1; margin: 3px 0;">$${pMayoristaF}</div>
-                            <div style="font-size: 11px; background: #dc2626; padding: 4px 8px; border-radius: 4px; font-weight: bold; text-transform: uppercase; display: inline-block;">Llevando ${pG.cant_promo} o más</div>
+                        <div style="background-color: #1a365d; color: white; padding: 6px; border-radius: 8px; margin-top: 10px; margin-bottom: auto; text-align: center; width: 95%; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
+                            <div style="font-size: 10px; text-transform: uppercase; color: white;">Precio Mayorista</div>
+                            <div style="font-size: 35px; font-weight: 900; line-height: 1; margin: 3px 0; color: white;">$${pMayoristaF}</div>
+                            <div style="font-size: 10px; background: #dc2626; padding: 3px 6px; border-radius: 4px; font-weight: bold; text-transform: uppercase; display: inline-block; color: white;">Llevando ${pG.cant_promo} o más</div>
                         </div>
                     `;
                     bloquePrecio = `
-                        <div style="font-size:12px; color:#666; text-transform:uppercase;">Precio Minorista</div>
-                        <div style="font-size:30px; font-weight:bold; color:#333; line-height:1;">$${pMostrarF}</div>
+                        <div style="font-size:11px; color:#666; text-transform:uppercase;">Precio Minorista</div>
+                        <div style="font-size:25px; font-weight:bold; color:#333; line-height:1;">$${pMostrarF}</div>
                     `;
                 }
 
                 contenedorHTML += `
-                    <div class="print-cartelMediano" style="width: 135mm !important; height: 95mm !important; border: 3px solid #1a365d; display: inline-flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; padding: 15px !important; box-sizing: border-box !important; background: white !important; margin: 5mm; float: left; page-break-inside: avoid;">
+                    <div class="print-cartelMediano" style="width: 100% !important; height: 130mm !important; border: 3px solid #1a365d; display: flex !important; flex-direction: column !important; justify-content: flex-start !important; align-items: center !important; text-align: center !important; padding: 15px !important; box-sizing: border-box !important; background: white !important; page-break-inside: avoid; border-radius: 8px;">
                         ${tx}
-                        <h2 style="font-size:22px; font-weight:900; color:#333; margin-bottom:10px; line-height:1.1;">${item.nombre}${tU}</h2>
+                        <h2 style="font-size:18px; font-weight:900; color:#333; margin-bottom:10px; line-height:1.1;">${item.nombre}${tU}</h2>
                         ${txtBulto ? `<div style="margin-bottom:10px;">${txtBulto}</div>` : ''}
                         ${bloquePrecio}
                         ${bloqueMayorista}
@@ -697,7 +694,6 @@ function prepararHojaImpresion(filtro) {
     contenedorHTML += `</div>`;
     hoja.innerHTML = contenedorHTML;
 
-    // SEGUNDO BUCLE: Acá se inyecta el código de barras real de la pistola
     items.forEach((item, idxItem) => { 
         if(item.formato === "Cenefa" && item.codigo_barras) { 
             for(let i=0; i < item.cantidad; i++) { 

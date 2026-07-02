@@ -145,7 +145,14 @@ def subir_todo_a_la_nube():
             if not cursor.fetchone():
                 continue
 
-            cursor.execute(f"SELECT * FROM {tabla}")
+            # --- BLINDAJE: Filtramos el ID interno para que Supabase no lo rechace ---
+            if tabla == 'promociones_volumen':
+                cursor.execute("SELECT producto_id, cantidad_minima, precio_oferta_unitario FROM promociones_volumen")
+            elif tabla == 'productos_combos':
+                cursor.execute("SELECT producto_padre_id, producto_hijo_id, cantidad_hijo FROM productos_combos")
+            else:
+                cursor.execute(f"SELECT * FROM {tabla}")
+                
             registros = [dict(row) for row in cursor.fetchall()]
 
             if not registros:
@@ -159,16 +166,17 @@ def subir_todo_a_la_nube():
             tamaño_lote = 500
             total_subidos = 0
             
-            # --- BLINDAJE: Para Promos y Combos (que no tienen ID), forzamos la subida ---
+            # --- SUBIDA FORZADA PARA TABLAS SIN ID ---
             if tabla in ['promociones_volumen', 'productos_combos']:
                 try:
+                    # Usamos .gt(..., 0) que es un comando infalible para borrar todo en Supabase
                     columna_filtro = 'producto_id' if tabla == 'promociones_volumen' else 'producto_padre_id'
-                    nube.table(tabla).delete().neq(columna_filtro, -1).execute() # Limpiamos la nube
+                    nube.table(tabla).delete().gt(columna_filtro, 0).execute() 
                 except:
                     pass
                 for i in range(0, len(registros), tamaño_lote):
                     paquete = registros[i:i + tamaño_lote]
-                    nube.table(tabla).insert(paquete).execute() # Insertamos a la fuerza
+                    nube.table(tabla).insert(paquete).execute() 
                     total_subidos += len(paquete)
             else:
                 # Tablas normales
