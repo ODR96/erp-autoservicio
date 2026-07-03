@@ -1183,22 +1183,28 @@ async function confirmarMerma() {
     }
 }
 
-async function forzarDescargaRapida() {
-    try {
-        // --- MAGIA DE MEMORIA: Guardamos la página y el scroll exacto antes de descargar ---
-        sessionStorage.setItem('paginaRetorno', paginaActualProd);
-        sessionStorage.setItem('alturaScroll', window.scrollY);
+async function forzarDescargaRapida(evento) {
+    // 1. ESCUDO ANTI-RECARGA: Frena cualquier "refresh" fantasma automático del HTML
+    if (evento) evento.preventDefault();
+    else if (window.event) window.event.preventDefault();
 
+    // 2. CLONACIÓN INBORRABLE: Anotamos dónde estás parado antes de hacer nada
+    let paginaSegura = paginaActualProd;
+    let scrollSeguro = window.scrollY;
+
+    try {
         Swal.fire({ title: 'Descargando...', text: 'Buscando cambios en la nube', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
         
-        // Acá ponés la ruta exacta que usaba la flechita de tu POS
         const res = await fetch(`${obtenerBaseUrl()}/sync/actualizar-rapido`, { method: 'POST' }); 
-        
         if (!res.ok) throw new Error("Fallo en la descarga");
         
-        // Recargamos las memorias. Al llamar a cargarCatalogo(), el sistema va a leer 
-        // la memoria que guardamos arriba y te va a dejar en el lugar exacto.
         await cargarCategoriasGlobales();
+        
+        // 3. INYECCIÓN JUSTO A TIEMPO: Guardamos la memoria un milisegundo antes 
+        // de recargar el catálogo, para que sea imposible que se borre en la espera.
+        sessionStorage.setItem('paginaRetorno', paginaSegura);
+        sessionStorage.setItem('alturaScroll', scrollSeguro);
+        
         await cargarCatalogo(); 
         
         Swal.fire('¡Actualizado!', 'Tu catálogo ya tiene los datos de la nube.', 'success');
