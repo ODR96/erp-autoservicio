@@ -1185,6 +1185,10 @@ async function confirmarMerma() {
 
 async function forzarDescargaRapida() {
     try {
+        // --- MAGIA DE MEMORIA: Guardamos la página y el scroll exacto antes de descargar ---
+        sessionStorage.setItem('paginaRetorno', paginaActualProd);
+        sessionStorage.setItem('alturaScroll', window.scrollY);
+
         Swal.fire({ title: 'Descargando...', text: 'Buscando cambios en la nube', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
         
         // Acá ponés la ruta exacta que usaba la flechita de tu POS
@@ -1192,7 +1196,8 @@ async function forzarDescargaRapida() {
         
         if (!res.ok) throw new Error("Fallo en la descarga");
         
-        // Recargamos las memorias para que la tabla muestre los precios nuevos
+        // Recargamos las memorias. Al llamar a cargarCatalogo(), el sistema va a leer 
+        // la memoria que guardamos arriba y te va a dejar en el lugar exacto.
         await cargarCategoriasGlobales();
         await cargarCatalogo(); 
         
