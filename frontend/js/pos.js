@@ -91,6 +91,13 @@ async function finalizarVenta() {
     }
 }
 
+function obtenerBaseUrl() {
+    // Si estás en tu compu usa localhost, si estás en Vercel usa Render
+    return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+        ? 'http://localhost:8000' 
+        : 'https://erp-autoservicio-backend.onrender.com'; 
+}
+
 function abrirModalCobro(metodo) {
     if (carrito.length === 0) return alert("El carrito está vacío");
     metodoSeleccionado = metodo;
