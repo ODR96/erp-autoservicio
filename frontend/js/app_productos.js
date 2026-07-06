@@ -1161,7 +1161,6 @@ async function confirmarMerma() {
 
     if (cantidad <= 0 || !loteId) return Swal.fire('Error', 'Faltan datos válidos.', 'error');
 
-    // Ya no le pegamos el texto del PIN, solo la observación
     const motivoCompleto = obs ? `${motivo} - Obs: ${obs}` : motivo;
     const usuarioId = localStorage.getItem('usuario_id') || 1;
 
@@ -1177,6 +1176,11 @@ async function confirmarMerma() {
 
         await Swal.fire('¡Merma Registrada!', 'El stock fue descontado y registrado en la auditoría.', 'success');
         bootstrap.Modal.getInstance(document.getElementById('modalMerma')).hide();
+        
+        // --- EL PARCHE DE MEMORIA ANTES DE RECARGAR ---
+        sessionStorage.setItem('paginaRetorno', paginaActualProd);
+        sessionStorage.setItem('alturaScroll', window.scrollY);
+        
         cargarCatalogo();
     } catch (error) {
         Swal.fire('Error', error.message || 'No se pudo procesar la baja.', 'error');
