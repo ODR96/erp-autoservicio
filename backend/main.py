@@ -52,6 +52,13 @@ def inicializar_base_vacia():
             print("🔧 [Auto-Parche] Evolución aplicada: Columna 'unidades_por_bulto' agregada a SQLite.")
         except:
             pass # Si falla es porque la columna ya existe, está todo perfecto.
+        
+        # --- AGREGÁ ESTE BLOQUE NUEVO ---
+        try:
+            conexion.execute("ALTER TABLE cola_impresion_etiquetas ADD COLUMN plantilla TEXT DEFAULT 'Clasica'")
+            conexion.execute("ALTER TABLE cola_impresion_etiquetas ADD COLUMN color_tema TEXT DEFAULT '#1a365d'")
+        except:
+            pass
             
         conexion.commit()
         conexion.close()

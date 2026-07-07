@@ -561,28 +561,30 @@ class EtiquetaNueva(BaseModel):
     tipo_cartel: str
     cantidad_copias: int
     texto_personalizado: str = "" # <-- NUEVO: El texto opcional
+    plantilla: str = "Clasica"      # <-- NUEVO
+    color_tema: str = "#1a365d"
 
 @router.post("/etiquetas/encolar")
 def encolar_etiqueta(datos: EtiquetaNueva):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     cursor = conexion.cursor()
     cursor.execute('''
-        INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, texto_personalizado) 
-        VALUES (?, ?, ?, 0, ?)
-    ''', (datos.producto_id, datos.tipo_cartel, datos.cantidad_copias, datos.texto_personalizado))
+        INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, texto_personalizado, plantilla, color_tema) 
+        VALUES (?, ?, ?, 0, ?, ?, ?)
+    ''', (datos.producto_id, datos.tipo_cartel, datos.cantidad_copias, datos.texto_personalizado, datos.plantilla, datos.color_tema))
     conexion.commit()
     conexion.close()
-    return {"mensaje": "Etiqueta encolada"}
+    return {"mensaje": "Etiqueta encolada con diseño guardado"}
 
 @router.get("/etiquetas/listar")
 def listar_cola_impresion():
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    # Ahora traemos el código de barras y el texto personalizado también
     cursor.execute('''
         SELECT c.id as cola_id, p.id as producto_id, p.nombre, p.precio_venta_final, p.codigo_barras, 
-               c.tipo_cartel as formato, c.cantidad_copias as cantidad, c.texto_personalizado
+               c.tipo_cartel as formato, c.cantidad_copias as cantidad, c.texto_personalizado,
+               c.plantilla, c.color_tema
         FROM cola_impresion_etiquetas c
         JOIN productos p ON c.producto_id = p.id
         WHERE c.impreso = 0
