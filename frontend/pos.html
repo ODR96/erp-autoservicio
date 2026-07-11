@@ -2358,56 +2358,40 @@ async function confirmarAnulacion(ventaId, ticket) {
         // ==============================================================
         // 3. LA FUNCIÓN DEL CIERRE Z (REEMPLAZAR COMPLETA)
         // ==============================================================
-        async function cierreZ() {
-            if (carrito.length > 0) return Swal.fire('Error', 'Anule la venta en curso antes de cerrar la caja.', 'error');
-            modalGestion.hide();
+// --- MOTOR DE CIERRE DE EMERGENCIA REMOTO ---
+async function forzarCierreRemoto(turnoId) {
+    const confirm = await Swal.fire({
+        title: '¿Forzar Cierre Remoto?',
+        text: "Vas a cerrar este turno desde la oficina. Se declararán $0 de efectivo físico en el conteo manual (podrás ajustarlo en los reportes luego). Usar solo si la caja quedó trabada.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonText: 'Cancelar',
+        confirmButtonText: 'Sí, forzar cierre'
+    });
 
-            const { value: montoDeclarado } = await Swal.fire({
-                title: 'CIERRE Z (Finalizar Turno)',
-                text: 'Ingrese el dinero físico (billetes) que hay en el cajón ahora mismo:',
-                input: 'number',
-                inputPlaceholder: 'Ej: 56000',
-                showCancelButton: true,
-                confirmButtonColor: '#d33',
-                confirmButtonText: 'Cerrar Turno',
-                preConfirm: (val) => {
-                    if (!val || val < 0) Swal.showValidationMessage('Ingrese un monto válido');
-                    return parseFloat(val);
-                }
+    if (confirm.isConfirmed) {
+        Swal.fire({ title: 'Cerrando caja remotamente...', didOpen: () => Swal.showLoading() });
+        try {
+            const res = await fetch(`${obtenerBaseUrl()}/caja/cerrar`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    turno_id: turnoId, 
+                    monto_final_declarado: 0 // Declaramos 0 porque el cajero no hizo el conteo manual
+                })
             });
-
-            if (montoDeclarado !== undefined) {
-                Swal.fire({ title: 'Cerrando caja...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                try {
-                    const res = await fetch('http://localhost:8000/caja/cerrar', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ turno_id: turnoActualId, monto_final_declarado: montoDeclarado })
-                    });
-
-                    const data = await res.json();
-
-                    if (!res.ok) {
-                        let msjError = "Fallo de comunicación con Python";
-                        if (data.detail && Array.isArray(data.detail)) msjError = "Datos incorrectos: " + data.detail[0].loc.join(" -> ");
-                        throw new Error(msjError);
-                    }
-                    if (data.error) throw new Error(data.detalle || data.error);
-
-                    // Pasamos la data entera al ticket
-                    imprimirTicketCaja('Z', data, montoDeclarado);
-
-                    cajaAbierta = false;
-                    turnoActualId = null;
-                    setTimeout(() => { 
-                        localStorage.removeItem('empleado_pos');
-                        localStorage.removeItem('token_pos');
-                        window.location.href = "index.html"; 
-                    }, 2000);                } catch (e) {
-                    Swal.fire('Error al cerrar caja', e.message, 'error');
-                }
-            }
+            
+            const data = await res.json();
+            if (!res.ok || data.error) throw new Error(data.error || "Fallo al cerrar remotamente");
+            
+            Swal.fire('¡Cerrada!', 'La caja fue destrabada y cerrada exitosamente.', 'success');
+            cargarDatosEnVivo(); // Refresca el monitor y desaparece la caja
+        } catch (e) {
+            Swal.fire('Error', e.message, 'error');
         }
+    }
+}
 
         // ===== NUEVO MOTOR: IMPRESIÓN DE TICKET 80mm (Diseño Real) =====
 async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, ahorroReal = 0) {

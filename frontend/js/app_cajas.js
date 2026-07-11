@@ -75,6 +75,9 @@ async function cargarMonitor() {
                                 <span class="d-block text-muted fw-bold small text-uppercase mb-1">Efectivo Físico en Cajón</span>
                                 <h3 class="fw-bold text-success mb-0">$${t.total_esperado.toFixed(2)}</h3>
                             </div>
+                            <button class="btn btn-outline-danger w-100 fw-bold shadow-sm" onclick="forzarCierreRemoto(${t.turno_id})">
+    <i class="bi bi-x-octagon-fill"></i> FORZAR CIERRE DE CAJA
+</button>
                         </div>
                     </div>
                 </div>
@@ -83,6 +86,41 @@ async function cargarMonitor() {
 
     } catch (e) {
         contenedor.innerHTML = `<div class="col-12 text-center text-danger py-4 fw-bold">Error de conexión con el servidor.</div>`;
+    }
+}
+
+// --- MOTOR DE CIERRE DE EMERGENCIA REMOTO ---
+async function forzarCierreRemoto(turnoId) {
+    const confirm = await Swal.fire({
+        title: '¿Forzar Cierre Remoto?',
+        text: "Vas a cerrar este turno desde la oficina. Se declararán $0 de efectivo físico en el conteo manual (podrás ajustarlo en los reportes luego). Usar solo si la caja quedó trabada.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonText: 'Cancelar',
+        confirmButtonText: 'Sí, forzar cierre'
+    });
+
+    if (confirm.isConfirmed) {
+        Swal.fire({ title: 'Cerrando caja remotamente...', didOpen: () => Swal.showLoading() });
+        try {
+            const res = await fetch(`${obtenerBaseUrl()}/caja/cerrar`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    turno_id: turnoId, 
+                    monto_final_declarado: 0 // Declaramos 0 porque el cajero no hizo el conteo manual
+                })
+            });
+            
+            const data = await res.json();
+            if (!res.ok || data.error) throw new Error(data.error || "Fallo al cerrar remotamente");
+            
+            Swal.fire('¡Cerrada!', 'La caja fue destrabada y cerrada exitosamente.', 'success');
+            cargarDatosEnVivo(); // Refresca el monitor y desaparece la caja
+        } catch (e) {
+            Swal.fire('Error', e.message, 'error');
+        }
     }
 }
 
