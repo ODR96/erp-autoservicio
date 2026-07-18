@@ -895,6 +895,8 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
+    <script src="js/layout.js"></script>
+
     <script>
 
         // --- UTILIDAD: Buscador a prueba de errores ---
@@ -946,7 +948,7 @@
         });
 
         // --- MOTOR DE AUTORIZACIONES REALES ---
-        async function solicitarAutorizacion(mensaje) {
+async function solicitarAutorizacion(mensaje) {
             const { value: pin } = await Swal.fire({
                 title: '⚠️ Autorización Requerida',
                 html: `${mensaje}<br><br>Ingrese PIN de Encargado o Admin:`,
@@ -961,10 +963,13 @@
 
             try {
                 Swal.fire({ title: 'Verificando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                const res = await fetch(`${obtenerBaseUrl()}/usuarios/autorizar, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                
+                // ACÁ ESTABA EL ERROR DE SINTAXIS (La comilla estaba mal cerrada)
+                const res = await fetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ pin_secreto: pin, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
-                }`);
+                });
 
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail);
@@ -985,7 +990,7 @@
             Swal.fire({ title: 'Verificando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
             try {
-                const res = await fetch('http://localhost:8000/usuarios/login', {
+                const res = await fetch(`${obtenerBaseUrl()}/usuarios/login`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ codigo_credencial: cred, pin_secreto: pin })
                 });
@@ -1053,7 +1058,7 @@
 
             // 4. Verificamos el estado de la caja
             try {
-                const res = await fetch('http://localhost:8000/caja/estado?caja_id=1');
+                const res = await fetch(`${obtenerBaseUrl()}/caja/estado?caja_id=1`);
                 const data = await res.json();
 
                 if (data.estado === 'ABIERTO') {
@@ -1203,7 +1208,7 @@ async function confirmarAnulacion(ventaId, ticket) {
 
             try {
                 const payload = { caja_id: 1, usuario_id: empleadoLogueado.id, monto_inicial: monto };
-                const response = await fetch('http://localhost:8000/caja/abrir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const response = await fetch(`${obtenerBaseUrl()}/caja/abrir`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                 const data = await response.json();
                 if (data.error) throw new Error(data.error);
 
@@ -1564,7 +1569,7 @@ async function confirmarAnulacion(ventaId, ticket) {
             };
 
             try {
-                const response = await fetch('http://localhost:8000/ventas/cobrar', {
+                const response = await fetch(`${obtenerBaseUrl()}/ventas/cobrar`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadVenta)
                 });
                 const data = await response.json();
@@ -1639,7 +1644,7 @@ async function confirmarAnulacion(ventaId, ticket) {
             modalDeuda.show();
 
             try {
-                const res = await fetch('http://localhost:8000/clientes/listado');
+                const res = await fetch(`${obtenerBaseUrl()}/clientes/listado`);
                 const data = await res.json();
                 clientesGlobalesPOS = data.clientes || data; // Soporta ambos formatos
                 setTimeout(() => document.getElementById("inputBuscarFiado").focus(), 500);
@@ -1855,7 +1860,7 @@ async function confirmarAnulacion(ventaId, ticket) {
             modalSeleccionCliente.show();
             document.getElementById('listaClientesAsignacion').innerHTML = '<div class="text-center p-3 text-muted">Cargando clientes...</div>';
             try {
-                const res = await fetch('http://localhost:8000/clientes/listado');
+                const res = await fetch(`${obtenerBaseUrl()}/clientes/listado`);
                 const data = await res.json();
                 clientesGlobalesPOS = data.clientes || data;
                 filtrarClientesAsignacion();
@@ -1960,7 +1965,7 @@ async function confirmarAnulacion(ventaId, ticket) {
             // VERIFICACIÓN CON EL BACKEND EN VEZ DE 1234
             Swal.fire({ title: 'Autorizando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
             try {
-                const resAuth = await fetch('http://localhost:8000/usuarios/autorizar', {
+                const resAuth = await fetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ pin_secreto: pin, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
                 });
@@ -1971,7 +1976,7 @@ async function confirmarAnulacion(ventaId, ticket) {
 
             Swal.fire({ title: 'Guardando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
             try {
-                const res = await fetch('http://localhost:8000/clientes/registrar', {
+                const res = await fetch(`${obtenerBaseUrl()}/clientes/registrar`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ nombre_completo: nombre, cuit: dni, telefono_whatsapp: "", limite_credito: limite })
                 });
@@ -2082,7 +2087,7 @@ async function confirmarAnulacion(ventaId, ticket) {
                         if (!pinEl || !pinEl.value) { Swal.showValidationMessage('Ingrese su PIN secreto'); return false; }
 
                         try {
-                            const resAuth = await fetch('http://localhost:8000/usuarios/autorizar', {
+                            const resAuth = await fetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ pin_secreto: pinEl.value, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
                             });
@@ -2099,7 +2104,7 @@ async function confirmarAnulacion(ventaId, ticket) {
 
             if (formValues) {
                 try {
-                    await fetch('http://localhost:8000/caja/movimiento', {
+                    await fetch(`${obtenerBaseUrl()}/caja/movimiento`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -2358,6 +2363,68 @@ async function confirmarAnulacion(ventaId, ticket) {
         // ==============================================================
         // 3. LA FUNCIÓN DEL CIERRE Z (REEMPLAZAR COMPLETA)
         // ==============================================================
+        async function cierreZ() {
+            if (carrito.length > 0) return Swal.fire('Error', 'Anule la venta en curso antes de cerrar la caja.', 'error');
+            modalGestion.hide();
+
+            const { value: montoDeclarado } = await Swal.fire({
+                title: 'CIERRE Z (Finalizar Turno)',
+                text: 'Ingrese el dinero físico (billetes) que hay en el cajón ahora mismo:',
+                input: 'number',
+                inputPlaceholder: 'Ej: 56000',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                confirmButtonText: 'Cerrar Turno',
+                preConfirm: (val) => {
+                    if (!val || val < 0) Swal.showValidationMessage('Ingrese un monto válido');
+                    return parseFloat(val);
+                }
+            });
+
+            if (montoDeclarado !== undefined) {
+                Swal.fire({ title: 'Cerrando caja...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+                try {
+                    const res = await fetch(`${obtenerBaseUrl()}/caja/cerrar`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ turno_id: turnoActualId, monto_final_declarado: montoDeclarado })
+                    });
+
+                    const data = await res.json();
+
+                    if (!res.ok) {
+                        let msjError = "Fallo de comunicación con Python";
+                        if (data.detail && Array.isArray(data.detail)) msjError = "Datos incorrectos: " + data.detail[0].loc.join(" -> ");
+                        throw new Error(msjError);
+                    }
+                    if (data.error) throw new Error(data.detalle || data.error);
+
+                    imprimirTicketCaja('Z', data, montoDeclarado);
+
+                    cajaAbierta = false;
+                    turnoActualId = null;
+
+                    await Swal.fire({
+                        title: '¡Caja Cerrada!',
+                        text: 'El turno se cerró correctamente. Esperá que termine de imprimir el comprobante antes de salir.',
+                        icon: 'success',
+                        confirmButtonText: '<i class="bi bi-box-arrow-right"></i> Salir del POS',
+                        allowOutsideClick: false
+                    });
+
+                    localStorage.removeItem('empleado_pos');
+                    localStorage.removeItem('token_pos');
+                    window.location.href = "index.html"; 
+
+                } catch (e) {
+                    Swal.fire('Error al cerrar caja', e.message, 'error');
+                }
+            }
+        }
+
+        // ==============================================================
+        // 3. LA FUNCIÓN DEL CIERRE Z (REEMPLAZAR COMPLETA)
+        // ==============================================================
 // --- MOTOR DE CIERRE DE EMERGENCIA REMOTO ---
 async function forzarCierreRemoto(turnoId) {
     const confirm = await Swal.fire({
@@ -2398,7 +2465,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
             try {
                 const res = await fetch(`http://localhost:8000/ventas/ticket/${ticketId}`);
                 const ticket = await res.json();
-                const resConfig = await fetch('http://localhost:8000/config/leer');
+                const resConfig = await fetch(`${obtenerBaseUrl()}/config/leer`);
                 const config = await resConfig.json();
                 if (ticket.error) return Swal.fire('Error', ticket.error, 'error');
 
@@ -2676,7 +2743,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
         // ===== CARGAR CATEGORÍAS RÁPIDAS DESDE PYTHON =====
         async function cargarCategoriasRapidas() {
             try {
-                const res = await fetch('http://localhost:8000/productos/categorias_pos');
+                const res = await fetch(`${obtenerBaseUrl()}/productos/categorias_pos`);
                 const data = await res.json();
 
                 if (data.error) throw new Error(data.error);
@@ -2906,7 +2973,7 @@ async function abrirCobroPedidoMayorista() {
         // PROCEDEMOS A GUARDAR EN LA BASE DE DATOS
         Swal.fire({ title: 'Guardando en caja...', didOpen: () => Swal.showLoading() });
         
-        const resCobro = await fetch('http://localhost:8000/caja/cobrar_pedido', {
+        const resCobro = await fetch(`${obtenerBaseUrl()}/caja/cobrar_pedido`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2932,6 +2999,8 @@ async function abrirCobroPedidoMayorista() {
         Swal.fire('Operación Cancelada', e.message, 'error');
     }
 }
+    
+
     </script>
 </body>
 
