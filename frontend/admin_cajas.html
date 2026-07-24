@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="css/estilos.css">
 </head>
+
 <body>
 
     <div id="layout-sidebar-placeholder"></div>
@@ -22,7 +24,12 @@
                     <button class="btn btn-outline-primary fw-bold shadow-sm w-100" onclick="cargarDatosEnVivo()">
                         <i class="bi bi-arrow-clockwise"></i> ACTUALIZAR VIVO
                     </button>
-                    <button class="btn btn-primary fw-bold shadow-sm w-100" data-bs-toggle="modal" data-bs-target="#modalNuevoEmpleado" style="white-space: nowrap;">
+                    <button class="btn btn-warning fw-bold shadow-sm w-100" data-bs-toggle="modal"
+                        data-bs-target="#modalVentasHistoricas">
+                        <i class="bi bi-calendar-date"></i> VENTAS ANTERIORES
+                    </button>
+                    <button class="btn btn-primary fw-bold shadow-sm w-100" data-bs-toggle="modal"
+                        data-bs-target="#modalNuevoEmpleado" style="white-space: nowrap;">
                         <i class="bi bi-person-plus-fill"></i> NUEVO EMPLEADO
                     </button>
                 </div>
@@ -30,12 +37,14 @@
 
             <div class="card-custom">
                 <ul class="nav nav-tabs flex-nowrap overflow-auto" id="cajaTabs" style="white-space: nowrap;">
-                    <li class="nav-item"><button class="nav-link active" onclick="cambiarPestana('vivo', event)"><i class="bi bi-display"></i> Monitor en Vivo</button></li>
-                    <li class="nav-item"><button class="nav-link" onclick="cambiarPestana('empleados', event)"><i class="bi bi-people"></i> Empleados y Permisos</button></li>
+                    <li class="nav-item"><button class="nav-link active" onclick="cambiarPestana('vivo', event)"><i
+                                class="bi bi-display"></i> Monitor en Vivo</button></li>
+                    <li class="nav-item"><button class="nav-link" onclick="cambiarPestana('empleados', event)"><i
+                                class="bi bi-people"></i> Empleados y Permisos</button></li>
                 </ul>
 
                 <div class="tab-content p-4">
-                    
+
                     <div class="tab-pane active" id="tab-vivo">
                         <div class="row g-4" id="contenedorMonitorVivo">
                             <div class="col-12 text-center text-muted py-5">
@@ -58,7 +67,7 @@
                                     </tr>
                                 </thead>
                                 <tbody id="tablaEmpleadosBody">
-                                    </tbody>
+                                </tbody>
                             </table>
                         </div>
                     </div>
@@ -69,7 +78,7 @@
     </div>
 
     <div class="modal fade" id="modalNuevoEmpleado" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered"> 
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content border-primary">
                 <div class="modal-header bg-primary text-white">
                     <h5 class="modal-title fw-bold"><i class="bi bi-person-badge"></i> Alta de Empleado</h5>
@@ -91,26 +100,76 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-bold small">PIN Secreto (Para Login y Autorizaciones)</label>
-                        <input id="empPin" type="password" class="form-control text-center fs-4 fw-bold" placeholder="Ej: 1234">
-                        <small class="text-danger d-block mt-1"><i class="bi bi-shield-lock"></i> Se guardará encriptado nivel bancario.</small>
+                        <input id="empPin" type="password" class="form-control text-center fs-4 fw-bold"
+                            placeholder="Ej: 1234">
+                        <small class="text-danger d-block mt-1"><i class="bi bi-shield-lock"></i> Se guardará encriptado
+                            nivel bancario.</small>
                     </div>
                     <div class="mb-2">
                         <label class="form-label fw-bold small">Cód. de Barras de su Tarjeta (Opcional)</label>
-                        <input id="empCredencial" type="text" class="form-control" placeholder="Escanee la tarjeta o invente un número">
+                        <input id="empCredencial" type="text" class="form-control"
+                            placeholder="Escanee la tarjeta o invente un número">
                     </div>
                 </div>
                 <div class="modal-footer bg-white border-top">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-primary fw-bold px-4" onclick="guardarEmpleado()">Registrar Empleado</button>
+                    <button type="button" class="btn btn-primary fw-bold px-4" onclick="guardarEmpleado()">Registrar
+                        Empleado</button>
                 </div>
             </div>
         </div>
     </div>
+    <div class="modal fade" id="modalVentasHistoricas" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content border-warning shadow-lg">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title fw-bold"><i class="bi bi-calendar-check"></i> Historial de Ventas por Día</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="row g-2 mb-4 align-items-end bg-light p-3 rounded border">
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold small">Seleccione el Día:</label>
+                        <input type="date" id="inputFechaHistorica" class="form-control form-control-lg border-warning">
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-dark btn-lg w-100 fw-bold" onclick="buscarVentasPorFecha()">
+                            <i class="bi bi-search"></i> BUSCAR
+                        </button>
+                    </div>
+                    <div class="col-md-5 text-end">
+                        <h4 class="mb-0 text-muted">Total del Día: <span id="totalDiaHistorico" class="text-success fw-bold">$0.00</span></h4>
+                    </div>
+                </div>
+
+                <div class="table-responsive" style="max-height: 50vh; overflow-y: auto;">
+                    <table class="table table-hover table-sm align-middle text-center border">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>Hora</th>
+                                <th>Ticket</th>
+                                <th>Cliente</th>
+                                <th>Método</th>
+                                <th>Cajero</th>
+                                <th class="text-end pe-3">Total</th>
+                                <th>Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaVentasHistoricas">
+                            <tr><td colspan="7" class="text-muted py-4">Seleccioná una fecha para ver las ventas.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    
+
     <script src="js/layout.js"></script>
     <script src="js/app_cajas.js"></script>
 </body>
+
 </html>

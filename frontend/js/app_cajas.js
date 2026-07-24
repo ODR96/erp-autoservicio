@@ -124,6 +124,57 @@ async function forzarCierreRemoto(turnoId) {
     }
 }
 
+async function buscarVentasPorFecha() {
+    const fecha = document.getElementById('inputFechaHistorica').value;
+    if (!fecha) return Swal.fire('Aviso', 'Elegí una fecha primero.', 'warning');
+
+    const tbody = document.getElementById('tablaVentasHistoricas');
+    const totalVisor = document.getElementById('totalDiaHistorico');
+    
+    tbody.innerHTML = '<tr><td colspan="7" class="py-4"><div class="spinner-border text-warning"></div> Buscando...</td></tr>';
+    
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/por_fecha?fecha=${fecha}`);
+        const data = await res.json();
+        
+        if (data.error) throw new Error(data.error);
+
+        tbody.innerHTML = '';
+        let sumaTotal = 0;
+
+        if (data.ventas.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-muted py-4">No hay ventas registradas en este día.</td></tr>';
+            totalVisor.innerText = '$0.00';
+            return;
+        }
+
+        data.ventas.forEach(v => {
+            const esAnulada = v.estado === 'ANULADA';
+            const colorFila = esAnulada ? 'text-muted text-decoration-line-through bg-light' : '';
+            const badge = esAnulada ? '<span class="badge bg-danger">Anulada</span>' : '<span class="badge bg-success">Ok</span>';
+            
+            if (!esAnulada) sumaTotal += v.total_venta;
+
+            tbody.innerHTML += `
+                <tr class="${colorFila}">
+                    <td>${v.fecha_hora.split(' ')[1]}</td>
+                    <td class="fw-bold">${v.numero_ticket}</td>
+                    <td>${v.cliente || 'Consumidor Final'}</td>
+                    <td>${v.metodo_pago}</td>
+                    <td>${v.cajero_nombre || '-'}</td>
+                    <td class="text-end fw-bold pe-3">$${v.total_venta.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                    <td>${badge}</td>
+                </tr>
+            `;
+        });
+
+        totalVisor.innerText = `$${sumaTotal.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-danger py-4">Error: ${e.message}</td></tr>`;
+    }
+}
+
 async function cargarEmpleados() {
     const tbody = document.getElementById('tablaEmpleadosBody');
     try {
