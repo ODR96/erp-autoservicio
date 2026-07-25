@@ -13,15 +13,21 @@ def obtener_ventas_por_fecha(fecha: str = Query(..., description="Formato YYYY-M
     cursor = conexion.cursor()
     
     try:
-        # Busca todas las ventas donde la fecha coincida con la ingresada
+        # Apuntamos a tu tabla real: ventas_cabecera
         cursor.execute("""
-            SELECT id, numero_ticket, fecha_hora, total_venta, metodo_pago, estado, cliente, cajero_nombre 
-            FROM ventas 
+            SELECT * FROM ventas_cabecera 
             WHERE DATE(fecha_hora) = ?
             ORDER BY fecha_hora DESC
         """, (fecha,))
         
-        ventas = [dict(row) for row in cursor.fetchall()]
+        ventas = []
+        for row in cursor.fetchall():
+            d = dict(row)
+            # Emparejamos los nombres que saca la base de datos con los que espera el JS
+            d["cliente"] = d.get("nombre_cliente_factura", "Consumidor Final")
+            d["cajero_nombre"] = d.get("cajero_nombre", "-")
+            ventas.append(d)
+            
         return {"ventas": ventas}
     except Exception as e:
         return {"error": str(e)}
