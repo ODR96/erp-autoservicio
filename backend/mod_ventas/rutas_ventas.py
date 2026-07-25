@@ -350,3 +350,25 @@ def anular_venta(venta_id: int):
         return {"error": str(e)}
     finally:
         conexion.close()
+        
+@router.get("/por_fecha")
+def obtener_ventas_por_fecha(fecha: str = Query(..., description="Formato YYYY-MM-DD")):
+    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    
+    try:
+        # Busca todas las ventas donde la fecha coincida con la ingresada
+        cursor.execute("""
+            SELECT id, numero_ticket, fecha_hora, total_venta, metodo_pago, estado, cliente, cajero_nombre 
+            FROM ventas 
+            WHERE DATE(fecha_hora) = ?
+            ORDER BY fecha_hora DESC
+        """, (fecha,))
+        
+        ventas = [dict(row) for row in cursor.fetchall()]
+        return {"ventas": ventas}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conexion.close()
