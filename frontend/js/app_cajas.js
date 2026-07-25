@@ -137,12 +137,18 @@ async function buscarVentasPorFecha() {
         const res = await fetch(`${obtenerBaseUrl()}/ventas/por_fecha?fecha=${fecha}`);
         const data = await res.json();
         
+        // 🛡️ EL ESCUDO: Si Python nos tira un error 404, 422 o 500, lo atrapamos acá
+        if (!res.ok) {
+            let errorOculto = data.detail ? JSON.stringify(data.detail) : 'Ruta no encontrada o caída';
+            throw new Error(data.error || errorOculto);
+        }
         if (data.error) throw new Error(data.error);
 
         tbody.innerHTML = '';
         let sumaTotal = 0;
 
-        if (data.ventas.length === 0) {
+        // 🛡️ DOBLE CHEQUEO: Nos aseguramos de que 'data.ventas' realmente exista
+        if (!data.ventas || data.ventas.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-muted py-4">No hay ventas registradas en este día.</td></tr>';
             totalVisor.innerText = '$0.00';
             return;
@@ -171,7 +177,9 @@ async function buscarVentasPorFecha() {
         totalVisor.innerText = `$${sumaTotal.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
 
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-danger py-4">Error: ${e.message}</td></tr>`;
+        // En vez de romperse, ahora te avisa con letras rojas
+        tbody.innerHTML = `<tr><td colspan="7" class="text-danger fw-bold py-4">Error: ${e.message}</td></tr>`;
+        totalVisor.innerText = '$0.00';
     }
 }
 
