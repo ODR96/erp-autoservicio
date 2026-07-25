@@ -161,15 +161,27 @@ async function buscarVentasPorFecha() {
             
             if (!esAnulada) sumaTotal += v.total_venta;
 
+            // 1. Limpiamos el "undefined" usando el ID real de la base de datos
+            const numTicket = v.numero_ticket || v.id;
+            
+            // 2. Limpiamos el texto residual de "Debe: $..." si quedó guardado
+            let clienteLimpio = v.cliente || 'Consumidor Final';
+            clienteLimpio = clienteLimpio.split(' Debe:')[0].split(' A favor:')[0].trim();
+
+            // 3. Los Botones de Ojo e Impresora
+            const btnOjo = `<button class="btn btn-sm btn-outline-info py-0 me-1" onclick="verDetalleTicketHistorico(${v.id})" title="Ver Detalle"><i class="bi bi-eye"></i></button>`;
+            const btnImprimir = `<button class="btn btn-sm btn-outline-secondary py-0" onclick="imprimirTicketHistorico(${v.id})" title="Imprimir Copia"><i class="bi bi-printer"></i></button>`;
+
             tbody.innerHTML += `
                 <tr class="${colorFila}">
                     <td>${v.fecha_hora.split(' ')[1]}</td>
-                    <td class="fw-bold">${v.numero_ticket}</td>
-                    <td>${v.cliente || 'Consumidor Final'}</td>
+                    <td class="fw-bold">${numTicket}</td>
+                    <td>${clienteLimpio}</td>
                     <td>${v.metodo_pago}</td>
                     <td>${v.cajero_nombre || '-'}</td>
                     <td class="text-end fw-bold pe-3">$${v.total_venta.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
                     <td>${badge}</td>
+                    <td>${btnOjo} ${btnImprimir}</td>
                 </tr>
             `;
         });
@@ -180,6 +192,125 @@ async function buscarVentasPorFecha() {
         // En vez de romperse, ahora te avisa con letras rojas
         tbody.innerHTML = `<tr><td colspan="7" class="text-danger fw-bold py-4">Error: ${e.message}</td></tr>`;
         totalVisor.innerText = '$0.00';
+    }
+}
+
+// --- EL OJO: Ver Detalle del Ticket ---
+async function verDetalleTicketHistorico(ventaId) {
+    Swal.fire({ title: 'Cargando detalle...', didOpen: () => Swal.showLoading() });
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
+        const data = await res.json();
+
+        if (data.error) throw new Error(data.error);
+
+        let html = `<div class="table-responsive"><table class="table table-sm text-start align-middle">
+            <thead class="table-light"><tr><th>Cant.</th><th>Producto</th><th class="text-end">Total</th></tr></thead><tbody>`;
+
+        data.detalle_compra.forEach(d => {
+            html += `<tr>
+                <td class="fw-bold">${d.cantidad}</td>
+                <td class="small">${d.nombre}</td>
+                <td class="text-end">$${d.subtotal.toFixed(2)}</td>
+            </tr>`;
+        });
+
+        html += `</tbody></table></div>
+                 <div class="text-end fw-bold fs-5 mt-2 text-success">Total Pagado: $${data.totales.total_a_pagar.toFixed(2)}</div>`;
+
+        // El modal es tan inteligente que te permite imprimir directamente desde adentro
+        Swal.fire({
+            title: `<i class="bi bi-receipt text-primary"></i> Detalle del Ticket #${data.encabezado.numero_ticket || ventaId}`,
+            html: html, width: '500px', showCloseButton: true, showCancelButton: true,
+            confirmButtonText: '<i class="bi bi-printer"></i> Imprimir Copia',
+            cancelButtonText: 'Cerrar',
+            confirmButtonColor: '#1b365d'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                imprimirTicketHistorico(ventaId);
+            }
+        });
+    } catch (e) {
+        Swal.fire('Error', 'No se pudo cargar el detalle del ticket.', 'error');
+    }
+}
+
+// --- LA IMPRESORA: Generar ticket de 80mm desde Admin ---
+async function imprimirTicketHistorico(ticketId) {
+    try {
+        Swal.fire({ title: 'Preparando impresión...', timer: 1000, showConfirmButton: false, didOpen: () => Swal.showLoading() });
+        
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
+        const ticket = await res.json();
+        
+        // Buscamos los datos de tu negocio en la memoria o ponemos genéricos
+        const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "AUTOSERVICIO", direccion: "", cuit: ""};
+
+        if (ticket.error) throw new Error(ticket.error);
+
+        let html = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <style>
+                    @page { margin: 0; }
+                    body { font-family: Arial, sans-serif; font-size: 12px; font-weight: 600; color: #000; margin: 0; padding: 2mm 4mm; width: 72mm; }
+                    .center { text-align: center; } .right { text-align: right; } .left { text-align: left; } .bold { font-weight: bold; }
+                    .divisor { border-top: 1px dashed #000; margin: 4px 0; }
+                    .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 4px 0; }
+                    table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 5px 0; }
+                    th, td { text-align: left; padding: 2px 0; vertical-align: top; }
+                </style>
+            </head>
+            <body>
+                <div class="center bold" style="font-size: 16px;">${config.nombre_negocio.toUpperCase()}</div>
+                <div class="center bold" style="font-size: 11px; border: 1px solid #000;">*** COPIA DEL TICKET ***</div>
+                <div class="divisor-doble"></div>
+                
+                <div class="left">Ticket N°: ${ticket.encabezado.numero_ticket || ticketId}</div>
+                <div class="left">Fecha: ${ticket.encabezado.fecha}</div>
+                <div class="left">Cajero: ${ticket.encabezado.cajero || '-'}</div>
+                <div class="left">Cliente: ${ticket.encabezado.cliente || 'Consumidor Final'}</div>
+                
+                <div class="divisor-doble"></div>
+                
+                <table>
+                    <tr><th style="width: 15%;">CANT</th><th style="width: 50%;">ARTICULO</th><th class="right">TOTAL</th></tr>
+                    <tr><td colspan="3"><div class="divisor"></div></td></tr>
+        `;
+
+        ticket.detalle_compra.forEach(item => {
+            html += `<tr><td class="left">${item.cantidad}</td><td>${item.nombre}</td><td class="right">$${item.subtotal.toFixed(2)}</td></tr>`;
+        });
+
+        html += `
+                    <tr><td colspan="3"><div class="divisor"></div></td></tr>
+                </table>
+                <div style="display: flex; justify-content: space-between;" class="bold">
+                    <span>TOTAL:</span>
+                    <span>$ ${ticket.totales.total_a_pagar.toFixed(2)}</span>
+                </div>
+                <div class="divisor-doble"></div>
+                <div class="left">Forma de Pago: ${ticket.totales.metodo_pago}</div>
+                
+                <div style="margin-bottom: 25mm;"></div> 
+            </body>
+            </html>
+        `;
+
+        let ventanaPrint = window.open('', '_blank', 'width=300,height=500');
+        ventanaPrint.document.write(html);
+        ventanaPrint.document.close();
+        ventanaPrint.focus();
+
+        setTimeout(() => {
+            ventanaPrint.print();
+            ventanaPrint.close();
+        }, 500);
+
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
     }
 }
 
