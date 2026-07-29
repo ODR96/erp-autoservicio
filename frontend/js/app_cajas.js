@@ -14,11 +14,11 @@ async function cargarDatosEnVivo() {
 
 async function cargarMonitor() {
     const contenedor = document.getElementById('contenedorMonitorVivo');
-    
+
     try {
         const response = await fetch(`${obtenerBaseUrl()}/caja/monitor_vivo`);
         const data = await response.json();
-        
+
         if (data.error) throw new Error(data.error);
 
         const turnos = data.turnos_vivos;
@@ -37,8 +37,8 @@ async function cargarMonitor() {
 
         turnos.forEach(t => {
             // Formatear la fecha para que se lea linda
-            let fecha = new Date(t.fecha_hora_apertura).toLocaleTimeString('es-AR', {hour: '2-digit', minute:'2-digit'});
-            
+            let fecha = new Date(t.fecha_hora_apertura).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
             contenedor.innerHTML += `
                 <div class="col-md-6 col-lg-4">
                     <div class="card border-success h-100 shadow-sm">
@@ -107,15 +107,15 @@ async function forzarCierreRemoto(turnoId) {
             const res = await fetch(`${obtenerBaseUrl()}/caja/cerrar`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    turno_id: turnoId, 
+                body: JSON.stringify({
+                    turno_id: turnoId,
                     monto_final_declarado: 0 // Declaramos 0 porque el cajero no hizo el conteo manual
                 })
             });
-            
+
             const data = await res.json();
             if (!res.ok || data.error) throw new Error(data.error || "Fallo al cerrar remotamente");
-            
+
             Swal.fire('¡Cerrada!', 'La caja fue destrabada y cerrada exitosamente.', 'success');
             cargarDatosEnVivo(); // Refresca el monitor y desaparece la caja
         } catch (e) {
@@ -130,26 +130,28 @@ async function buscarVentasPorFecha() {
 
     const tbody = document.getElementById('tablaVentasHistoricas');
     const totalVisor = document.getElementById('totalDiaHistorico');
+    const desglose = document.getElementById('desgloseHistorico');
     
-    tbody.innerHTML = '<tr><td colspan="7" class="py-4"><div class="spinner-border text-warning"></div> Buscando...</td></tr>';
+    // Mostramos que está buscando y ocultamos el desglose viejo
+    tbody.innerHTML = '<tr><td colspan="8" class="py-4"><div class="spinner-border text-warning"></div> Buscando...</td></tr>';
+    desglose.classList.add('d-none');
     
     try {
         const res = await fetch(`${obtenerBaseUrl()}/ventas/por_fecha?fecha=${fecha}`);
         const data = await res.json();
         
-        // 🛡️ EL ESCUDO: Si Python nos tira un error 404, 422 o 500, lo atrapamos acá
         if (!res.ok) {
-            let errorOculto = data.detail ? JSON.stringify(data.detail) : 'Ruta no encontrada o caída';
+            let errorOculto = data.detail ? JSON.stringify(data.detail) : 'Ruta no encontrada';
             throw new Error(data.error || errorOculto);
         }
         if (data.error) throw new Error(data.error);
 
         tbody.innerHTML = '';
-        let sumaTotal = 0;
+        // Cajas para guardar la plata separada
+        let sumaTotal = 0, sumaEfectivo = 0, sumaVirtual = 0, sumaFiado = 0;
 
-        // 🛡️ DOBLE CHEQUEO: Nos aseguramos de que 'data.ventas' realmente exista
         if (!data.ventas || data.ventas.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-muted py-4">No hay ventas registradas en este día.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-muted py-4">No hay ventas registradas en este día.</td></tr>';
             totalVisor.innerText = '$0.00';
             return;
         }
@@ -159,21 +161,26 @@ async function buscarVentasPorFecha() {
             const colorFila = esAnulada ? 'text-muted text-decoration-line-through bg-light' : '';
             const badge = esAnulada ? '<span class="badge bg-danger">Anulada</span>' : '<span class="badge bg-success">Ok</span>';
             
-            if (!esAnulada) sumaTotal += v.total_venta;
+            // LA MEJORA 1: Matemática de desglose
+            if (!esAnulada) {
+                sumaTotal += v.total_venta;
+                let metodo = (v.metodo_pago || "").toUpperCase();
+                if (metodo.includes('EFECTIVO')) sumaEfectivo += v.total_venta;
+                else if (metodo.includes('CUENTA CORRIENTE') || metodo.includes('FIADO')) sumaFiado += v.total_venta;
+                else sumaVirtual += v.total_venta; 
+            }
 
-            // 1. Limpiamos el "undefined" usando el ID real de la base de datos
             const numTicket = v.numero_ticket || v.id;
-            
-            // 2. Limpiamos el texto residual de "Debe: $..." si quedó guardado
             let clienteLimpio = v.cliente || 'Consumidor Final';
             clienteLimpio = clienteLimpio.split(' Debe:')[0].split(' A favor:')[0].trim();
 
-            // 3. Los Botones de Ojo e Impresora
-            const btnOjo = `<button class="btn btn-sm btn-outline-info py-0 me-1" onclick="verDetalleTicketHistorico(${v.id})" title="Ver Detalle"><i class="bi bi-eye"></i></button>`;
-            const btnImprimir = `<button class="btn btn-sm btn-outline-secondary py-0" onclick="imprimirTicketHistorico(${v.id})" title="Imprimir Copia"><i class="bi bi-printer"></i></button>`;
+            // Los botones (le agregamos stopPropagation para que no choquen con el doble clic)
+            const btnOjo = `<button class="btn btn-sm btn-outline-info py-0 me-1" onclick="verDetalleTicketHistorico(${v.id}); event.stopPropagation();" title="Ver Detalle"><i class="bi bi-eye"></i></button>`;
+            const btnImprimir = `<button class="btn btn-sm btn-outline-secondary py-0" onclick="imprimirTicketHistorico(${v.id}); event.stopPropagation();" title="Imprimir Copia"><i class="bi bi-printer"></i></button>`;
 
+            // LA MEJORA 3: Fila Clickeable (ondblclick)
             tbody.innerHTML += `
-                <tr class="${colorFila}">
+                <tr class="fila-historica ${colorFila}" style="cursor:pointer;" ondblclick="verDetalleTicketHistorico(${v.id})" title="Doble clic para ver detalle">
                     <td>${v.fecha_hora.split(' ')[1]}</td>
                     <td class="fw-bold">${numTicket}</td>
                     <td>${clienteLimpio}</td>
@@ -186,13 +193,31 @@ async function buscarVentasPorFecha() {
             `;
         });
 
+        // Actualizamos los textos en pantalla
         totalVisor.innerText = `$${sumaTotal.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        document.getElementById('badgeEfectivo').innerText = `Efec: $${sumaEfectivo.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        document.getElementById('badgeVirtual').innerText = `Virt: $${sumaVirtual.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        document.getElementById('badgeFiado').innerText = `Cta: $${sumaFiado.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        
+        // Prendemos el desglose
+        desglose.classList.remove('d-none');
 
     } catch (e) {
-        // En vez de romperse, ahora te avisa con letras rojas
-        tbody.innerHTML = `<tr><td colspan="7" class="text-danger fw-bold py-4">Error: ${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="text-danger fw-bold py-4">Error: ${e.message}</td></tr>`;
         totalVisor.innerText = '$0.00';
     }
+}
+
+// LA MEJORA 2: Función de filtro instantáneo
+function filtrarTablaHistorica() {
+    const texto = document.getElementById('inputFiltroHistorico').value.toLowerCase();
+    const filas = document.querySelectorAll('#tablaVentasHistoricas .fila-historica');
+
+    filas.forEach(fila => {
+        // Lee todo el texto de la fila (cliente, ticket, monto) y oculta lo que no coincide
+        const contenido = fila.textContent.toLowerCase();
+        fila.style.display = contenido.includes(texto) ? '' : 'none';
+    });
 }
 
 // --- EL OJO: Ver Detalle del Ticket ---
@@ -239,12 +264,12 @@ async function verDetalleTicketHistorico(ventaId) {
 async function imprimirTicketHistorico(ticketId) {
     try {
         Swal.fire({ title: 'Preparando impresión...', timer: 1000, showConfirmButton: false, didOpen: () => Swal.showLoading() });
-        
+
         const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
         const ticket = await res.json();
-        
+
         // Buscamos los datos de tu negocio en la memoria o ponemos genéricos
-        const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "AUTOSERVICIO", direccion: "", cuit: ""};
+        const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "AUTOSERVICIO", direccion: "", cuit: "" };
 
         if (ticket.error) throw new Error(ticket.error);
 
@@ -319,20 +344,20 @@ async function cargarEmpleados() {
     try {
         const response = await fetch(`${obtenerBaseUrl()}/usuarios/listar`);
         const data = await response.json();
-        
+
         if (data.error) throw new Error(data.error);
 
         tbody.innerHTML = '';
         data.usuarios.forEach(u => {
             let badgeRol = 'bg-secondary';
-            if(u.rol === 'ADMIN') badgeRol = 'bg-danger';
-            if(u.rol === 'ENCARGADO') badgeRol = 'bg-warning text-dark';
-            if(u.rol === 'CAJERO') badgeRol = 'bg-info text-dark';
+            if (u.rol === 'ADMIN') badgeRol = 'bg-danger';
+            if (u.rol === 'ENCARGADO') badgeRol = 'bg-warning text-dark';
+            if (u.rol === 'CAJERO') badgeRol = 'bg-info text-dark';
 
             // PARCHE: Botones de Lápiz y Basurero
-// PARCHE: Botones de Lápiz y Basurero, o Botón de Restaurar
+            // PARCHE: Botones de Lápiz y Basurero, o Botón de Restaurar
             // PARCHE: Botones de Editar, Borrar y el nuevo de Imprimir Credencial
-            let botonesAccion = u.estado === 'ACTIVO' 
+            let botonesAccion = u.estado === 'ACTIVO'
                 ? `
                    <button class="btn btn-sm btn-outline-dark py-0 me-1" title="Imprimir Credencial" onclick="imprimirCredencial('${u.nombre_completo}', '${u.rol}', '${u.codigo_barras_credencial}')"><i class="bi bi-printer"></i></button>
                    <button class="btn btn-sm btn-outline-primary py-0" title="Editar" onclick="abrirEditarEmpleado(${u.id}, '${u.nombre_completo}', '${u.rol}', '${u.codigo_barras_credencial}')"><i class="bi bi-pencil"></i></button>
@@ -374,7 +399,7 @@ function abrirEditarEmpleado(id, nombre, rol, credencial) {
     document.getElementById('empRol').value = rol;
     document.getElementById('empPin').value = ''; // Lo dejamos vacío por seguridad
     document.getElementById('empCredencial').value = credencial === 'null' ? '' : credencial;
-    
+
     document.querySelector('#modalNuevoEmpleado .modal-title').innerHTML = '<i class="bi bi-pencil-square"></i> Editar Empleado';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('modalNuevoEmpleado')).show();
 }
@@ -386,10 +411,10 @@ async function guardarEmpleado() {
     const pin = document.getElementById('empPin').value.trim();
     const credencial = document.getElementById('empCredencial').value.trim() || `CRED-${Math.floor(Math.random() * 10000)}`;
 
-// EL PARCHE: Si es nuevo exige PIN, si estamos editando lo deja pasar en blanco
-    if(!nombre) return Swal.fire('Atención', 'El nombre es obligatorio', 'warning');
-    if(idEditando === '' && !pin) return Swal.fire('Atención', 'El PIN es obligatorio para un empleado nuevo', 'warning');
-    
+    // EL PARCHE: Si es nuevo exige PIN, si estamos editando lo deja pasar en blanco
+    if (!nombre) return Swal.fire('Atención', 'El nombre es obligatorio', 'warning');
+    if (idEditando === '' && !pin) return Swal.fire('Atención', 'El PIN es obligatorio para un empleado nuevo', 'warning');
+
     try {
         let url = `${obtenerBaseUrl()}/usuarios/crear`;
         let metodo = 'POST';
@@ -406,7 +431,7 @@ async function guardarEmpleado() {
             body: JSON.stringify({ nombre_completo: nombre, rol: rol, codigo_barras_credencial: credencial, pin_secreto: pin })
         });
         const data = await res.json();
-        
+
         if (!res.ok) throw new Error(data.detail || data.error || "Error al guardar");
 
         Swal.fire('¡Éxito!', 'Empleado guardado correctamente.', 'success');
@@ -508,7 +533,7 @@ function imprimirCredencial(nombre, rol, codigo) {
 document.addEventListener("DOMContentLoaded", () => {
     // Le agregamos el link correcto a la flecha del layout para esta página
     document.querySelector('.sidebar-menu a[href="admin_productos.html"]').classList.remove('active');
-    
-    
+
+
     cargarDatosEnVivo();
 });
