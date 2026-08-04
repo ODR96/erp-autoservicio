@@ -53,11 +53,14 @@ function inyectarLayout() {
     const nombreLocal = config.nombre_negocio;
 
     const sidebarHTML = `
-        <div class="sidebar shadow d-print-none">
+        <div id="sidebarMenu" class="sidebar shadow d-print-none">
             <div class="sidebar-header">
                 <i class="bi bi-shop display-4 text-warning"></i>
                 <h5 class="mt-2 fw-bold mb-0">ERP Gestión</h5>
                 <small class="text-warning">${nombreLocal}</small> 
+                <button class="btn btn-dark d-md-none me-3 border-0" id="btnToggleMenu" onclick="toggleMenuCelular()">
+    <i class="bi bi-list fs-2"></i>
+</button>
             </div>
             <div class="sidebar-menu">
                 <a href="#" class="menu-item"><i class="bi bi-speedometer2"></i> Dashboard</a>
@@ -85,23 +88,24 @@ function inyectarLayout() {
         </button>
     ` : '';
 
-    const navbarHTML = `
+const navbarHTML = `
         <div class="top-navbar d-print-none">
+            <!-- BOTÓN HAMBURGUESA QUE HABÍA DESAPARECIDO -->
+            <button class="btn-hamburguesa d-md-none me-3" onclick="toggleMenu()" title="Abrir Menú">
+                <i class="bi bi-list"></i>
+            </button>
+            
             <div><span class="text-muted fw-bold d-none d-md-inline">Módulo de Inventario (Autoservicio)</span></div>
             
             <div class="d-flex align-items-center gap-3">
-                
                 ${botonSyncHTML}
-
                 <div id="cajaDolar" class="d-none d-md-flex align-items-center gap-2 px-3 py-1 bg-light border rounded-pill text-success fw-bold small">
                     <i class="bi bi-currency-dollar"></i> Cargando...
                 </div>
-
                 <button class="btn btn-light position-relative p-1 border shadow-sm rounded-circle d-flex justify-content-center align-items-center" style="width: 35px; height: 35px;">
                     <i class="bi bi-bell text-secondary"></i>
                     <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle"></span>
                 </button>
-
                 <div class="dropdown">
                     <div class="d-flex align-items-center gap-2 border-start ps-3" data-bs-toggle="dropdown" style="cursor: pointer;" title="Opciones de cuenta">
                         <div class="text-end lh-1">
@@ -117,6 +121,8 @@ function inyectarLayout() {
                 </div>
             </div>
         </div>
+        <!-- FONDO NEGRO PARA EL CELULAR -->
+        <div id="sidebarBackdrop" class="sidebar-backdrop" onclick="toggleMenu()"></div>
     `;
 
     const sidePlaceholder = document.getElementById('layout-sidebar-placeholder');
