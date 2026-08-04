@@ -44,16 +44,17 @@ async function intentarAcceso() {
 
             // --- 2. SOLUCIÓN AL PROBLEMA DE CONFIGURACIÓN VACÍA ---
             try {
-                const resConfig = await fetch(`${baseUrl}/configuracion`, {
+                const resConfig = await fetch(`${baseUrl}/config/leer`, { // <--- ACÁ CORREGIMOS LA RUTA
                     method: 'GET',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${data.token_acceso}` // <-- ACÁ LE MANDAMOS LA LLAVE
+                        'Authorization': `Bearer ${data.token_acceso}`
                     }
                 });
 
                 if (resConfig.ok) {
                     const dataConfig = await resConfig.json();
+                    // Guardamos todo el choclo de configuración en la memoria del navegador
                     localStorage.setItem('config_negocio', JSON.stringify(dataConfig));
                 } else {
                     console.warn("El servidor no dejó leer la config. Estado:", resConfig.status);
