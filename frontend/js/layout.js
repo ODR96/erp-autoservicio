@@ -58,9 +58,6 @@ function inyectarLayout() {
                 <i class="bi bi-shop display-4 text-warning"></i>
                 <h5 class="mt-2 fw-bold mb-0">ERP Gestión</h5>
                 <small class="text-warning">${nombreLocal}</small> 
-                <button class="btn btn-dark d-md-none me-3 border-0" id="btnToggleMenu" onclick="toggleMenuCelular()">
-    <i class="bi bi-list fs-2"></i>
-</button>
             </div>
             <div class="sidebar-menu">
                 <a href="#" class="menu-item"><i class="bi bi-speedometer2"></i> Dashboard</a>
