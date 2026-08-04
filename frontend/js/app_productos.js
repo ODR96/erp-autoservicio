@@ -201,34 +201,53 @@ document.querySelector('[data-bs-target="#modalNuevoProducto"]').addEventListene
         });
 
 async function cargarCatalogo() {
-            try {
-                let filtroElemento = document.getElementById('filtroEstado');
-                let filtroSelect = filtroElemento ? filtroElemento.value : '1';
-                
-                let url = `${obtenerBaseUrl()}/productos/listar`;
-                if (filtroSelect === 'critico') { 
-                    url += '?estado=1&alerta_stock=true'; 
-                } else if (filtroSelect === 'vencimiento') {
-                    url += '?estado=1&alerta_vencimiento=true';
-                } else { 
-                    url += `?estado=${filtroSelect}`; 
-                }
-                
-                const response = await fetch(url);
-                const data = await response.json();
-                productosGlobales = data.productos || [];
-                
-                if (typeof filtrarCatalogoFront === 'function') filtrarCatalogoFront(); 
-                
-                // PARCHE BLINDAJE: Llamamos a las demás funciones SOLO si existen 
-                // y envueltas en un try para que nunca frenen la carga de la tabla principal
-                try { if (typeof llenarSelectEtiquetas === 'function') llenarSelectEtiquetas(); } catch(e){}
-                try { if (typeof llenarSelectComponentes === 'function') llenarSelectComponentes(); } catch(e){}
-                
-            } catch (error) { 
-                console.error("Error crítico cargando catálogo:", error); 
-            }
+    // 1. Agarramos el loader y el contenedor real de tus tablas
+    const loader = document.getElementById('loaderServidor');
+    const contenedor = document.getElementById('productTabsContent');
+    
+    // 2. Mostramos el loader y ocultamos el contenido
+    if (loader) loader.style.display = 'block';
+    if (contenedor) contenedor.style.display = 'none';
+
+    try {
+        let filtroElemento = document.getElementById('filtroEstado');
+        let filtroSelect = filtroElemento ? filtroElemento.value : '1';
+        
+        let url = `${obtenerBaseUrl()}/productos/listar`;
+        if (filtroSelect === 'critico') { 
+            url += '?estado=1&alerta_stock=true'; 
+        } else if (filtroSelect === 'vencimiento') {
+            url += '?estado=1&alerta_vencimiento=true';
+        } else { 
+            url += `?estado=${filtroSelect}`; 
         }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        productosGlobales = data.productos || [];
+        
+        if (typeof filtrarCatalogoFront === 'function') filtrarCatalogoFront(); 
+        
+        // PARCHE BLINDAJE
+        try { if (typeof llenarSelectEtiquetas === 'function') llenarSelectEtiquetas(); } catch(e){}
+        try { if (typeof llenarSelectComponentes === 'function') llenarSelectComponentes(); } catch(e){}
+        
+        // 3. ¡ÉXITO! Apagamos el loader y mostramos el sistema
+        if (loader) loader.style.display = 'none';
+        if (contenedor) contenedor.style.display = 'block';
+        
+    } catch (error) { 
+        console.error("Error crítico cargando catálogo:", error); 
+        // 4. Si Render tarda de más o falla, cambiamos el texto
+        if (loader) {
+            loader.innerHTML = `
+                <i class="bi bi-x-circle text-danger display-4 mb-3 d-block"></i>
+                <h5 class="fw-bold text-dark">Servidor inactivo</h5>
+                <p class="text-muted">Parece que el servidor de Render está dormido profundamente.<br>Recargá la página (F5) para insistir.</p>
+            `;
+        }
+    }
+}
 
 // ========================================================
 // 1. MAGIA EXPORTAR A EXCEL (CON SELECTOR DE COLUMNAS)

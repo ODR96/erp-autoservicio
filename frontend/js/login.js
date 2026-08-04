@@ -5,7 +5,7 @@ function obtenerBaseUrl() {
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')) {
         return 'http://localhost:8000';
     }
-    return 'https://erp-autoservicio-backend.onrender.com'; 
+    return 'https://erp-autoservicio-backend.onrender.com';
 }
 
 async function intentarAcceso() {
@@ -39,15 +39,24 @@ async function intentarAcceso() {
             localStorage.setItem('token', data.token_acceso);
             localStorage.setItem('usuario_nombre', data.usuario.nombre);
             localStorage.setItem('usuario_id', data.usuario.id);
-            localStorage.setItem('usuario_rol', data.usuario.rol); 
-            localStorage.setItem('rol', data.usuario.rol); 
+            localStorage.setItem('usuario_rol', data.usuario.rol);
+            localStorage.setItem('rol', data.usuario.rol);
 
             // --- 2. SOLUCIÓN AL PROBLEMA DE CONFIGURACIÓN VACÍA ---
             try {
-                const resConfig = await fetch(`${baseUrl}/configuracion`);
+                const resConfig = await fetch(`${baseUrl}/configuracion`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${data.token_acceso}` // <-- ACÁ LE MANDAMOS LA LLAVE
+                    }
+                });
+
                 if (resConfig.ok) {
                     const dataConfig = await resConfig.json();
                     localStorage.setItem('config_negocio', JSON.stringify(dataConfig));
+                } else {
+                    console.warn("El servidor no dejó leer la config. Estado:", resConfig.status);
                 }
             } catch (error) {
                 console.error("No se pudo cargar la config inicial", error);
@@ -55,14 +64,14 @@ async function intentarAcceso() {
 
             // Redirección por rol
             if (data.usuario.rol === 'ADMIN' || data.usuario.rol === 'ENCARGADO') {
-                window.location.href = 'admin_productos.html'; 
+                window.location.href = 'admin_productos.html';
             } else {
-                window.location.href = 'pos.html'; 
+                window.location.href = 'pos.html';
             }
         } else {
             // --- 3. SEGURIDAD: Mensaje de error genérico ---
             Swal.fire({ title: 'Acceso Denegado', text: 'Credenciales incorrectas.', icon: 'error', confirmButtonColor: '#0d6efd' });
-            
+
             // Si hay error, apagamos el spinner y revivimos el botón
             btn.disabled = false;
             btn.innerHTML = htmlOriginal;

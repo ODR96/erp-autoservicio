@@ -68,11 +68,10 @@
 
         <div class="text-start mb-4">
             <label class="small fw-bold text-muted">PIN Secreto</label>
-            <!-- SEGURIDAD: autocomplete="new-password" engaña al navegador para que no ofrezca guardar la clave -->
-            <!-- UX: inputmode="numeric" abre el teclado numérico gigante en celulares -->
-            <input type="password" id="inputPin" class="form-control form-control-custom text-center fs-4"
-                placeholder="****" maxlength="6" autocomplete="new-password" inputmode="numeric"
-                onkeypress="if(event.key === 'Enter') intentarAcceso()">
+            <!-- EL TRUCO: type="text" con CSS -webkit-text-security -->
+            <input type="text" id="inputPin" class="form-control form-control-custom text-center fs-4"
+                placeholder="****" maxlength="6" autocomplete="off" inputmode="numeric"
+                style="-webkit-text-security: disc;" onkeypress="if(event.key === 'Enter') intentarAcceso()">
         </div>
 
         <!-- ACÁ ESTÁ EL ID QUE FALTABA: id="btnIngresar" -->
