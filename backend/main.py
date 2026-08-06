@@ -39,7 +39,7 @@ def inicializar_base_vacia():
         print("📥 [Render] Despertando: Recuperando memoria desde Supabase Storage...")
         try:
             from supabase import create_client
-            nube = create_client("SUPABASE_URL", "SUPABASE_KEY")            
+            nube = create_client(SUPABASE_URL, SUPABASE_KEY)            
             res = nube.storage.from_('backups').download('autoservicio_20dejunio.db')
             with open('autoservicio_20dejunio.db', 'wb') as f:
                 f.write(res)
@@ -118,7 +118,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:8000",
-        "${obtenerBaseUrl()}",
         "https://erp-autoservicio.vercel.app" # <--- TU LINK EXACTO, SIN BARRA AL FINAL
     ],
     allow_credentials=True,
