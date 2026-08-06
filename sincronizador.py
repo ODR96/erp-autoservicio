@@ -1,11 +1,14 @@
-import sqlite3
+import sqlite3, os
 from supabase import create_client, Client
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # =====================================================================
 # 1. TUS CREDENCIALES DE LA NUBE
 # =====================================================================
-SUPABASE_URL = "https://fxbxkvagnpuoibtifwjw.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4YnhrdmFnbnB1b2lidGlmd2p3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3OTU5NCwiZXhwIjoyMDk2OTU1NTk0fQ.aO0s-A3FwMExlJezGNGu_EUNINa8vgE7gHUbBTmRLpY"
+SUPABASE_URL = os.environ.get('SUPABASE_URL')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
 nube: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =====================================================================

@@ -8,16 +8,21 @@ from jose import jwt, JWTError
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 import os
+from dotenv import load_dotenv
 from fastapi import BackgroundTasks
 from backend.replicador import replicar_fila_a_nube
 
+
 router = APIRouter()
 
-SUPABASE_URL = "https://fxbxkvagnpuoibtifwjw.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4YnhrdmFnbnB1b2lidGlmd2p3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3OTU5NCwiZXhwIjoyMDk2OTU1NTk0fQ.aO0s-A3FwMExlJezGNGu_EUNINa8vgE7gHUbBTmRLpY"
+load_dotenv()
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
 
 # --- CONFIGURACIÓN DE SEGURIDAD BANCARIA ---
-SECRET_KEY = "clave_secreta_super_robusta_autoservicio_20_de_junio" 
+SECRET_KEY = os.environ.get("SECRET_KEY") 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 840 # 14 horas de vigencia del token
 

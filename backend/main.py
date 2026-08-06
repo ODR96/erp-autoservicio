@@ -21,6 +21,13 @@ from backend.mod_config.rutas_config import router as router_config
 from backend.mod_sincronizacion.rutas_sync import router as rutas_sync
 from sincronizador import subir_todo_a_la_nube, descargar_novedades_oficina 
 from fastapi import BackgroundTasks
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 
 # --- 0. SALVAVIDAS Y AUTO-PARCHES PARA RENDER Y LOCAL ---
@@ -32,7 +39,7 @@ def inicializar_base_vacia():
         print("📥 [Render] Despertando: Recuperando memoria desde Supabase Storage...")
         try:
             from supabase import create_client
-            nube = create_client("https://fxbxkvagnpuoibtifwjw.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4YnhrdmFnbnB1b2lidGlmd2p3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3OTU5NCwiZXhwIjoyMDk2OTU1NTk0fQ.aO0s-A3FwMExlJezGNGu_EUNINa8vgE7gHUbBTmRLpY")            
+            nube = create_client("SUPABASE_URL", "SUPABASE_KEY")            
             res = nube.storage.from_('backups').download('autoservicio_20dejunio.db')
             with open('autoservicio_20dejunio.db', 'wb') as f:
                 f.write(res)
