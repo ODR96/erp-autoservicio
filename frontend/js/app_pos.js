@@ -193,7 +193,7 @@ async function abrirHistorialTurno() {
     modalGestion.hide();
 
     try {
-        const res = await fetch(`http://localhost:8000/ventas/historial/${turnoActualId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/historial/${turnoActualId}`);
         const data = await res.json();
 
         if (data.error) throw new Error(data.error);
@@ -376,7 +376,7 @@ async function buscarProducto(q) {
 
     try {
         // LLAMADA REAL A TU API
-        const response = await fetch(`http://localhost:8000/productos/buscar?termino=${encodeURIComponent(q)}`);
+        const response = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(q)}`);
 
         if (!response.ok) {
             throw new Error("No se pudo conectar o el servidor devolvió un error");
@@ -768,7 +768,7 @@ function seleccionarClienteDeuda(id) {
 async function cargarHistorialTabla(clienteId) {
     const tbody = document.getElementById("tablaDetalleFiado");
     try {
-        const res = await fetch(`http://localhost:8000/clientes/historial/${clienteId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/historial/${clienteId}`);
         const data = await res.json();
         tbody.innerHTML = "";
 
@@ -802,7 +802,7 @@ async function cargarHistorialTabla(clienteId) {
 async function verDetalleTicketFiado(ventaId) {
     Swal.fire({ title: 'Cargando detalle...', didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetch(`http://localhost:8000/ventas/ticket/${ventaId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
         const data = await res.json();
 
         if (data.error) throw new Error(data.error);
@@ -920,7 +920,7 @@ async function registrarPagoFiado() {
     Swal.fire({ title: 'Acreditando pago...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     try {
-        const res = await fetch(`http://localhost:8000/clientes/pagar_deuda/${clienteFiadoActual.id}`, {
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/pagar_deuda/${clienteFiadoActual.id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 monto_pago: pago,
@@ -1253,7 +1253,7 @@ async function filtrarAvanzado(event) {
         tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm text-primary" role="status"></div> Buscando...</td></tr>';
 
         try {
-            const response = await fetch(`http://localhost:8000/productos/buscar?termino=${encodeURIComponent(query)}`);
+            const response = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
             if (response.ok) {
                 const data = await response.json();
                 const resultados = data.productos;
@@ -1325,7 +1325,7 @@ async function agregarDesdeF3(id_producto) {
     modalBuscador.hide();
     try {
         // Llamamos directo a la base de datos por el ID exacto, esquivando el buscador ambiguo
-        const res = await fetch(`http://localhost:8000/productos/codigo/${id_producto}`);
+        const res = await fetch(`${obtenerBaseUrl()}/productos/codigo/${id_producto}`);
         const prod = await res.json();
         if (!prod.error) {
             agregarAlCarrito(prod);
@@ -1447,7 +1447,7 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
 async function ejecutarArqueoX() {
     if (!turnoActualId) return Swal.fire('Error', 'No hay turno abierto.', 'error');
     modalGestion.hide();
-    const res = await fetch(`http://localhost:8000/caja/informe_x/${turnoActualId}`);
+    const res = await fetch(`${obtenerBaseUrl()}/caja/informe_x/${turnoActualId}`);
     const data = await res.json();
     if (data.error) return Swal.fire('Error', data.error, 'error');
 
@@ -1555,7 +1555,7 @@ async function forzarCierreRemoto(turnoId) {
 // ===== NUEVO MOTOR: IMPRESIÓN DE TICKET 80mm (Diseño Real) =====
 async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, ahorroReal = 0) {
     try {
-        const res = await fetch(`http://localhost:8000/ventas/ticket/${ticketId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
         const ticket = await res.json();
         const resConfig = await fetch(`${obtenerBaseUrl()}/config/leer`);
         const config = await resConfig.json();
@@ -1964,7 +1964,7 @@ async function abrirCobroPedidoMayorista() {
 
     try {
         Swal.fire({ title: 'Buscando en depósito...', didOpen: () => Swal.showLoading() });
-        const res = await fetch(`http://localhost:8000/deposito/pendiente/${pedidoId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/deposito/pendiente/${pedidoId}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
@@ -2090,3 +2090,37 @@ async function abrirCobroPedidoMayorista() {
         Swal.fire('Operación Cancelada', e.message, 'error');
     }
 }
+
+// =========================================================
+// MOTOR NATIVO: LECTOR LÁSER GLOBAL
+// =========================================================
+let bufferCodigo = '';
+let temporizadorLector = null;
+
+document.addEventListener('keypress', (e) => {
+    // 1. Si la caja está cerrada o hay ventanas modales abiertas, el láser se ignora
+    if (!cajaAbierta || document.querySelector('.modal.show') || Swal.isVisible()) return;
+
+    // 2. Si el cajero ya hizo clic manual en un campo de texto, dejamos que escriba normal
+    if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+
+    // 3. El láser siempre manda un 'Enter' al terminar de leer el código
+    if (e.key === 'Enter') {
+        if (bufferCodigo.length > 3) {
+            // Es un código largo, seguro fue el láser
+            buscarProducto(bufferCodigo);
+            bufferCodigo = ''; // Vaciamos la recámara
+        }
+        return;
+    }
+
+    // 4. Vamos guardando número por número en la memoria temporal
+    bufferCodigo += e.key;
+
+    // 5. El truco maestro: El láser dispara teclas en menos de 20ms. 
+    // Si pasan más de 50ms sin recibir otra tecla, asumimos que fue un humano tocando el teclado por error y borramos la memoria.
+    clearTimeout(temporizadorLector);
+    temporizadorLector = setTimeout(() => {
+        bufferCodigo = '';
+    }, 50);
+});
