@@ -22,7 +22,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 
 # --- CONFIGURACIÓN DE SEGURIDAD BANCARIA ---
-SECRET_KEY = os.environ.get("SECRET_KEY") 
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY") 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 840 # 14 horas de vigencia del token
 
