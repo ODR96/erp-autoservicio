@@ -242,58 +242,79 @@ def simular_actualizacion_precios(cliente_id: int):
     finally:
         conexion.close()
         
-@app.get("/clientes/resumen_pendientes/{cliente_id}")
-def resumen_pendientes(cliente_id: int, db: Session = Depends(get_db)):
-    # 1. Buscamos al cliente y vemos cuánta plata debe
-    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+@router.get("/resumen_pendientes/{cliente_id}")
+def resumen_pendientes(cliente_id: int):
+    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
     
-    if not cliente or cliente.saldo_actual_deudor <= 0:
-        return {"error": False, "articulos": [], "saldo_total": 0}
+    try:
+        # 1. Buscamos al cliente y vemos cuánta plata debe
+        cursor.execute("SELECT saldo_actual_deudor FROM clientes WHERE id = ?", (cliente_id,))
+        cliente = cursor.fetchone()
         
-    deuda_restante = cliente.saldo_actual_deudor
-    
-    # 2. Buscamos sus compras fiadas, ordenadas de la MÁS NUEVA a la MÁS VIEJA
-    ventas_fiadas = db.query(Venta).filter(
-        Venta.cliente_id == cliente_id,
-        Venta.metodo_pago == 'CUENTA CORRIENTE',
-        Venta.estado != 'ANULADA'
-    ).order_by(Venta.fecha_hora.desc()).all()
-    
-    articulos_agrupados = {}
-    
-    # 3. Recorremos los tickets de atrás para adelante hasta cubrir el monto de la deuda
-    for venta in ventas_fiadas:
-        if deuda_restante <= 0:
-            break # Si ya cubrimos la plata que debe, dejamos de buscar tickets viejos
+        if not cliente or cliente['saldo_actual_deudor'] <= 0:
+            return {"error": False, "articulos": [], "saldo_total": 0}
             
-        deuda_restante -= venta.total_venta
+        deuda_restante = cliente['saldo_actual_deudor']
         
-        # Traemos los productos de este ticket
-        detalles = db.query(DetalleVenta).filter(DetalleVenta.venta_id == venta.id).all()
+        # 2. Buscamos sus compras fiadas, de la MÁS NUEVA a la MÁS VIEJA
+        cursor.execute('''
+            SELECT id, total_venta 
+            FROM ventas_cabecera 
+            WHERE cliente_id = ? 
+            AND UPPER(metodo_pago) IN ('CUENTA CORRIENTE', 'FIADO') 
+            AND estado != 'ANULADA'
+            ORDER BY fecha_hora DESC
+        ''', (cliente_id,))
+        ventas_fiadas = cursor.fetchall()
         
-        for item in detalles:
-            # Asumimos que el nombre y la unidad están en la relación con Producto
-            nombre_prod = item.producto.nombre if item.producto else "Artículo"
-            unidad_prod = item.producto.unidad_medida if item.producto else "un"
-            
-            if nombre_prod in articulos_agrupados:
-                articulos_agrupados[nombre_prod]['cantidad'] += item.cantidad
-                articulos_agrupados[nombre_prod]['subtotal'] += item.subtotal
-            else:
-                articulos_agrupados[nombre_prod] = {
-                    "cantidad": item.cantidad,
-                    "unidad": unidad_prod,
-                    "subtotal": item.subtotal
-                }
+        articulos_agrupados = {}
+        
+        # 3. Recorremos los tickets de atrás para adelante
+        for venta in ventas_fiadas:
+            if deuda_restante <= 0:
+                break # Si ya cubrimos la plata que debe, dejamos de buscar
                 
-    # 4. Formateamos la respuesta para mandarla masticada al frontend
-    lista_final = []
-    for nombre, datos in articulos_agrupados.items():
-        lista_final.append({
-            "nombre": nombre,
-            "cantidad": datos["cantidad"],
-            "unidad": datos["unidad"],
-            "subtotal": datos["subtotal"]
-        })
+            deuda_restante -= venta['total_venta']
+            
+            # Traemos los productos de este ticket (cruzando con la tabla productos)
+            cursor.execute('''
+                SELECT vd.cantidad, vd.subtotal, p.nombre, p.unidad_medida 
+                FROM ventas_detalle vd
+                LEFT JOIN productos p ON vd.producto_id = p.id
+                WHERE vd.venta_id = ?
+            ''', (venta['id'],))
+            
+            detalles = cursor.fetchall()
+            
+            for item in detalles:
+                nombre_prod = item['nombre'] or "Artículo"
+                unidad_prod = item['unidad_medida'] or "un"
+                
+                if nombre_prod in articulos_agrupados:
+                    articulos_agrupados[nombre_prod]['cantidad'] += item['cantidad']
+                    articulos_agrupados[nombre_prod]['subtotal'] += item['subtotal']
+                else:
+                    articulos_agrupados[nombre_prod] = {
+                        "cantidad": item['cantidad'],
+                        "unidad": unidad_prod,
+                        "subtotal": item['subtotal']
+                    }
+                    
+        # 4. Formateamos la lista final para el frontend
+        lista_final = []
+        for nombre, datos in articulos_agrupados.items():
+            lista_final.append({
+                "nombre": nombre,
+                "cantidad": datos["cantidad"],
+                "unidad": datos["unidad"],
+                "subtotal": datos["subtotal"]
+            })
+            
+        return {"error": False, "articulos": lista_final, "saldo_total": cliente['saldo_actual_deudor']}
         
-    return {"error": False, "articulos": lista_final, "saldo_total": cliente.saldo_actual_deudor}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conexion.close()
