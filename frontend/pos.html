@@ -9,13 +9,18 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
 
     <style>
-:root {
+        :root {
             /* Paleta Azul Petróleo / Marino */
-            --bg-main: #0B1320;       /* Fondo general súper oscuro */
-            --panel-bg: #142032;      /* Paneles un poco más claros para separar */
-            --header-blue: #070B14;   /* Cabeceras casi negras */
-            --border-color: #1F304A;  /* Bordes sutiles */
-            --text-main: #E2E8F0;     /* Texto gris clarito (no blanco puro para no encandilar) */
+            --bg-main: #0B1320;
+            /* Fondo general súper oscuro */
+            --panel-bg: #142032;
+            /* Paneles un poco más claros para separar */
+            --header-blue: #070B14;
+            /* Cabeceras casi negras */
+            --border-color: #1F304A;
+            /* Bordes sutiles */
+            --text-main: #E2E8F0;
+            /* Texto gris clarito (no blanco puro para no encandilar) */
             --text-muted: #94A3B8;
         }
 
@@ -42,11 +47,36 @@
         }
 
         /* Buscador integrado oscuro */
-        .search-container { flex-grow: 1; max-width: 500px; margin: 0 20px; }
-        .search-bar { border-radius: 0 20px 20px 0; padding: 12px 20px; border: none; background-color: #1A2A42 !important; color: white !important; outline: none; box-shadow: none !important; }
-        .search-icon-box { border-radius: 20px 0 0 20px; padding-left: 20px; border: none; background-color: #1A2A42 !important; color: var(--text-muted) !important; }
+        .search-container {
+            flex-grow: 1;
+            max-width: 500px;
+            margin: 0 20px;
+        }
 
-        .main-content { flex: 1 1 auto; padding: 15px; overflow-y: auto; padding-bottom: 50px; }
+        .search-bar {
+            border-radius: 0 20px 20px 0;
+            padding: 12px 20px;
+            border: none;
+            background-color: #1A2A42 !important;
+            color: white !important;
+            outline: none;
+            box-shadow: none !important;
+        }
+
+        .search-icon-box {
+            border-radius: 20px 0 0 20px;
+            padding-left: 20px;
+            border: none;
+            background-color: #1A2A42 !important;
+            color: var(--text-muted) !important;
+        }
+
+        .main-content {
+            flex: 1 1 auto;
+            padding: 15px;
+            overflow-y: auto;
+            padding-bottom: 50px;
+        }
 
         .panel-container {
             background: var(--panel-bg);
@@ -71,52 +101,239 @@
         }
 
         /* Estilos del Ticket */
-        .ticket-info-bar { background-color: #0D1627; border-bottom: 1px solid var(--border-color); padding: 8px 15px; display: flex; justify-content: space-between; font-size: 0.9rem; color: var(--text-muted); align-items: center; }
-        .cliente-link { color: #38bdf8; cursor: pointer; text-decoration: none; font-weight: bold; padding: 2px 5px; border-radius: 4px; transition: 0.2s; }
-        .cliente-link:hover { background-color: rgba(56, 189, 248, 0.1); }
-        .ticket-headers { display: grid; grid-template-columns: 1.5fr 4fr 2fr 2fr 1fr; padding: 8px 15px; border-bottom: 2px solid var(--border-color); font-weight: bold; text-align: center; font-size: 0.9rem; color: var(--text-muted); }
-        .ticket-body { flex: 1 1 0; overflow-y: auto; padding: 10px; min-height: 150px; }
-        
-        .ticket-item { display: grid; grid-template-columns: 1.5fr 4fr 2fr 2fr 1fr; background-color: transparent; padding: 8px; border-bottom: 1px solid var(--border-color); align-items: center; text-align: center; font-size: 1.05rem; }
-        .ticket-footer { padding: 15px; border-top: 2px solid var(--border-color); background-color: #0D1627; border-radius: 0 0 8px 8px; }
+        .ticket-info-bar {
+            background-color: #0D1627;
+            border-bottom: 1px solid var(--border-color);
+            padding: 8px 15px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            color: #cbd5e1;
+            /* Color más claro */
+            align-items: center;
+        }
+
+        .cliente-link {
+            color: #38bdf8;
+            cursor: pointer;
+            text-decoration: none;
+            font-weight: bold;
+            padding: 2px 5px;
+            border-radius: 4px;
+            transition: 0.2s;
+        }
+
+        .cliente-link:hover {
+            background-color: rgba(56, 189, 248, 0.1);
+        }
+
+        .ticket-headers {
+            display: grid;
+            grid-template-columns: 1.5fr 4fr 2fr 2fr 1fr;
+            padding: 8px 15px;
+            border-bottom: 2px solid var(--border-color);
+            font-weight: bold;
+            text-align: center;
+            font-size: 0.9rem;
+            color: #cbd5e1;
+            /* Color más claro */
+        }
+
+        .ticket-body {
+            flex: 1 1 0;
+            overflow-y: auto;
+            padding: 10px;
+            min-height: 150px;
+        }
+
+        .ticket-item {
+            display: grid;
+            grid-template-columns: 1.5fr 4fr 2fr 2fr 1fr;
+            background-color: transparent;
+            padding: 8px;
+            border-bottom: 1px solid var(--border-color);
+            align-items: center;
+            text-align: center;
+            font-size: 1.05rem;
+        }
+
+        .ticket-footer {
+            padding: 15px;
+            border-top: 2px solid var(--border-color);
+            background-color: #0D1627;
+            border-radius: 0 0 8px 8px;
+        }
 
         /* Categorías y Numpad */
-        .cat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 15px; flex-grow: 1; align-items: start; }
-        .btn-cat { border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 5px; font-weight: 600; display: flex; flex-direction: column; align-items: center; color: #fff !important; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); transition: transform 0.1s; }
-        .btn-cat:active { transform: scale(0.96); }
+        .cat-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            padding: 15px;
+            flex-grow: 1;
+            align-items: start;
+        }
 
-        .numpad-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 12px; }
-        .btn-num { background-color: #1C2B42; border: 1px solid #2A3D5A; border-radius: 8px; font-size: 1.5rem; font-weight: bold; height: 65px; color: #F8FAFC; box-shadow: 0 3px 0 #070B14; transition: 0.1s; }
-        .btn-num:active { transform: translateY(3px); box-shadow: none; }
-        
+        .btn-cat {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 5px;
+            font-weight: 700;
+            /* Letra más gordita */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: #1e293b !important;
+            /* Texto gris muy oscuro/casi negro en vez de blanco */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            transition: transform 0.1s;
+        }
+
+        .btn-cat:active {
+            transform: scale(0.96);
+        }
+
+        .numpad-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            padding: 12px;
+        }
+
+        .btn-num {
+            background-color: #1C2B42;
+            border: 1px solid #2A3D5A;
+            border-radius: 8px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            height: 65px;
+            color: #F8FAFC;
+            box-shadow: 0 3px 0 #070B14;
+            transition: 0.1s;
+        }
+
+        .btn-num:active {
+            transform: translateY(3px);
+            box-shadow: none;
+        }
+
         /* Botones de acción del numpad */
-        .btn-action-blue { background-color: #0284c7; border-color: #0369a1; }
-        .btn-action-yellow { background-color: #d97706; border-color: #b45309; }
-        .btn-action-red { background-color: #dc2626; border-color: #991b1b; }
+        .btn-action-blue {
+            background-color: #0284c7;
+            border-color: #0369a1;
+        }
+
+        .btn-action-yellow {
+            background-color: #d97706;
+            border-color: #b45309;
+        }
+
+        .btn-action-red {
+            background-color: #dc2626;
+            border-color: #991b1b;
+        }
 
         /* Pagos */
-        .btn-pago { min-height: 55px; border-radius: 8px; font-size: 1.2rem; font-weight: bold; color: white; border: none; width: 100%; box-shadow: 0 4px 0 rgba(0, 0, 0, 0.4); text-shadow: 1px 1px 2px rgba(0,0,0,0.5); }
-        .btn-pago:active { transform: translateY(4px); box-shadow: none; }
-        .bg-efectivo { background-color: #10b981; } /* Verde más brillante para contraste oscuro */
-        .bg-tarjeta { background-color: #eab308; color: #1e293b; text-shadow: none; }
-        .bg-virtual { background-color: #3b82f6; }
-        .bg-fiado { background-color: #f97316; }
+        .btn-pago {
+            min-height: 55px;
+            border-radius: 8px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: white;
+            border: none;
+            width: 100%;
+            box-shadow: 0 4px 0 rgba(0, 0, 0, 0.4);
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+
+        .btn-pago:active {
+            transform: translateY(4px);
+            box-shadow: none;
+        }
+
+        .bg-efectivo {
+            background-color: #10b981;
+        }
+
+        /* Verde más brillante para contraste oscuro */
+        .bg-tarjeta {
+            background-color: #eab308;
+            color: #1e293b;
+            text-shadow: none;
+        }
+
+        .bg-virtual {
+            background-color: #3b82f6;
+        }
+
+        .bg-fiado { 
+            background-color: #d97706; /* Un naranja más oscuro y menos chillón */
+        }
 
         /* Botones espera/recuperar */
-        .btn-espera { background-color: #475569; color: white; border: none; font-weight: bold; border-radius: 8px; padding: 10px; width: 100%; box-shadow: 0 2px 0 #1e293b; }
-        .btn-recuperar { background-color: #0891b2; color: white; border: none; font-weight: bold; border-radius: 8px; padding: 10px; width: 100%; box-shadow: 0 2px 0 #164e63; }
+        .btn-espera {
+            background-color: #475569;
+            color: white;
+            border: none;
+            font-weight: bold;
+            border-radius: 8px;
+            padding: 10px;
+            width: 100%;
+            box-shadow: 0 2px 0 #1e293b;
+        }
 
-        .footer-bar { background-color: var(--header-blue); color: var(--text-muted); padding: 10px 20px; display: flex; justify-content: space-around; position: fixed; bottom: 0; width: 100%; z-index: 2000; font-size: 1rem; border-top: 3px solid #f59e0b; }
-        .footer-bar span { cursor: pointer; padding: 2px 8px; border-radius: 4px; transition: 0.2s; }
-        .footer-bar span:hover { background-color: rgba(255, 255, 255, 0.05); color: white; }
-        .fila-busqueda:hover { background-color: var(--border-color); cursor: pointer; }
-        
+        .btn-recuperar {
+            background-color: #0891b2;
+            color: white;
+            border: none;
+            font-weight: bold;
+            border-radius: 8px;
+            padding: 10px;
+            width: 100%;
+            box-shadow: 0 2px 0 #164e63;
+        }
+
+        .footer-bar {
+            background-color: var(--header-blue);
+            color: var(--text-muted);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-around;
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            z-index: 2000;
+            font-size: 1rem;
+            border-top: 3px solid #f59e0b;
+        }
+
+        .footer-bar span {
+            cursor: pointer;
+            padding: 2px 8px;
+            border-radius: 4px;
+            transition: 0.2s;
+        }
+
+        .footer-bar span:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: white;
+        }
+
+        .fila-busqueda:hover {
+            background-color: var(--border-color);
+            cursor: pointer;
+        }
+
         /* Agrandamos los montos del ticket para máxima visibilidad */
-        #visorTotal { font-size: 2.8rem; text-shadow: 0 0 10px rgba(16, 185, 129, 0.3); }
+        #visorTotal {
+            font-size: 2.8rem;
+            text-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+        }
     </style>
 </head>
 
 <!-- Le decimos a Bootstrap que ponga todos los modales e inputs en modo oscuro -->
+
 <body data-bs-theme="dark">
     <div class="top-navbar shadow-sm d-print-none">
         <div class="d-flex align-items-center gap-3">
