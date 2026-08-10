@@ -241,3 +241,59 @@ def simular_actualizacion_precios(cliente_id: int):
         return {"error": str(e)}
     finally:
         conexion.close()
+        
+@app.get("/clientes/resumen_pendientes/{cliente_id}")
+def resumen_pendientes(cliente_id: int, db: Session = Depends(get_db)):
+    # 1. Buscamos al cliente y vemos cuánta plata debe
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    
+    if not cliente or cliente.saldo_actual_deudor <= 0:
+        return {"error": False, "articulos": [], "saldo_total": 0}
+        
+    deuda_restante = cliente.saldo_actual_deudor
+    
+    # 2. Buscamos sus compras fiadas, ordenadas de la MÁS NUEVA a la MÁS VIEJA
+    ventas_fiadas = db.query(Venta).filter(
+        Venta.cliente_id == cliente_id,
+        Venta.metodo_pago == 'CUENTA CORRIENTE',
+        Venta.estado != 'ANULADA'
+    ).order_by(Venta.fecha_hora.desc()).all()
+    
+    articulos_agrupados = {}
+    
+    # 3. Recorremos los tickets de atrás para adelante hasta cubrir el monto de la deuda
+    for venta in ventas_fiadas:
+        if deuda_restante <= 0:
+            break # Si ya cubrimos la plata que debe, dejamos de buscar tickets viejos
+            
+        deuda_restante -= venta.total_venta
+        
+        # Traemos los productos de este ticket
+        detalles = db.query(DetalleVenta).filter(DetalleVenta.venta_id == venta.id).all()
+        
+        for item in detalles:
+            # Asumimos que el nombre y la unidad están en la relación con Producto
+            nombre_prod = item.producto.nombre if item.producto else "Artículo"
+            unidad_prod = item.producto.unidad_medida if item.producto else "un"
+            
+            if nombre_prod in articulos_agrupados:
+                articulos_agrupados[nombre_prod]['cantidad'] += item.cantidad
+                articulos_agrupados[nombre_prod]['subtotal'] += item.subtotal
+            else:
+                articulos_agrupados[nombre_prod] = {
+                    "cantidad": item.cantidad,
+                    "unidad": unidad_prod,
+                    "subtotal": item.subtotal
+                }
+                
+    # 4. Formateamos la respuesta para mandarla masticada al frontend
+    lista_final = []
+    for nombre, datos in articulos_agrupados.items():
+        lista_final.append({
+            "nombre": nombre,
+            "cantidad": datos["cantidad"],
+            "unidad": datos["unidad"],
+            "subtotal": datos["subtotal"]
+        })
+        
+    return {"error": False, "articulos": lista_final, "saldo_total": cliente.saldo_actual_deudor}

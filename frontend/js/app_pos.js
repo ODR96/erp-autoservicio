@@ -747,76 +747,36 @@ function prepararCobroEfectivo() {
 async function verResumenDetalladoFiado() {
     if (!clienteFiadoActual) return;
     
-    Swal.fire({ title: 'Recopilando artículos...', text: 'Buscando tickets históricos...', didOpen: () => Swal.showLoading() });
+    Swal.fire({ title: 'Calculando deuda...', text: 'Consultando al servidor...', didOpen: () => Swal.showLoading() });
     
     try {
-        // 1. Buscamos el historial actual del cliente
-        const res = await fetch(`${obtenerBaseUrl()}/clientes/historial/${clienteFiadoActual.id}`);
+        // Le pegamos directo a nuestro nuevo misil en Python
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/resumen_pendientes/${clienteFiadoActual.id}`);
         const data = await res.json();
         
-        if (!data.movimientos || data.movimientos.length === 0) {
-            return Swal.fire('Sin datos', 'No hay movimientos para resumir.', 'info');
+        if (data.error) throw new Error(data.error);
+        if (!data.articulos || data.articulos.length === 0) {
+            return Swal.fire('Cuenta al día', 'No se registran artículos impagos para este cliente.', 'info');
         }
 
-        // 2. Filtramos solo los movimientos que son VENTAS (ignoramos los pagos) y que tienen un número de ticket
-        const ventas = data.movimientos.filter(m => m.tipo_movimiento !== 'PAGO' && m.detalle.includes('#'));
-        
-        if (ventas.length === 0) {
-            return Swal.fire('Cuenta al día', 'No se encontraron tickets pendientes de pago en el historial.', 'info');
-        }
-
-        // 3. Descargamos todos los tickets en paralelo a la velocidad de la luz
-        const promesas = ventas.map(v => {
-            let numTicket = v.detalle.split('#')[1].trim();
-            return fetch(`${obtenerBaseUrl()}/ventas/ticket/${numTicket}`).then(r => r.json());
-        });
-        
-        const ticketsDescargados = await Promise.all(promesas);
-
-        // 4. Agrupamos los artículos iguales (Ej: Si llevó Coca 3 veces, la sumamos)
-        let articulosUnificados = {};
-
-        ticketsDescargados.forEach(ticketData => {
-            if (!ticketData.error && ticketData.detalle_compra) {
-                ticketData.detalle_compra.forEach(item => {
-                    let nombreLimpio = item.nombre.trim();
-                    if (articulosUnificados[nombreLimpio]) {
-                        articulosUnificados[nombreLimpio].cantidad += item.cantidad;
-                        articulosUnificados[nombreLimpio].subtotal += item.subtotal;
-                    } else {
-                        articulosUnificados[nombreLimpio] = {
-                            cantidad: item.cantidad,
-                            unidad: item.unidad_medida || 'un',
-                            subtotal: item.subtotal
-                        };
-                    }
-                });
-            }
-        });
-
-        // 5. Armamos la tabla para el cartel
         let html = `<div class="table-responsive border rounded shadow-sm" style="max-height: 40vh; overflow-y: auto;">
             <table class="table table-sm text-start align-middle table-hover mb-0">
             <thead class="table-light sticky-top"><tr><th>Cant.</th><th>Producto</th><th class="text-end">Subtotal</th></tr></thead><tbody>`;
         
-        let arrayImpresion = [];
-
-        for (const [nombre, datos] of Object.entries(articulosUnificados)) {
-            let unidad = datos.unidad.toLowerCase().includes('kg') ? 'Kg' : 'un.';
+        data.articulos.forEach(a => {
+            let unidad = (a.unidad || 'un.').toLowerCase().includes('kg') ? 'Kg' : 'un.';
             html += `<tr>
-                <td class="fw-bold text-primary">${datos.cantidad} <span style="font-size:0.75rem" class="text-muted">${unidad}</span></td>
-                <td class="small fw-bold">${nombre}</td>
-                <td class="text-end fw-bold">$${datos.subtotal.toFixed(2)}</td>
+                <td class="fw-bold text-primary">${a.cantidad} <span style="font-size:0.75rem" class="text-muted">${unidad}</span></td>
+                <td class="small fw-bold">${a.nombre}</td>
+                <td class="text-end fw-bold">$${a.subtotal.toFixed(2)}</td>
             </tr>`;
-            arrayImpresion.push({ nombre: nombre, cantidad: datos.cantidad, unidad: unidad, subtotal: datos.subtotal });
-        }
+        });
 
         html += `</tbody></table></div>
                 <div class="alert alert-warning mt-3 text-start small border-warning pb-2">
-                    <i class="bi bi-info-circle-fill"></i> Este es un resumen de los tickets emitidos. El saldo final adeudado del cliente es de <b>$${clienteFiadoActual.saldo_actual_deudor.toLocaleString('es-AR', {minimumFractionDigits: 2})}</b> (puede ser menor si realizó entregas parciales de dinero).
+                    <i class="bi bi-info-circle-fill"></i> El saldo total adeudado del cliente es de <b>$${data.saldo_total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</b>.
                 </div>`;
 
-        // 6. Mostramos el resultado
         const result = await Swal.fire({
             title: `<div class="d-flex align-items-center justify-content-center gap-2"><i class="bi bi-list-check text-primary"></i> Resumen de Cuenta</div><span class="fs-6 text-muted">${clienteFiadoActual.nombre_completo}</span>`,
             html: html,
@@ -828,13 +788,13 @@ async function verResumenDetalladoFiado() {
             cancelButtonText: 'Cerrar'
         });
 
-        // 7. Si apretó imprimir, mandamos el reporte a la ticketera
+        // La función imprimirResumenFiado() queda igual, esa estaba perfecta
         if (result.isConfirmed) {
-            imprimirResumenFiado(clienteFiadoActual.nombre_completo, clienteFiadoActual.saldo_actual_deudor, arrayImpresion);
+            imprimirResumenFiado(clienteFiadoActual.nombre_completo, data.saldo_total, data.articulos);
         }
 
     } catch (e) {
-        Swal.fire('Error', 'No se pudo generar el resumen detallado.', 'error');
+        Swal.fire('Error', 'No se pudo generar el resumen. ¿Agregaste el endpoint en Python?', 'error');
         console.error(e);
     }
 }
