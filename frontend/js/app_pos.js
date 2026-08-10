@@ -999,6 +999,10 @@ function seleccionarClienteDeuda(id) {
     cargarHistorialTabla(cliente.id);
 }
 
+// Variables globales para controlar la paginación del historial
+let movimientosHistorialGlobal = [];
+let limiteMostrarHistorial = 15;
+
 async function cargarHistorialTabla(clienteId) {
     const tbody = document.getElementById("tablaDetalleFiado");
     try {
@@ -1011,26 +1015,60 @@ async function cargarHistorialTabla(clienteId) {
             return;
         }
 
-        data.movimientos.forEach(m => {
-            let esPago = m.tipo_movimiento === 'PAGO';
-            let numTicket = m.detalle.includes('#') ? m.detalle.split('#')[1] : '-';
+        // Guardamos todos los movimientos en la memoria del navegador
+        movimientosHistorialGlobal = data.movimientos;
+        limiteMostrarHistorial = 15; // Reiniciamos el límite a 15 cada vez que buscamos un cliente
+        
+        dibujarFilasHistorial();
 
-            tbody.innerHTML += `
-            <tr>
-                <td class="text-muted small align-middle">${m.fecha_hora.split(' ')[0]}</td>
-                <td class="align-middle"><span class="badge ${esPago ? 'bg-success' : 'bg-danger'}">${m.tipo_movimiento}</span></td>
-                <td class="text-start small align-middle">${m.detalle}</td>
-                <td class="fw-bold ${esPago ? 'text-success' : 'text-danger'} align-middle">${esPago ? '-' : ''}$${m.monto.toFixed(2)}</td>
-                <td class="text-end align-middle">
-                    ${!esPago && numTicket !== '-' ? `
-                    <div class="btn-group">
-                        <button class="btn btn-sm btn-outline-info py-0" onclick="verDetalleTicketFiado(${numTicket})" title="Ver Detalle"><i class="bi bi-eye"></i></button>
-                        <button class="btn btn-sm btn-outline-secondary py-0" onclick="imprimirTicket80mm(${numTicket})" title="Imprimir"><i class="bi bi-printer"></i></button>
-                    </div>` : ''}
-                </td>
-            </tr>`;
-        });
-    } catch (e) { tbody.innerHTML = "<tr><td colspan='5'>Error al cargar historial.</td></tr>"; }
+    } catch (e) { 
+        tbody.innerHTML = "<tr><td colspan='5'>Error al cargar historial.</td></tr>"; 
+    }
+}
+
+function dibujarFilasHistorial() {
+    const tbody = document.getElementById("tablaDetalleFiado");
+    tbody.innerHTML = "";
+
+    // Cortamos la lista para mostrar solo la cantidad permitida (los primeros 15)
+    const listaVisible = movimientosHistorialGlobal.slice(0, limiteMostrarHistorial);
+
+    listaVisible.forEach(m => {
+        let esPago = m.tipo_movimiento === 'PAGO';
+        let numTicket = m.detalle.includes('#') ? m.detalle.split('#')[1] : '-';
+
+        tbody.innerHTML += `
+        <tr>
+            <td class="text-muted small align-middle">${m.fecha_hora.split(' ')[0]}</td>
+            <td class="align-middle"><span class="badge ${esPago ? 'bg-success' : 'bg-danger'}">${m.tipo_movimiento}</span></td>
+            <td class="text-start small align-middle">${m.detalle}</td>
+            <td class="fw-bold ${esPago ? 'text-success' : 'text-danger'} align-middle">${esPago ? '-' : ''}$${m.monto.toFixed(2)}</td>
+            <td class="text-end align-middle">
+                ${!esPago && numTicket !== '-' ? `
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-outline-info py-0" onclick="verDetalleTicketFiado(${numTicket})" title="Ver Detalle"><i class="bi bi-eye"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary py-0" onclick="imprimirTicket80mm(${numTicket})" title="Imprimir"><i class="bi bi-printer"></i></button>
+                </div>` : ''}
+            </td>
+        </tr>`;
+    });
+
+    // Si quedaron movimientos afuera de los 15, mostramos el botón "Ver más" al final
+    if (movimientosHistorialGlobal.length > limiteMostrarHistorial) {
+        tbody.innerHTML += `
+        <tr>
+            <td colspan="5" class="text-center py-2 bg-light border-0">
+                <button class="btn btn-sm btn-outline-secondary fw-bold shadow-sm" onclick="mostrarMasHistorial()">
+                    <i class="bi bi-arrow-down-circle"></i> Cargar más movimientos antiguos
+                </button>
+            </td>
+        </tr>`;
+    }
+}
+
+function mostrarMasHistorial() {
+    limiteMostrarHistorial += 15; // Sumamos 15 registros más al límite
+    dibujarFilasHistorial(); // Volvemos a dibujar la tabla instantáneamente
 }
 
 async function verDetalleTicketFiado(ventaId) {
