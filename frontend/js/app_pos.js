@@ -137,6 +137,12 @@ async function iniciarInterfazPOS() {
     // 1. Cargamos los datos de la memoria unificada
     const nombre = localStorage.getItem('usuario_nombre');
     const rol = localStorage.getItem('usuario_rol');
+    // 2. Mostramos el nombre en el Navbar
+    document.getElementById('nombreCajeroLogueado').innerText = nombre;
+
+    // MAGIA MARCA BLANCA: Leemos el nombre del local de la memoria (o ponemos uno por defecto)
+    const configLocal = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio" };
+    document.getElementById('uiNombreNegocio').innerText = configLocal.nombre_negocio.toUpperCase();
 
     if (!nombre) {
         window.location.href = 'index.html';
