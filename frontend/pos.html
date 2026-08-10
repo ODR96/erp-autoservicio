@@ -217,10 +217,22 @@
             box-shadow: none;
         }
 
-        .bg-efectivo { background-color: #4caf50; }
-        .bg-tarjeta { background-color: #ffeb3b; color: #333; }
-        .bg-virtual { background-color: #2196f3; }
-        .bg-fiado { background-color: #f57c00; }
+        .bg-efectivo {
+            background-color: #4caf50;
+        }
+
+        .bg-tarjeta {
+            background-color: #ffeb3b;
+            color: #333;
+        }
+
+        .bg-virtual {
+            background-color: #2196f3;
+        }
+
+        .bg-fiado {
+            background-color: #f57c00;
+        }
 
         .btn-espera {
             background-color: #6c757d;
@@ -306,14 +318,11 @@
                     <i class="bi bi-journal-check"></i> Cobrar Cta. Cte.
                 </button>
                 <button class="btn btn-warning fw-bold shadow-sm px-4" onclick="abrirCobroPedidoMayorista()">
-                <i class="bi bi-box-seam"></i> Pedido Mayorista
-            </button>
+                    <i class="bi bi-box-seam"></i> Pedido Mayorista
+                </button>
                 <button class="btn btn-secondary fw-bold d-flex align-items-center gap-2 me-3"
                     onclick="modalGestion.show()">
                     <i class="bi bi-safe"></i> Caja (F10)
-                </button>
-                <button class="btn btn-outline-light border-0 me-2" onclick="actualizarCajaRapido()" title="Actualizar precios y permisos desde la Nube">
-                    <i class="bi bi-arrow-clockwise fs-3"></i>
                 </button>
                 <div class="text-end lh-1">
                     <strong class="fs-4" id="reloj">00:00</strong><br>
@@ -640,6 +649,12 @@
                                 <div class="alert alert-danger text-center my-3 shadow-sm"><small
                                         class="text-uppercase fw-bold">Deuda Total</small>
                                     <h2 class="mb-0 fw-bold" id="deudaClienteFiado">$ 0.00</h2>
+
+                                    <button class="btn btn-outline-primary btn-sm w-100 fw-bold mb-3 shadow-sm"
+                                        onclick="verResumenDetalladoFiado()">
+                                        <i class="bi bi-list-check"></i> Ver Resumen de Artículos
+                                    </button>
+                                    
                                 </div><label class="form-label fw-bold">Monto a Entregar</label>
                                 <div class="input-group input-group-lg mb-3">
                                     <span class="input-group-text fw-bold">$</span>
@@ -855,4 +870,5 @@
     <script src="js/app_pos.js"></script>
 
 </body>
+
 </html>

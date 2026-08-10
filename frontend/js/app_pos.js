@@ -63,9 +63,9 @@ async function solicitarAutorizacion(mensaje) {
 
     try {
         Swal.fire({ title: 'Verificando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-        
+
         const res = await fetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
-            method: 'POST', 
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin_secreto: pin, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
         });
@@ -208,6 +208,8 @@ async function abrirHistorialTurno() {
                 const esAnulada = v.estado === 'ANULADA';
                 const colorFila = esAnulada ? 'text-muted text-decoration-line-through' : '';
                 const badge = esAnulada ? '<span class="badge bg-danger">Anulada</span>' : '<span class="badge bg-success">Ok</span>';
+                
+                const btnVer = `<button class="btn btn-sm btn-outline-info me-1" onclick="verDetalleTicketGlobal(${v.id})" title="Ver Detalle"><i class="bi bi-eye"></i></button>`;
 
                 // EL PARCHE: Agregamos el botón de imprimir que llama a tu propia función
                 const btnImprimir = `<button class="btn btn-sm btn-outline-primary me-1" onclick="imprimirTicket80mm(${v.id})" title="Reimprimir Ticket"><i class="bi bi-printer"></i></button>`;
@@ -226,11 +228,11 @@ async function abrirHistorialTurno() {
         <td class="align-middle text-end fw-bold">$${v.total_venta.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
         <td class="align-middle text-center">${badge}</td>
         <td class="align-middle text-center">
-            <div class="d-flex justify-content-center">
-                ${btnImprimir}
-                ${btnAnular}
-            </div>
-        </td>
+        <div class="d-flex justify-content-center">
+            ${btnVer}
+            ${btnImprimir}
+            ${btnAnular}
+        </div>
     </tr>
 `;
             });
@@ -238,6 +240,37 @@ async function abrirHistorialTurno() {
         modalHistorial.show();
     } catch (e) {
         Swal.fire('Error', 'No se pudo cargar el historial: ' + e.message, 'error');
+    }
+}
+
+async function verDetalleTicketGlobal(ventaId) {
+    Swal.fire({ title: 'Cargando detalle...', didOpen: () => Swal.showLoading() });
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        let html = `<div class="table-responsive"><table class="table table-sm text-start align-middle">
+            <thead class="table-light"><tr><th>Cant.</th><th>Producto</th><th class="text-end">Total</th></tr></thead><tbody>`;
+
+        data.detalle_compra.forEach(d => {
+            html += `<tr>
+                <td class="fw-bold">${d.cantidad}</td>
+                <td class="small">${d.nombre}</td>
+                <td class="text-end">$${d.subtotal.toFixed(2)}</td>
+            </tr>`;
+        });
+
+        html += `</tbody></table></div>
+                 <div class="text-end fw-bold fs-5 mt-2 text-primary">Total: $${data.totales.total_a_pagar.toFixed(2)}</div>
+                 <div class="text-start text-muted small mt-2">Método: ${data.totales.metodo_pago}</div>`;
+
+        Swal.fire({
+            title: `<i class="bi bi-receipt text-primary"></i> Ticket #${ventaId}`,
+            html: html, width: '500px', showCloseButton: true, confirmButtonText: 'Cerrar', confirmButtonColor: '#6c757d'
+        });
+    } catch (e) {
+        Swal.fire('Error', 'No se pudo cargar el detalle del ticket.', 'error');
     }
 }
 
@@ -339,15 +372,50 @@ async function anularVentaConAviso() {
 }
 
 function pressNumpad(n) { inputScan.value += n; inputScan.focus(); }
-function setModo(m) {
+async function setModo(m) {
     if (m === 'CANT' && inputScan.value) {
-        mult = parseFloat(inputScan.value); inputScan.value = "";
-        inputScan.placeholder = `Cant: ${mult} x (Pase producto)`;
-    } else if (m === 'PRECIO' && inputScan.value) {
-        agregarAlCarrito({ id: 999, nombre: "Varios", precio_venta_final: parseFloat(inputScan.value) });
+        mult = parseFloat(inputScan.value); 
         inputScan.value = "";
+        inputScan.placeholder = `Cant: ${mult} x (Pase producto)`;
+        inputScan.focus();
+    } else if (m === 'PRECIO' && inputScan.value) {
+        const precioVarios = parseFloat(inputScan.value);
+        inputScan.value = "";
+        
+        // El cuadro súper rápido (podes escribir y darle a Enter sin usar el mouse)
+        const { value: nombreVarios } = await Swal.fire({
+            title: 'Artículo Varios',
+            input: 'text',
+            inputLabel: `Precio: $${precioVarios.toFixed(2)}`,
+            inputPlaceholder: 'Ej: Caramelos, Escoba... (Enter para omitir)',
+            showCancelButton: true,
+            confirmButtonText: 'Agregar (Enter)',
+            cancelButtonText: 'Cancelar (Esc)',
+            didOpen: () => {
+                const input = Swal.getInput();
+                input.focus();
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') Swal.clickConfirm();
+                });
+            }
+        });
+
+        // Si el cajero le dio a Aceptar o apretó Enter
+        if (nombreVarios !== undefined) {
+            // Si lo dejó en blanco por apuro, le ponemos "Varios" por defecto
+            const nombreFinal = nombreVarios.trim() === '' ? 'Varios' : nombreVarios.trim();
+            
+            // MAGIA: Le generamos un ID único con Date.now() para que no se agrupen
+            agregarAlCarrito({ 
+                id: 'varios_' + Date.now(), 
+                nombre: nombreFinal, 
+                precio_venta_final: precioVarios 
+            });
+        }
+        inputScan.focus();
+    } else {
+        inputScan.focus();
     }
-    inputScan.focus();
 }
 function borrarUltimo() { if (carrito.length > 0) { carrito.pop(); actualizarTabla(); } inputScan.focus(); }
 
@@ -410,34 +478,61 @@ function agregarAlCarrito(p) {
     // (Ajustá 'PESO' o 'Kg' según cómo lo hayas escrito en tu base de datos)
     const esPesable = (p.tipo_venta === 'PESO' || p.tipo_venta === 'Peso' || p.unidad_medida === 'Kg' || p.unidad_medida === 'KG');
 
-    if (esPesable) {
-        // 2. Si es pesable, frenamos todo y abrimos la balanza
+if (esPesable) {
+        // 2. Si es pesable, frenamos todo y abrimos la balanza bidireccional
         Swal.fire({
             title: '⚖️ Producto por Peso',
             html: `
-        <h5 class="text-primary fw-bold">${p.nombre}</h5>
-        <p class="mb-1 text-muted">Precio por Kg: $${p.precio_venta_final.toFixed(2)}</p>
-        <hr>
-        <label class="form-label fw-bold">Ingrese el peso en KG:</label>
-    `,
-            input: 'number',
-            inputAttributes: {
-                step: '0.001', // <-- AHORA PERMITE PESAR GRAMO POR GRAMO EXACTO
-                min: '0.010',
-                placeholder: 'Ej: 1.500'
-            },
+                <h5 class="text-primary fw-bold">${p.nombre}</h5>
+                <p class="mb-3 text-muted">Precio por Kg: $${p.precio_venta_final.toFixed(2)}</p>
+                <div class="row g-2 text-start px-2">
+                    <div class="col-6">
+                        <label class="form-label fw-bold small text-secondary">Peso (KG)</label>
+                        <input type="number" id="swal-peso" class="form-control border-primary form-control-lg text-center fw-bold" step="0.005" min="0" placeholder="Ej: 0.250" autocomplete="off">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label fw-bold small text-success">Por Monto ($)</label>
+                        <input type="number" id="swal-monto" class="form-control border-success form-control-lg text-center fw-bold" step="10" min="0" placeholder="Ej: 2000" autocomplete="off">
+                    </div>
+                </div>
+            `,
             showCancelButton: true,
             confirmButtonColor: '#198754',
-            confirmButtonText: '<i class="bi bi-check-lg"></i> Pesar y Agregar',
-            cancelButtonText: 'Cancelar',
+            confirmButtonText: '<i class="bi bi-check-lg"></i> Pesar (Enter)',
+            cancelButtonText: 'Cancelar (Esc)',
             didOpen: () => {
-                const input = Swal.getInput();
-                input.focus();
+                const inputPeso = document.getElementById('swal-peso');
+                const inputMonto = document.getElementById('swal-monto');
+                inputPeso.focus();
                 mult = 1; // Anulamos el multiplicador manual si lo usó por error
+
+                // MAGIA: Si escribe Kilos, calcula la Plata
+                inputPeso.addEventListener('input', () => {
+                    let kilos = parseFloat(inputPeso.value) || 0;
+                    inputMonto.value = (kilos * p.precio_venta_final).toFixed(2);
+                });
+
+                // MAGIA INVERSA: Si escribe Plata, calcula los Kilos
+                inputMonto.addEventListener('input', () => {
+                    let plata = parseFloat(inputMonto.value) || 0;
+                    inputPeso.value = (plata / p.precio_venta_final).toFixed(3);
+                });
+
+                // Escuchamos el Enter en cualquiera de los dos cuadros
+                inputPeso.addEventListener('keypress', (e) => { if(e.key === 'Enter') Swal.clickConfirm(); });
+                inputMonto.addEventListener('keypress', (e) => { if(e.key === 'Enter') Swal.clickConfirm(); });
+            },
+            preConfirm: () => {
+                const kilosFinales = parseFloat(document.getElementById('swal-peso').value);
+                if (!kilosFinales || kilosFinales <= 0) {
+                    Swal.showValidationMessage('Ingrese un peso o monto mayor a 0');
+                    return false;
+                }
+                return kilosFinales;
             }
         }).then((result) => {
             if (result.isConfirmed && result.value > 0) {
-                let kilos = parseFloat(result.value);
+                let kilos = result.value;
 
                 // Agregamos al carrito con la cantidad en Kilos
                 const existe = carrito.find(x => x.id === p.id);
@@ -508,12 +603,41 @@ function cambiarCantidad(i, delta) {
 async function aplicarModificador(tipo) {
     if (carrito.length === 0) return Swal.fire('Ticket vacío', 'Cargue productos primero.', 'warning');
 
-    let titulo = tipo === 'descuento' ? 'Porcentaje de DESCUENTO' : 'Porcentaje de RECARGO';
-    const { value: val } = await Swal.fire({ title: titulo, input: 'number', inputPlaceholder: 'Ej: 10', showCancelButton: true, confirmButtonText: 'Aplicar' });
+    let titulo = tipo === 'descuento' ? 'Aplicar Descuento Global (%)' : 'Aplicar Recargo Global (%)';
+    let valorActual = tipo === 'descuento' ? porcentajeDescuento : porcentajeRecargo;
 
-    if (val !== undefined && val !== "") {
-        if (tipo === 'descuento') { porcentajeDescuento = parseFloat(val); porcentajeRecargo = 0; }
-        else { porcentajeRecargo = parseFloat(val); porcentajeDescuento = 0; }
+    const { value: val, isDenied } = await Swal.fire({
+        title: titulo,
+        input: 'number',
+        inputValue: valorActual > 0 ? valorActual : '',
+        inputPlaceholder: 'Ej: 10',
+        showCancelButton: true,
+        showDenyButton: valorActual > 0, // Solo aparece si ya hay un descuento/recargo activo
+        denyButtonText: '<i class="bi bi-trash"></i> Eliminar',
+        confirmButtonText: 'Aplicar',
+        cancelButtonText: 'Cancelar',
+        denyButtonColor: '#dc3545'
+    });
+
+    if (isDenied) {
+        // El usuario tocó el botón rojo de Eliminar
+        porcentajeDescuento = 0;
+        porcentajeRecargo = 0;
+        actualizarTabla();
+    } else if (val !== undefined && val !== "") {
+        let num = parseFloat(val);
+        if (num < 0) num = 0; 
+        
+        if (num === 0) {
+            porcentajeDescuento = 0;
+            porcentajeRecargo = 0;
+        } else if (tipo === 'descuento') { 
+            porcentajeDescuento = num; 
+            porcentajeRecargo = 0; 
+        } else { 
+            porcentajeRecargo = num; 
+            porcentajeDescuento = 0; 
+        }
         actualizarTabla();
     }
     inputScan.focus();
@@ -614,6 +738,156 @@ function prepararCobroEfectivo() {
     document.getElementById("cobroVuelto").innerText = "$ 0.00";
     modalCobroEfectivo.show();
     setTimeout(() => document.getElementById("inputPagaCon").focus(), 500);
+}
+
+
+// =========================================================
+// RESUMEN DETALLADO DE CUENTA CORRIENTE
+// =========================================================
+async function verResumenDetalladoFiado() {
+    if (!clienteFiadoActual) return;
+    
+    Swal.fire({ title: 'Recopilando artículos...', text: 'Buscando tickets históricos...', didOpen: () => Swal.showLoading() });
+    
+    try {
+        // 1. Buscamos el historial actual del cliente
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/historial/${clienteFiadoActual.id}`);
+        const data = await res.json();
+        
+        if (!data.movimientos || data.movimientos.length === 0) {
+            return Swal.fire('Sin datos', 'No hay movimientos para resumir.', 'info');
+        }
+
+        // 2. Filtramos solo los movimientos que son VENTAS (ignoramos los pagos) y que tienen un número de ticket
+        const ventas = data.movimientos.filter(m => m.tipo_movimiento !== 'PAGO' && m.detalle.includes('#'));
+        
+        if (ventas.length === 0) {
+            return Swal.fire('Cuenta al día', 'No se encontraron tickets pendientes de pago en el historial.', 'info');
+        }
+
+        // 3. Descargamos todos los tickets en paralelo a la velocidad de la luz
+        const promesas = ventas.map(v => {
+            let numTicket = v.detalle.split('#')[1].trim();
+            return fetch(`${obtenerBaseUrl()}/ventas/ticket/${numTicket}`).then(r => r.json());
+        });
+        
+        const ticketsDescargados = await Promise.all(promesas);
+
+        // 4. Agrupamos los artículos iguales (Ej: Si llevó Coca 3 veces, la sumamos)
+        let articulosUnificados = {};
+
+        ticketsDescargados.forEach(ticketData => {
+            if (!ticketData.error && ticketData.detalle_compra) {
+                ticketData.detalle_compra.forEach(item => {
+                    let nombreLimpio = item.nombre.trim();
+                    if (articulosUnificados[nombreLimpio]) {
+                        articulosUnificados[nombreLimpio].cantidad += item.cantidad;
+                        articulosUnificados[nombreLimpio].subtotal += item.subtotal;
+                    } else {
+                        articulosUnificados[nombreLimpio] = {
+                            cantidad: item.cantidad,
+                            unidad: item.unidad_medida || 'un',
+                            subtotal: item.subtotal
+                        };
+                    }
+                });
+            }
+        });
+
+        // 5. Armamos la tabla para el cartel
+        let html = `<div class="table-responsive border rounded shadow-sm" style="max-height: 40vh; overflow-y: auto;">
+            <table class="table table-sm text-start align-middle table-hover mb-0">
+            <thead class="table-light sticky-top"><tr><th>Cant.</th><th>Producto</th><th class="text-end">Subtotal</th></tr></thead><tbody>`;
+        
+        let arrayImpresion = [];
+
+        for (const [nombre, datos] of Object.entries(articulosUnificados)) {
+            let unidad = datos.unidad.toLowerCase().includes('kg') ? 'Kg' : 'un.';
+            html += `<tr>
+                <td class="fw-bold text-primary">${datos.cantidad} <span style="font-size:0.75rem" class="text-muted">${unidad}</span></td>
+                <td class="small fw-bold">${nombre}</td>
+                <td class="text-end fw-bold">$${datos.subtotal.toFixed(2)}</td>
+            </tr>`;
+            arrayImpresion.push({ nombre: nombre, cantidad: datos.cantidad, unidad: unidad, subtotal: datos.subtotal });
+        }
+
+        html += `</tbody></table></div>
+                <div class="alert alert-warning mt-3 text-start small border-warning pb-2">
+                    <i class="bi bi-info-circle-fill"></i> Este es un resumen de los tickets emitidos. El saldo final adeudado del cliente es de <b>$${clienteFiadoActual.saldo_actual_deudor.toLocaleString('es-AR', {minimumFractionDigits: 2})}</b> (puede ser menor si realizó entregas parciales de dinero).
+                </div>`;
+
+        // 6. Mostramos el resultado
+        const result = await Swal.fire({
+            title: `<div class="d-flex align-items-center justify-content-center gap-2"><i class="bi bi-list-check text-primary"></i> Resumen de Cuenta</div><span class="fs-6 text-muted">${clienteFiadoActual.nombre_completo}</span>`,
+            html: html,
+            width: '600px',
+            showCancelButton: true,
+            confirmButtonColor: '#198754',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: '<i class="bi bi-printer"></i> Imprimir Reporte',
+            cancelButtonText: 'Cerrar'
+        });
+
+        // 7. Si apretó imprimir, mandamos el reporte a la ticketera
+        if (result.isConfirmed) {
+            imprimirResumenFiado(clienteFiadoActual.nombre_completo, clienteFiadoActual.saldo_actual_deudor, arrayImpresion);
+        }
+
+    } catch (e) {
+        Swal.fire('Error', 'No se pudo generar el resumen detallado.', 'error');
+        console.error(e);
+    }
+}
+
+// MOTOR DE IMPRESIÓN DEL RESUMEN
+function imprimirResumenFiado(cliente, deudaTotal, articulos) {
+    const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio", direccion: "" };
+    let fechaActual = `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
+    
+    let html = `
+    <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Resumen de Cuenta</title>
+    <style>
+        @page { margin: 0; }
+        body { font-family: Arial, sans-serif; font-size: 11px; margin: 0; padding: 2mm 4mm; width: 72mm; color: #000; -webkit-font-smoothing: none; text-rendering: crispEdges;}
+        .center { text-align: center; } .left { text-align: left; } .right { text-align: right; } .bold { font-weight: bold; }
+        .divisor { border-top: 1px dashed #000; margin: 4px 0; }
+        .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 4px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 5px 0; }
+        th, td { text-align: left; padding: 2px 0; vertical-align: top; }
+    </style>
+    </head><body>
+        <div class="center bold" style="font-size: 15px;">${config.nombre_negocio.toUpperCase()}</div>
+        <div class="center bold" style="font-size: 13px; margin-top: 4px;">RESUMEN DE ARTÍCULOS PENDIENTES</div>
+        <div class="divisor"></div>
+        <div class="left">Fecha: ${fechaActual}</div>
+        <div class="left bold">Cliente: ${cliente}</div>
+        <div class="divisor-doble"></div>
+        <table>
+            <tr><th style="width:15%">CANT</th><th>DETALLE</th><th class="right">SUBT</th></tr>
+            <tr><td colspan="3"><div class="divisor"></div></td></tr>`;
+            
+    articulos.forEach(a => {
+        html += `<tr>
+            <td class="left">${a.cantidad} <span style="font-size:9px">${a.unidad}</span></td>
+            <td class="left">${a.nombre}</td>
+            <td class="right">$${a.subtotal.toFixed(2)}</td>
+        </tr>`;
+    });
+    
+    html += `
+            <tr><td colspan="3"><div class="divisor-doble"></div></td></tr>
+        </table>
+        <div style="font-size: 14px; display: flex; justify-content: space-between;" class="bold">
+            <span>SALDO TOTAL:</span>
+            <span>$ ${deudaTotal.toFixed(2)}</span>
+        </div>
+        <div class="center" style="margin-top: 15px; font-size: 10px;">Documento informativo detallado.<br>No válido como factura.</div>
+        <div style="margin-bottom: 25mm;"></div>
+    </body></html>`;
+
+    let vent = window.open('', '_blank', 'width=300,height=500');
+    vent.document.write(html); vent.document.close(); vent.focus();
+    setTimeout(() => { vent.print(); vent.close(); }, 500);
 }
 
 function calcularVuelto() {
@@ -1358,9 +1632,9 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
     const esCierreZ = (tipo === 'Z' || tipo === 'z');
     const tituloReporte = esCierreZ ? "CIERRE Z (FINAL)" : "ARQUEO X (PARCIAL)";
 
-    const nombreCajero = (typeof empleadoLogueado !== 'undefined' && empleadoLogueado && empleadoLogueado.nombre) 
-                        ? empleadoLogueado.nombre 
-                        : (localStorage.getItem('usuario_nombre') || "Caja Principal");
+    const nombreCajero = (typeof empleadoLogueado !== 'undefined' && empleadoLogueado && empleadoLogueado.nombre)
+        ? empleadoLogueado.nombre
+        : (localStorage.getItem('usuario_nombre') || "Caja Principal");
     // Mapeo ampliado (agregamos más opciones para atrapar los fiados)
     const fondoIni = d.fondo_inicial ?? 0;
     const vEfectivo = d.ventas_en_efectivo ?? d.efectivo ?? 0;
@@ -1509,7 +1783,7 @@ async function cierreZ() {
 
             localStorage.removeItem('empleado_pos');
             localStorage.removeItem('token_pos');
-            window.location.href = "index.html"; 
+            window.location.href = "index.html";
 
         } catch (e) {
             Swal.fire('Error al cerrar caja', e.message, 'error');
@@ -1535,15 +1809,15 @@ async function forzarCierreRemoto(turnoId) {
             const res = await fetch(`${obtenerBaseUrl()}/caja/cerrar`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    turno_id: turnoId, 
+                body: JSON.stringify({
+                    turno_id: turnoId,
                     monto_final_declarado: 0 // Declaramos 0 porque el cajero no hizo el conteo manual
                 })
             });
-            
+
             const data = await res.json();
             if (!res.ok || data.error) throw new Error(data.error || "Fallo al cerrar remotamente");
-            
+
             Swal.fire('¡Cerrada!', 'La caja fue destrabada y cerrada exitosamente.', 'success');
             cargarDatosEnVivo(); // Refresca el monitor y desaparece la caja
         } catch (e) {
@@ -1570,7 +1844,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
                 const clienteObj = clientesGlobales.find(c => c.id === clienteSeleccionadoId);
                 if (clienteObj) saldoActual = clienteObj.saldo_actual_deudor;
             }
-            
+
             if (saldoActual > 0) {
                 bloqueDeuda = `
                     <div class="divisor"></div>
@@ -1734,7 +2008,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
 
 function imprimirRemitoFiado(cliente, total, articulos) {
     let fechaActual = `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
-    const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio", direccion: "Dirección", cuit: "00-00000000-0", mensaje_ticket: "¡Gracias por su compra!"};
+    const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio", direccion: "Dirección", cuit: "00-00000000-0", mensaje_ticket: "¡Gracias por su compra!" };
 
     // Armamos un "molde" inteligente
     const generarCuerpo = (esCopia) => {
@@ -1802,7 +2076,7 @@ function imprimirRemitoFiado(cliente, total, articulos) {
                     DESARROLLO DE SOFTWARE ERP - 20 DE JUNIO
                 </div>
             `;
-            return htmlCuerpo;
+        return htmlCuerpo;
     };
 
     let html = `
@@ -1876,16 +2150,6 @@ function abrirPagoMixto() {
     calcularMixto();
     modalPagoMixto.show();
     setTimeout(() => document.getElementById('mixtoEfectivo').focus(), 500);
-}
-
-async function actualizarCajaRapido() {
-    Swal.fire({ title: 'Actualizando...', timer: 2000, showConfirmButton: false });
-    try {
-        await fetch(`${obtenerBaseUrl()}/sync/actualizar-rapido`, { method: 'POST' });
-        // Después de 2 segundos, los permisos nuevos ya están en la PC local
-    } catch (e) {
-        console.error("Error al actualizar", e);
-    }
 }
 
 function calcularMixto() {
@@ -2025,12 +2289,12 @@ async function abrirCobroPedidoMayorista() {
                     const tra = parseFloat(document.getElementById('mixTra').value) || 0;
                     const cta = parseFloat(document.getElementById('mixCta').value) || 0;
                     const suma = efe + tar + tra + cta;
-                    
+
                     if (suma < data.total_venta) {
                         Swal.showValidationMessage(`Faltan $${(data.total_venta - suma).toFixed(2)} para cubrir el pedido.`);
                         return false;
                     }
-                    
+
                     let vuelto = 0;
                     if (suma > data.total_venta) {
                         vuelto = suma - data.total_venta;
@@ -2040,7 +2304,7 @@ async function abrirCobroPedidoMayorista() {
                             return false;
                         }
                     }
-                    
+
                     return {
                         pagos: [
                             { metodo: 'EFECTIVO', monto: efe },
@@ -2052,9 +2316,9 @@ async function abrirCobroPedidoMayorista() {
                     };
                 }
             });
-            
+
             if (!resultadoMixto) return;
-            
+
             pagosMixtosData = resultadoMixto.pagos.filter(p => p.monto > 0);
             if (resultadoMixto.vuelto > 0) {
                 textoVuelto = `<br><br><span class="text-success fs-5"><b>Entregar Vuelto: $${resultadoMixto.vuelto.toFixed(2)}</b></span>`;
@@ -2063,7 +2327,7 @@ async function abrirCobroPedidoMayorista() {
 
         // PROCEDEMOS A GUARDAR EN LA BASE DE DATOS
         Swal.fire({ title: 'Guardando en caja...', didOpen: () => Swal.showLoading() });
-        
+
         const resCobro = await fetch(`${obtenerBaseUrl()}/caja/cobrar_pedido`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2074,9 +2338,9 @@ async function abrirCobroPedidoMayorista() {
                 pagos_mixtos: pagosMixtosData.length > 0 ? pagosMixtosData : null
             })
         });
-        
+
         const dataCobro = await resCobro.json();
-        
+
         if (!resCobro.ok) throw new Error('Error de conexión con el motor de caja.');
         if (dataCobro.error) throw new Error(dataCobro.error);
 
@@ -2085,7 +2349,7 @@ async function abrirCobroPedidoMayorista() {
             html: `El pedido ya aparece en Logística para su entrega.${textoVuelto}`,
             icon: 'success'
         });
-        
+
     } catch (e) {
         Swal.fire('Operación Cancelada', e.message, 'error');
     }
