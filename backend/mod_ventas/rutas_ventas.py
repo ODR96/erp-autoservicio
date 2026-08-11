@@ -42,6 +42,7 @@ class ItemVenta(BaseModel):
     producto_id: int
     cantidad: float
     precio_unitario: float
+    nombre_fantasma: Optional[str] = None
 
 class PagoMixto(BaseModel):
     metodo: str
@@ -90,7 +91,17 @@ def registrar_venta(venta: NuevaVenta):
             cursor.execute("SELECT precio_venta_final, nombre FROM productos WHERE id = ?", (item.producto_id,))
             prod_info = cursor.fetchone()
             if not prod_info:
-                raise Exception(f"El producto ID {item.producto_id} no existe.")
+                subtotal_item = item.precio_unitario * item.cantidad
+                total_venta += subtotal_item
+                nombre_mostrar = item.nombre_fantasma if item.nombre_fantasma else "Artículo Varios"
+                
+                cursor.execute('''
+                    INSERT INTO ventas_detalle 
+                    (venta_id, producto_id, descripcion_historica, cantidad, precio_unitario_historico, subtotal)
+                    VALUES (?, 0, ?, ?, ?, ?)
+                ''', (venta_id, nombre_mostrar, item.cantidad, item.precio_unitario, subtotal_item))
+                
+                continue
                 
             precio_standard = prod_info['precio_venta_final']
             ahorro_esta_linea = (precio_standard - item.precio_unitario) * item.cantidad

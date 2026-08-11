@@ -214,7 +214,7 @@ async function abrirHistorialTurno() {
                 const esAnulada = v.estado === 'ANULADA';
                 const colorFila = esAnulada ? 'text-muted text-decoration-line-through' : '';
                 const badge = esAnulada ? '<span class="badge bg-danger">Anulada</span>' : '<span class="badge bg-success">Ok</span>';
-                
+
                 const btnVer = `<button class="btn btn-sm btn-outline-info me-1" onclick="verDetalleTicketGlobal(${v.id})" title="Ver Detalle"><i class="bi bi-eye"></i></button>`;
 
                 // EL PARCHE: Agregamos el botón de imprimir que llama a tu propia función
@@ -380,14 +380,14 @@ async function anularVentaConAviso() {
 function pressNumpad(n) { inputScan.value += n; inputScan.focus(); }
 async function setModo(m) {
     if (m === 'CANT' && inputScan.value) {
-        mult = parseFloat(inputScan.value); 
+        mult = parseFloat(inputScan.value);
         inputScan.value = "";
         inputScan.placeholder = `Cant: ${mult} x (Pase producto)`;
         inputScan.focus();
     } else if (m === 'PRECIO' && inputScan.value) {
         const precioVarios = parseFloat(inputScan.value);
         inputScan.value = "";
-        
+
         // El cuadro súper rápido (podes escribir y darle a Enter sin usar el mouse)
         const { value: nombreVarios } = await Swal.fire({
             title: 'Artículo Varios',
@@ -410,12 +410,12 @@ async function setModo(m) {
         if (nombreVarios !== undefined) {
             // Si lo dejó en blanco por apuro, le ponemos "Varios" por defecto
             const nombreFinal = nombreVarios.trim() === '' ? 'Varios' : nombreVarios.trim();
-            
+
             // MAGIA: Le generamos un ID único con Date.now() para que no se agrupen
-            agregarAlCarrito({ 
-                id: 'varios_' + Date.now(), 
-                nombre: nombreFinal, 
-                precio_venta_final: precioVarios 
+            agregarAlCarrito({
+                id: Date.now(),
+                nombre: nombreFinal,
+                precio_venta_final: precioVarios
             });
         }
         inputScan.focus();
@@ -484,7 +484,7 @@ function agregarAlCarrito(p) {
     // (Ajustá 'PESO' o 'Kg' según cómo lo hayas escrito en tu base de datos)
     const esPesable = (p.tipo_venta === 'PESO' || p.tipo_venta === 'Peso' || p.unidad_medida === 'Kg' || p.unidad_medida === 'KG');
 
-if (esPesable) {
+    if (esPesable) {
         // 2. Si es pesable, frenamos todo y abrimos la balanza bidireccional
         Swal.fire({
             title: '⚖️ Producto por Peso',
@@ -525,8 +525,8 @@ if (esPesable) {
                 });
 
                 // Escuchamos el Enter en cualquiera de los dos cuadros
-                inputPeso.addEventListener('keypress', (e) => { if(e.key === 'Enter') Swal.clickConfirm(); });
-                inputMonto.addEventListener('keypress', (e) => { if(e.key === 'Enter') Swal.clickConfirm(); });
+                inputPeso.addEventListener('keypress', (e) => { if (e.key === 'Enter') Swal.clickConfirm(); });
+                inputMonto.addEventListener('keypress', (e) => { if (e.key === 'Enter') Swal.clickConfirm(); });
             },
             preConfirm: () => {
                 const kilosFinales = parseFloat(document.getElementById('swal-peso').value);
@@ -632,17 +632,17 @@ async function aplicarModificador(tipo) {
         actualizarTabla();
     } else if (val !== undefined && val !== "") {
         let num = parseFloat(val);
-        if (num < 0) num = 0; 
-        
+        if (num < 0) num = 0;
+
         if (num === 0) {
             porcentajeDescuento = 0;
             porcentajeRecargo = 0;
-        } else if (tipo === 'descuento') { 
-            porcentajeDescuento = num; 
-            porcentajeRecargo = 0; 
-        } else { 
-            porcentajeRecargo = num; 
-            porcentajeDescuento = 0; 
+        } else if (tipo === 'descuento') {
+            porcentajeDescuento = num;
+            porcentajeRecargo = 0;
+        } else {
+            porcentajeRecargo = num;
+            porcentajeDescuento = 0;
         }
         actualizarTabla();
     }
@@ -752,14 +752,14 @@ function prepararCobroEfectivo() {
 // =========================================================
 async function verResumenDetalladoFiado() {
     if (!clienteFiadoActual) return;
-    
+
     Swal.fire({ title: 'Calculando deuda...', text: 'Consultando al servidor...', didOpen: () => Swal.showLoading() });
-    
+
     try {
         // Le pegamos directo a nuestro nuevo misil en Python
         const res = await fetch(`${obtenerBaseUrl()}/clientes/resumen_pendientes/${clienteFiadoActual.id}`);
         const data = await res.json();
-        
+
         if (data.error) throw new Error(data.error);
         if (!data.articulos || data.articulos.length === 0) {
             return Swal.fire('Cuenta al día', 'No se registran artículos impagos para este cliente.', 'info');
@@ -768,7 +768,7 @@ async function verResumenDetalladoFiado() {
         let html = `<div class="table-responsive border rounded shadow-sm" style="max-height: 40vh; overflow-y: auto;">
             <table class="table table-sm text-start align-middle table-hover mb-0">
             <thead class="table-light sticky-top"><tr><th>Cant.</th><th>Producto</th><th class="text-end">Subtotal</th></tr></thead><tbody>`;
-        
+
         data.articulos.forEach(a => {
             let unidad = (a.unidad || 'un.').toLowerCase().includes('kg') ? 'Kg' : 'un.';
             html += `<tr>
@@ -780,7 +780,7 @@ async function verResumenDetalladoFiado() {
 
         html += `</tbody></table></div>
                 <div class="alert alert-warning mt-3 text-start small border-warning pb-2">
-                    <i class="bi bi-info-circle-fill"></i> El saldo total adeudado del cliente es de <b>$${data.saldo_total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</b>.
+                    <i class="bi bi-info-circle-fill"></i> El saldo total adeudado del cliente es de <b>$${data.saldo_total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</b>.
                 </div>`;
 
         const result = await Swal.fire({
@@ -809,7 +809,7 @@ async function verResumenDetalladoFiado() {
 function imprimirResumenFiado(cliente, deudaTotal, articulos) {
     const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio", direccion: "" };
     let fechaActual = `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
-    
+
     let html = `
     <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Resumen de Cuenta</title>
     <style>
@@ -831,7 +831,7 @@ function imprimirResumenFiado(cliente, deudaTotal, articulos) {
         <table>
             <tr><th style="width:15%">CANT</th><th>DETALLE</th><th class="right">SUBT</th></tr>
             <tr><td colspan="3"><div class="divisor"></div></td></tr>`;
-            
+
     articulos.forEach(a => {
         html += `<tr>
             <td class="left">${a.cantidad} <span style="font-size:9px">${a.unidad}</span></td>
@@ -839,7 +839,7 @@ function imprimirResumenFiado(cliente, deudaTotal, articulos) {
             <td class="right">$${a.subtotal.toFixed(2)}</td>
         </tr>`;
     });
-    
+
     html += `
             <tr><td colspan="3"><div class="divisor-doble"></div></td></tr>
         </table>
@@ -881,7 +881,12 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
             let regla = reglas.find(r => p.cantidad >= r.cantidad_minima);
             if (regla) precioCalculado = regla.precio_oferta_unitario;
         }
-        return { producto_id: p.id, cantidad: p.cantidad, precio_unitario: precioCalculado };
+        return {
+            producto_id: p.id,
+            cantidad: p.cantidad,
+            precio_unitario: precioCalculado,
+            nombre_fantasma: p.nombre
+        };
     });
 
     let descuentoRecargoTotal = 0;
@@ -1024,11 +1029,11 @@ async function cargarHistorialTabla(clienteId) {
         // Guardamos todos los movimientos en la memoria del navegador
         movimientosHistorialGlobal = data.movimientos;
         limiteMostrarHistorial = 15; // Reiniciamos el límite a 15 cada vez que buscamos un cliente
-        
+
         dibujarFilasHistorial();
 
-    } catch (e) { 
-        tbody.innerHTML = "<tr><td colspan='5'>Error al cargar historial.</td></tr>"; 
+    } catch (e) {
+        tbody.innerHTML = "<tr><td colspan='5'>Error al cargar historial.</td></tr>";
     }
 }
 
@@ -1785,8 +1790,8 @@ async function cierreZ() {
                 allowOutsideClick: false
             });
 
-            localStorage.removeItem('empleado_pos');
-            localStorage.removeItem('token_pos');
+            // Y PONÉ ESTO:
+            localStorage.clear(); // Esto detona tanto la sesión del POS como la global
             window.location.href = "index.html";
 
         } catch (e) {
