@@ -881,8 +881,16 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
             let regla = reglas.find(r => p.cantidad >= r.cantidad_minima);
             if (regla) precioCalculado = regla.precio_oferta_unitario;
         }
+
+        // --- EL BLINDAJE ANTI-ERROR 422 QUE FALTABA ---
+        // Convertimos el ID a número. Si es texto, fecha larga o un invento, lo clavamos en 0.
+        let idLimpio = parseInt(p.id);
+        if (isNaN(idLimpio) || idLimpio > 999999999) {
+            idLimpio = 0; 
+        }
+
         return {
-            producto_id: p.id,
+            producto_id: idLimpio, // <-- MANDAMOS EL NÚMERO LIMPIO
             cantidad: p.cantidad,
             precio_unitario: precioCalculado,
             nombre_fantasma: p.nombre
