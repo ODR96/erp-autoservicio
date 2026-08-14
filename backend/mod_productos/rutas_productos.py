@@ -99,8 +99,18 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
         conexion.close()
         return {"mensaje": "¡Producto y Lote Inicial guardados!", "id": nuevo_id}
     except Exception as e:
-        if conexion: conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
 
 # --- 2. LEER / CATÁLOGO COMPLETO (R) ---
 # --- 2. LEER / CATÁLOGO COMPLETO (R) ---
@@ -211,8 +221,18 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
         conexion.close()
         return {"mensaje": "Actualizado correctamente."}
     except Exception as e:
-        if conexion: conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
 # --- 7. VER UN SOLO PRODUCTO (Con Aspirador Automático de Lotes) ---
 @router.get("/ver/{producto_id}")
@@ -298,8 +318,18 @@ def ver_producto_por_id(producto_id: int):
         return resultado
         
     except Exception as e:
-        if conexion: conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
 
 # --- 4. BORRAR (D - Borrado Lógico) ---
 @router.delete("/eliminar/{producto_id}")
@@ -314,8 +344,18 @@ def desactivar_producto(producto_id: int, background_tasks: BackgroundTasks):
         conexion.close()
         return {"mensaje": "Producto dado de baja del catálogo."}
     except Exception as e:
-        conexion.close()
-        return {"error": "No se pudo eliminar", "detalle": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
 @router.put("/restaurar/{producto_id}")
 def restaurar_producto(producto_id: int, background_tasks: BackgroundTasks):
@@ -330,8 +370,18 @@ def restaurar_producto(producto_id: int, background_tasks: BackgroundTasks):
         conexion.close()
         return {"mensaje": f"¡Producto {producto_id} restaurado y visible nuevamente!"}
     except Exception as e:
-        conexion.close()
-        return {"error": "No se pudo restaurar", "detalle": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
 # --- 6. BUSCADOR AVANZADO (Inteligente, Sin Zombies y CON PROMOS) ---
 @router.get("/buscar")
@@ -381,7 +431,18 @@ def buscar_producto(q: Optional[str] = None, termino: Optional[str] = None, quer
         
         return {"productos": adjuntar_reglas_y_stock(cursor.fetchall())}
     except Exception as e:
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     finally:
         conexion.close()
 
@@ -478,8 +539,18 @@ def actualizar_precios_masivamente(datos: ActualizacionMasiva, background_tasks:
         return {"mensaje": f"¡Éxito! Se actualizaron {filas_afectadas} productos y se subieron a la Nube."}
         
     except Exception as e:
-        conexion.close()
-        return {"error": "Error en la actualización masiva", "detalle": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
 
 # --- 8. PROMOCIONES POR VOLUMEN (Ej: Llevando 3, pagás menos) ---
 class PromocionNueva(BaseModel):
@@ -500,8 +571,18 @@ def crear_promocion(promo: PromocionNueva):
         conexion.close()
         return {"mensaje": f"¡Promoción activada! Llevando {promo.cantidad_minima} o más, el precio queda en ${promo.precio_oferta_unitario}"}
     except Exception as e:
-        conexion.close()
-        return {"error": "Hubo un problema al crear la promoción", "detalle": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
     # --- MODELO PARA CATEGORÍAS ---
 class CategoriaNueva(BaseModel):
@@ -521,8 +602,18 @@ def listar_categorias_activas():
         conexion.close()
         return {"categorias": categorias}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
 
 @router.post("/categorias/crear")
 def crear_categoria(cat: CategoriaNueva, background_tasks: BackgroundTasks):
@@ -538,8 +629,18 @@ def crear_categoria(cat: CategoriaNueva, background_tasks: BackgroundTasks):
         conexion.close()
         return {"mensaje": "Categoría creada", "id": nuevo_id, "nombre": cat.nombre}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
 
 @router.delete("/categorias/eliminar/{cat_id}")
 def eliminar_categoria(cat_id: int):
@@ -552,8 +653,18 @@ def eliminar_categoria(cat_id: int):
         conexion.close()
         return {"mensaje": "Categoría eliminada"}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
 
 # --- RUTAS PARA LA CARTELERÍA (USANDO TU TABLA REAL) ---
 class EtiquetaNueva(BaseModel):
@@ -628,8 +739,18 @@ def generar_codigo_interno():
         conexion.close()
         return {"codigo": siguiente_codigo}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
 # --- 7. GESTIÓN DE CATEGORÍAS RÁPIDAS DEL POS ---
 @router.get("/categorias_pos")
@@ -643,8 +764,18 @@ def listar_categorias_pos():
         conexion.close()
         return {"categorias": cats}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
 
 @router.put("/categorias_pos/{cat_id}")
 def editar_categoria_pos(cat_id: int, cat: CategoriaPOS, background_tasks: BackgroundTasks):
@@ -662,8 +793,18 @@ def editar_categoria_pos(cat_id: int, cat: CategoriaPOS, background_tasks: Backg
         conexion.close()
         return {"mensaje": "Categoría actualizada correctamente"}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
 # --- 9. LISTAR COMBOS (Para la Pestaña Híbrida) ---
 @router.get("/listar_combos")
@@ -693,8 +834,18 @@ def listar_combos_armados():
         conexion.close()
         return {"combos": combos}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
 # --- GESTIÓN DIRECTA DE LOTES (CORRECCIÓN DE ERRORES) ---
 # Acordate de sumarle "background_tasks: BackgroundTasks" arriba
@@ -716,8 +867,18 @@ def actualizar_lote_individual(lote_id: int, datos: dict, background_tasks: Back
         conexion.close()
         return {"mensaje": "Lote corregido correctamente."}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
 
 @router.delete("/lotes/eliminar/{lote_id}")
 def eliminar_lote_fisico(lote_id: int):
@@ -730,8 +891,18 @@ def eliminar_lote_fisico(lote_id: int):
         conexion.close()
         return {"mensaje": "Lote eliminado de la existencia."}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     
 @router.get("/movimientos/{producto_id}")
 def obtener_historial_producto(producto_id: int):
@@ -751,5 +922,15 @@ def obtener_historial_producto(producto_id: int):
         conexion.close()
         return {"movimientos": movimientos}
     except Exception as e:
-        if conexion: conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}

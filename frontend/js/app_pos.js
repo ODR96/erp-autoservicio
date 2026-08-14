@@ -7,7 +7,8 @@ function normalizarTexto(texto) {
 // Reloj
 setInterval(() => {
     const d = new Date();
-    document.getElementById('reloj').innerText = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    // Le agregamos el hour12: false para forzar el formato militar/24hs
+    document.getElementById('reloj').innerText = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
     document.getElementById('fecha').innerText = d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }, 1000);
 
@@ -134,13 +135,10 @@ async function cerrarSesionCajero() {
 
 // ===== 2. ARRANQUE DEL POS (Memoria de Caja) =====
 async function iniciarInterfazPOS() {
-    // 1. Cargamos los datos de la memoria unificada
     const nombre = localStorage.getItem('usuario_nombre');
     const rol = localStorage.getItem('usuario_rol');
-    // 2. Mostramos el nombre en el Navbar
+    
     document.getElementById('nombreCajeroLogueado').innerText = nombre;
-
-    // MAGIA MARCA BLANCA: Leemos el nombre del local de la memoria (o ponemos uno por defecto)
     const configLocal = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio" };
     document.getElementById('uiNombreNegocio').innerText = configLocal.nombre_negocio.toUpperCase();
 
@@ -149,17 +147,31 @@ async function iniciarInterfazPOS() {
         return;
     }
 
-    // 2. Mostramos el nombre en el Navbar
-    document.getElementById('nombreCajeroLogueado').innerText = nombre;
-
-    // 3. Mostramos/Ocultamos el acceso admin según el rol
     const flechaAdmin = document.querySelector('a[href="admin_productos.html"]');
     if (flechaAdmin) {
-        // EL ARREGLO: Ahora el Encargado también ve la flecha para volver al panel
         flechaAdmin.style.display = (rol === 'ADMIN' || rol === 'ENCARGADO') ? 'block' : 'none';
     }
 
-    // 4. Verificamos el estado de la caja
+    // Mini-función para dibujar el carrito recuperado solo si la caja abre bien
+    const cargarCarritoSobreviviente = () => {
+        try {
+            let carritoGuardado = localStorage.getItem('carrito_pos_recupero');
+            if (carritoGuardado) {
+                carrito = JSON.parse(carritoGuardado);
+                if (carrito.length > 0) {
+                    actualizarTabla();
+                    Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Ticket recuperado', showConfirmButton: false, timer: 2000 });
+                }
+            }
+            // 2. RECUPERAR LAS VENTAS EN ESPERA
+    let esperaGuardada = localStorage.getItem('ventas_espera_pos');
+    if (esperaGuardada) {
+        ventasEnEspera = JSON.parse(esperaGuardada);
+        document.getElementById('badgeEspera').innerText = `${ventasEnEspera.length} en espera`;
+    }
+        } catch(e) {}
+    };
+
     try {
         const res = await fetch(`${obtenerBaseUrl()}/caja/estado?caja_id=1`);
         const data = await res.json();
@@ -167,14 +179,29 @@ async function iniciarInterfazPOS() {
         if (data.estado === 'ABIERTO') {
             cajaAbierta = true;
             turnoActualId = data.turno_id;
+            localStorage.setItem('turno_actual_offline', data.turno_id);
             actualizarInfoCabecera(data.turno_id);
+            
+            cargarCarritoSobreviviente(); // <--- DIBUJA EL CARRITO ACÁ
             setTimeout(() => inputScan.focus(), 500);
         } else {
             modalApertura.show();
             setTimeout(() => document.getElementById("montoApertura").focus(), 500);
         }
     } catch (error) {
-        modalApertura.show();
+        // MODO SUPERVIVENCIA: Se apretó F5 sin internet
+        let turnoGuardado = localStorage.getItem('turno_actual_offline');
+        
+        if (turnoGuardado) {
+            cajaAbierta = true;
+            turnoActualId = turnoGuardado;
+            actualizarInfoCabecera(turnoGuardado);
+            
+            cargarCarritoSobreviviente(); // <--- TAMBIÉN LO DIBUJA OFFLINE
+            setTimeout(() => inputScan.focus(), 500);
+        } else {
+            modalApertura.show();
+        }
     }
 }
 
@@ -281,10 +308,16 @@ async function verDetalleTicketGlobal(ventaId) {
 }
 
 async function confirmarAnulacion(ventaId, ticket) {
+    // EL TRUCO: Escondemos el historial de Bootstrap para que no nos congele el input del PIN
+    modalHistorial.hide();
+
     // EL PATOVICA DIGITAL: Pedir PIN si no es Admin o Encargado
     if (!empleadoLogueado || (empleadoLogueado.rol !== 'ADMIN' && empleadoLogueado.rol !== 'ENCARGADO')) {
         const autorizadoPor = await solicitarAutorizacion(`Anular el Ticket ${ticket} descontará plata de la caja. Requiere autorización de Supervisor.`);
-        if (!autorizadoPor) return; // Si falla el PIN, se cancela la anulación
+        if (!autorizadoPor) {
+            modalHistorial.show(); // Si cancela o erra el PIN, le devolvemos el historial
+            return; 
+        }
     }
 
     // Alerta de seguridad antes de anular
@@ -309,11 +342,14 @@ async function confirmarAnulacion(ventaId, ticket) {
 
             Swal.fire('¡Anulada!', 'La venta ha sido anulada y el stock restaurado.', 'success');
 
-            // Recargamos la tabla para que se vea tachada
+            // Recargamos la tabla para que se vea tachada y volvemos a abrir el historial
             abrirHistorialTurno();
         } catch (e) {
             Swal.fire('Error', e.message, 'error');
+            modalHistorial.show();
         }
+    } else {
+        modalHistorial.show(); // Si canceló la anulación final, vuelve al historial
     }
 }
 
@@ -448,35 +484,59 @@ inputScan.addEventListener("keyup", (e) => {
 async function buscarProducto(q) {
     if (!cajaAbierta) return Swal.fire('Caja Cerrada', 'Debe abrir la caja primero.', 'warning');
 
+    let query = q.trim().toLowerCase();
+
     try {
-        // LLAMADA REAL A TU API
-        const response = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(q)}`);
+        if (!navigator.onLine) throw new Error("OFFLINE");
 
-        if (!response.ok) {
-            throw new Error("No se pudo conectar o el servidor devolvió un error");
-        }
-
+        const response = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
+        if (!response.ok) throw new Error("Error servidor");
+        
         const data = await response.json();
-        const productos = data.productos;
+        procesarResultadosBusqueda(data.productos, query);
 
-        if (productos && productos.length === 1) {
-            // Si encuentra un solo producto exacto, lo suma al carrito
-            agregarAlCarrito({ ...productos[0] });
-        } else if (productos && productos.length > 1) {
-            // Si encuentra varios (ej: buscó "coca" y hay 10 cocas distintas) abre la búsqueda avanzada
-            Swal.fire({ title: 'Múltiples resultados', text: 'Abriendo búsqueda avanzada...', icon: 'info', timer: 1000, showConfirmButton: false });
-            document.getElementById('inputBusquedaAvanzada').value = q;
-            abrirBuscadorAvanzado();
-        } else {
-            Swal.fire({ title: 'No encontrado', text: 'El producto no existe o está inactivo', icon: 'error', timer: 1500, showConfirmButton: false });
-        }
     } catch (error) {
-        console.error("Error conectando al backend:", error);
-        // Si esto falla, probablemente tu servidor de Python esté apagado o te falte habilitar los permisos CORS.
-        Swal.fire('Error de conexión', 'No se pudo conectar con el servidor de Python (Verifique la consola).', 'error');
+        // GUARDAVIDAS NIVEL 2: Búsqueda Offline
+        if (error.message === "OFFLINE" || error.message === "Failed to fetch" || error.message.includes("NetworkError")) {
+            
+            let catalogoOffline = JSON.parse(localStorage.getItem('catalogo_productos_offline')) || [];
+            if (catalogoOffline.length === 0) return Swal.fire('Sin Internet', 'Sin conexión y el catálogo offline está vacío.', 'error');
+
+            // 1. Buscamos por código de barras exacto o ID
+            let exactos = catalogoOffline.filter(p => p.codigo_barras === query || p.id.toString() === query);
+            
+            if (exactos.length > 0) {
+                procesarResultadosBusqueda(exactos, query);
+            } else {
+                // 2. Si no, buscamos por nombre aproximado
+                let palabras = query.split(" ");
+                let aproximados = catalogoOffline.filter(p => {
+                    let textoProd = (p.nombre + " " + (p.codigo_barras || "")).toLowerCase();
+                    return palabras.every(pal => textoProd.includes(pal));
+                });
+                procesarResultadosBusqueda(aproximados, query);
+            }
+        } else {
+            Swal.fire('Error', 'Fallo interno al buscar producto.', 'error');
+        }
     }
 
     inputScan.value = ""; inputScan.placeholder = "[F2] Lector o texto..."; inputScan.focus();
+}
+
+// Sub-rutina inteligente para no repetir código (PEGAR ABAJO DE buscarProducto)
+function procesarResultadosBusqueda(productos, queryOriginal) {
+    if (productos && productos.length === 1) {
+        agregarAlCarrito({ ...productos[0] });
+    } else if (productos && productos.length > 1) {
+        // Modo silencioso para avisar que entró el F3 Offline
+        if (!navigator.onLine) Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Resultados múltiples (Modo Offline)', showConfirmButton: false, timer: 1500 });
+        
+        document.getElementById('inputBusquedaAvanzada').value = queryOriginal;
+        abrirBuscadorAvanzado();
+    } else {
+        Swal.fire({ title: 'No encontrado', text: 'El producto no existe o está inactivo', icon: 'error', timer: 1500, showConfirmButton: false });
+    }
 }
 
 function agregarAlCarrito(p) {
@@ -663,9 +723,7 @@ function actualizarTabla() {
         let precioF = p.precio_venta_final;
         let badgePromo = "";
 
-        // PARCHE PROMOS: Buscamos si Python nos mandó reglas mayoristas
         if (p.reglas_mayoristas && p.reglas_mayoristas.length > 0 && !p.precio_modificado_manual) {
-            // Ordenamos de mayor a menor para aplicar la mejor oferta posible
             let reglas = p.reglas_mayoristas.sort((a, b) => b.cantidad_minima - a.cantidad_minima);
             let regla = reglas.find(r => p.cantidad >= r.cantidad_minima);
             if (regla) {
@@ -681,9 +739,7 @@ function actualizarTabla() {
             <div class="ticket-item">
                 <div class="d-flex align-items-center justify-content-center gap-1">
                     <button class="btn btn-sm btn-light border py-0 px-1 text-danger fw-bold" onclick="cambiarCantidad(${i}, -1)">-</button>
-                    
                     <span class="fw-bold px-1" style="font-size: 0.95rem;">${p.cantidad} <small class="text-muted">${unidad}</small></span>
-                    
                     <button class="btn btn-sm btn-light border py-0 px-1 text-success fw-bold" onclick="cambiarCantidad(${i}, 1)">+</button>
                 </div>
                 <div class="text-start fw-bold" style="line-height:1.1;">${p.nombre}${badgePromo}</div>
@@ -691,13 +747,12 @@ function actualizarTabla() {
                 <div class="fw-bold">$${sub.toFixed(2)}</div>
                 <button class="btn btn-outline-danger border-0 btn-sm" onclick="carrito.splice(${i},1); actualizarTabla();"><i class="bi bi-trash"></i></button>
             </div>`;
-    }); // <--- ¡AQUÍ ESTABA EL FALTANTE QUE COLGÓ TODO!
+    });
 
     document.getElementById("visorSubtotal").innerText = `$ ${subtotalVenta.toFixed(2)}`;
     const cajaModificador = document.getElementById("visorModificador");
     totalVenta = subtotalVenta;
 
-    // PARCHE: Solo aplicamos la matemática si el subtotal es mayor a 0
     if (porcentajeDescuento > 0 && subtotalVenta > 0) {
         let desc = subtotalVenta * (porcentajeDescuento / 100); totalVenta -= desc;
         cajaModificador.innerText = `Descuento ${porcentajeDescuento}% (-$${desc.toFixed(2)})`;
@@ -712,9 +767,11 @@ function actualizarTabla() {
 
     document.getElementById("visorTotal").innerText = `$ ${totalVenta.toFixed(2)}`;
 
-    // Mantiene el scroll siempre abajo cuando vas cargando
     const containerTicket = document.querySelector('.ticket-body');
     if (containerTicket) containerTicket.scrollTop = containerTicket.scrollHeight;
+
+    // MAGIA ANTI-F5: Guardamos el carrito acá al final de todo
+    localStorage.setItem('carrito_pos_recupero', JSON.stringify(carrito));
 }
 
 // ===== FUNCIONES DE LIMPIEZA Y COBRO ======
@@ -722,10 +779,17 @@ function actualizarTabla() {
 let clienteSeleccionadoId = null; // Guardamos el ID real del cliente
 
 function limpiarMostrador() {
-    carrito = []; porcentajeDescuento = 0; porcentajeRecargo = 0; mult = 1;
+    carrito = []; 
+    porcentajeDescuento = 0; 
+    porcentajeRecargo = 0; 
+    mult = 1;
     document.getElementById("nombreClienteTicket").innerText = "Consumidor Final";
-    clienteSeleccionadoId = null; // Borramos el cliente al terminar
+    clienteSeleccionadoId = null; 
     document.getElementById("visorModificador").classList.add("d-none");
+    
+    // MAGIA ANTI-F5: Destruimos la memoria del ticket anterior
+    localStorage.removeItem('carrito_pos_recupero');
+    
     actualizarTabla();
     inputScan.value = ""; inputScan.focus();
 }
@@ -918,19 +982,114 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
     };
 
     try {
+        // Chequeo rápido de si el navegador ya sabe que no hay internet
+        if (!navigator.onLine) {
+            throw new Error("OFFLINE");
+        }
+
         const response = await fetch(`${obtenerBaseUrl()}/ventas/cobrar`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadVenta)
         });
+        
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Error en el servidor");
         if (data.error) throw new Error(data.detalle || data.error);
+        
         return data;
+
     } catch (error) {
+        // EL GUARDAVIDAS: Si el error es de red o tiró OFFLINE, guardamos en la cola
+        if (error.message === "OFFLINE" || error.message === "Failed to fetch" || error.message.includes("NetworkError")) {
+            
+            Swal.close(); // Cerramos el "Procesando..."
+            
+            // Creamos un ticket temporal falso para que el cajero pueda imprimir el papel
+            const ticketTemporalId = "OFF-" + Date.now().toString().slice(-6);
+            
+            // Guardamos la venta en la mochila (localStorage)
+            let ventasPendientes = JSON.parse(localStorage.getItem('ventas_offline')) || [];
+            
+            // Le agregamos el ID temporal al payload para saber cuál es
+            payloadVenta.ticket_temporal = ticketTemporalId;
+            ventasPendientes.push(payloadVenta);
+            
+            localStorage.setItem('ventas_offline', JSON.stringify(ventasPendientes));
+            
+            // Le avisamos al cajero que se cobró pero en modo sin conexión
+            Swal.fire({
+                toast: true, position: 'top-end', icon: 'warning',
+                title: 'Venta guardada (Sin Internet)', showConfirmButton: false, timer: 3000
+            });
+
+            // Devolvemos una respuesta simulada para que el código del POS siga su curso e imprima
+            return {
+                numero_ticket: ticketTemporalId,
+                total_cobrado: montoEntregado,
+                vuelto: montoEntregado - (subtotalVenta + descuentoRecargoTotal),
+                ahorro_total: 0
+            };
+        }
+
+        // Si es un error real de validación (ej: PIN incorrecto), lo mostramos normal
         Swal.close();
         Swal.fire('Venta Rechazada', error.message, 'error');
         return null;
     }
 }
+
+// --- MOTOR OFFLINE-FIRST: EL CARTERO ---
+async function sincronizarVentasOffline() {
+    let ventasPendientes = JSON.parse(localStorage.getItem('ventas_offline')) || [];
+    
+    if (ventasPendientes.length === 0) return; // No hay nada que subir
+
+    console.log(`Subiendo ${ventasPendientes.length} ventas offline a la nube...`);
+    
+    let ventasAprobadas = [];
+
+    for (let i = 0; i < ventasPendientes.length; i++) {
+        let venta = ventasPendientes[i];
+        try {
+            // Intentamos mandar la venta al servidor
+            const response = await fetch(`${obtenerBaseUrl()}/ventas/cobrar`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venta)
+            });
+            
+            if (response.ok) {
+                // Si subió bien, la marcamos para borrarla de la memoria local
+                ventasAprobadas.push(venta.ticket_temporal);
+            }
+        } catch (e) {
+            console.warn("Fallo al sincronizar ticket:", venta.ticket_temporal);
+            // Si falla, cortamos el bucle, internet sigue inestable. Se intentará en la próxima.
+            break; 
+        }
+    }
+
+    // Limpiamos de la memoria solo las ventas que subieron con éxito
+    if (ventasAprobadas.length > 0) {
+        ventasPendientes = ventasPendientes.filter(v => !ventasAprobadas.includes(v.ticket_temporal));
+        localStorage.setItem('ventas_offline', JSON.stringify(ventasPendientes));
+        
+        Swal.fire({
+            toast: true, position: 'top-end', icon: 'success',
+            title: `${ventasAprobadas.length} ventas offline subidas a la nube`,
+            showConfirmButton: false, timer: 3000
+        });
+    }
+}
+
+// Disparadores automáticos:
+// 1. Cuando el navegador detecta que volvió la red
+window.addEventListener('online', sincronizarVentasOffline);
+
+// 2. Cada 1 minuto revisa por las dudas si quedó algo trabado
+setInterval(sincronizarVentasOffline, 60000);
+
+// 3. Cuando se abre el POS por primera vez
+document.addEventListener("DOMContentLoaded", () => {
+    sincronizarVentasOffline();
+});
 
 // ===== BOTÓN COBRO EFECTIVO CONECTADO =====
 async function confirmarCobroEfectivo() {
@@ -961,8 +1120,27 @@ async function confirmarCobroEfectivo() {
 }
 
 // ===== BOTONES TARJETA / BILLETERA CONECTADOS =====
+// ===== BOTONES TARJETA / BILLETERA CONECTADOS =====
 async function cerrarVentaBasica(metodo) {
     if (carrito.length === 0) return Swal.fire('Error', 'El ticket está vacío.', 'error');
+
+    // EL ESCUDO: Mini confirmación para evitar cobros accidentales por el lector láser
+    const confirm = await Swal.fire({
+        title: `¿Cobrar con ${metodo}?`,
+        text: `Total a cobrar: $${totalVenta.toFixed(2)}`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#198754',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Sí, cobrar (Enter)',
+        cancelButtonText: 'Cancelar (Esc)'
+    });
+
+    // Si cancela, devolvemos el cursor a la barra de búsqueda
+    if (!confirm.isConfirmed) {
+        inputScan.focus();
+        return; 
+    }
 
     Swal.fire({ title: 'Procesando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
@@ -1378,12 +1556,16 @@ async function guardarNuevoCliente() {
 
 function ponerEnEspera() {
     if (carrito.length === 0) return;
-    // Guardamos todo y calculamos el total para mostrarlo después
+    
     ventasEnEspera.push({
         carro: [...carrito], dto: porcentajeDescuento, rec: porcentajeRecargo,
         cliente: document.getElementById("nombreClienteTicket").innerText,
         totalEstimado: totalVenta
     });
+    
+    // MAGIA: Guardamos la lista de espera en la mochila
+    localStorage.setItem('ventas_espera_pos', JSON.stringify(ventasEnEspera));
+    
     limpiarMostrador();
     document.getElementById('badgeEspera').innerText = `${ventasEnEspera.length} en espera`;
 }
@@ -1420,6 +1602,10 @@ function recuperarVenta() {
 function cargarVentaEspera(index) {
     Swal.close();
     let recuperado = ventasEnEspera.splice(index, 1)[0];
+    
+    // MAGIA: Actualizamos la mochila (ahora tiene uno menos)
+    localStorage.setItem('ventas_espera_pos', JSON.stringify(ventasEnEspera));
+    
     carrito = recuperado.carro; porcentajeDescuento = recuperado.dto; porcentajeRecargo = recuperado.rec;
     document.getElementById("nombreClienteTicket").innerText = recuperado.cliente;
     document.getElementById('badgeEspera').innerText = `${ventasEnEspera.length} en espera`;
@@ -1520,10 +1706,7 @@ let indexFilaF3 = -1;
 let temporizadorF3 = null; // <-- LA MEMORIA DEL AMORTIGUADOR
 
 async function filtrarAvanzado(event) {
-    // EL PARCHE: Si la tecla es una flecha o Enter, cortamos acá para no romper la navegación
-    if (event && (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter')) {
-        return;
-    }
+    if (event && (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter')) return;
 
     const query = document.getElementById('inputBusquedaAvanzada').value.trim().toLowerCase();
     const tbody = document.getElementById('tablaResultadosF3');
@@ -1534,49 +1717,58 @@ async function filtrarAvanzado(event) {
         return;
     }
 
-    // 1. FRENAMOS EL MOTOR SI EL CAJERO SIGUE ESCRIBIENDO RÁPIDO
     clearTimeout(temporizadorF3);
 
-    // 2. ENVOLVEMOS LA BÚSQUEDA EN UNA ESPERA DE 300 MILISEGUNDOS
     temporizadorF3 = setTimeout(async () => {
-
-        // Detalle pro: mostramos que está buscando
         tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm text-primary" role="status"></div> Buscando...</td></tr>';
+        
+        let resultados = [];
 
         try {
+            if (!navigator.onLine) throw new Error("OFFLINE");
             const response = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
-            if (response.ok) {
-                const data = await response.json();
-                const resultados = data.productos;
-
-                tbody.innerHTML = ''; // Limpiamos el spinner
-
-                if (resultados && resultados.length > 0) {
-                    resultados.forEach((p, index) => {
-                        let categoriaTexto = p.categoria_id ? `Cat ID ${p.categoria_id}` : "Sin Rubro";
-                        let codigoMostrar = p.codigo_barras || p.id;
-                        let precioMostrar = p.precio_venta_final || 0;
-
-                        tbody.innerHTML += `
-                                <tr class="fila-busqueda" onclick="agregarDesdeF3('${p.id}')">
-                                    <td class="text-muted fw-bold">${codigoMostrar}</td>
-                                    <td class="fw-bold">${p.nombre}</td>
-                                    <td><span class="badge bg-secondary">${categoriaTexto}</span></td>
-                                    <td class="text-end fw-bold text-success">$${precioMostrar.toFixed(2)}</td>
-                                </tr>
-                            `;
-                    });
-                    indexFilaF3 = -1;
-                } else {
-                    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-3">No se encontraron resultados</td></tr>`;
-                }
+            if (!response.ok) throw new Error("Fallo");
+            
+            const data = await response.json();
+            resultados = data.productos;
+        } catch (error) {
+            // GUARDAVIDAS F3 OFFLINE
+            if (error.message === "OFFLINE" || error.message === "Failed to fetch" || error.message.includes("NetworkError")) {
+                let catalogoOffline = JSON.parse(localStorage.getItem('catalogo_productos_offline')) || [];
+                let palabras = query.split(" ");
+                
+                resultados = catalogoOffline.filter(p => {
+                    let textoProd = (p.nombre + " " + (p.codigo_barras || "")).toLowerCase();
+                    return palabras.every(pal => textoProd.includes(pal));
+                }).slice(0, 50); // Cortamos en 50 para que no se trabe la pantalla sin internet
+            } else {
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">Error interno al cargar la lista</td></tr>`;
+                return;
             }
-        } catch (e) {
-            console.error("Error buscando en F3:", e);
-            tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">Error interno al cargar la lista</td></tr>`;
         }
 
-    }, 300); // <-- ACÁ TERMINA EL AMORTIGUADOR
+        // Renderizamos (Sea de Python o de la mochila)
+        tbody.innerHTML = '';
+        if (resultados && resultados.length > 0) {
+            resultados.forEach((p) => {
+                let categoriaTexto = p.categoria_id ? `Cat ID ${p.categoria_id}` : "Sin Rubro";
+                let codigoMostrar = p.codigo_barras || p.id;
+                let precioMostrar = p.precio_venta_final || 0;
+
+                tbody.innerHTML += `
+                    <tr class="fila-busqueda" onclick="agregarDesdeF3('${p.id}')">
+                        <td class="text-muted fw-bold">${codigoMostrar}</td>
+                        <td class="fw-bold">${p.nombre}</td>
+                        <td><span class="badge bg-secondary">${categoriaTexto}</span></td>
+                        <td class="text-end fw-bold text-success">$${precioMostrar.toFixed(2)}</td>
+                    </tr>
+                `;
+            });
+            indexFilaF3 = -1;
+        } else {
+            tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-3">No se encontraron resultados</td></tr>`;
+        }
+    }, 300);
 }
 
 // --- NAVEGACIÓN POR TECLADO EN BUSCADOR (F3) ---
@@ -1615,13 +1807,19 @@ function resaltarFilaF3(filas) {
 async function agregarDesdeF3(id_producto) {
     modalBuscador.hide();
     try {
-        // Llamamos directo a la base de datos por el ID exacto, esquivando el buscador ambiguo
+        if (!navigator.onLine) throw new Error("OFFLINE");
+        
         const res = await fetch(`${obtenerBaseUrl()}/productos/codigo/${id_producto}`);
         const prod = await res.json();
-        if (!prod.error) {
-            agregarAlCarrito(prod);
+        if (!prod.error) agregarAlCarrito(prod);
+        
+    } catch (e) {
+        if (e.message === "OFFLINE" || e.message === "Failed to fetch" || e.message.includes("NetworkError")) {
+            let catalogo = JSON.parse(localStorage.getItem('catalogo_productos_offline')) || [];
+            let prod = catalogo.find(p => p.id.toString() === id_producto.toString());
+            if (prod) agregarAlCarrito(prod);
         }
-    } catch (e) { }
+    }
     inputScan.focus();
 }
 
@@ -1844,21 +2042,59 @@ async function forzarCierreRemoto(turnoId) {
 }
 
 // ===== NUEVO MOTOR: IMPRESIÓN DE TICKET 80mm (Diseño Real) =====
+// ===== NUEVO MOTOR: IMPRESIÓN DE TICKET 80mm (Blindado para Offline) =====
 async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, ahorroReal = 0) {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
-        const ticket = await res.json();
-        const resConfig = await fetch(`${obtenerBaseUrl()}/config/leer`);
-        const config = await resConfig.json();
-        if (ticket.error) return Swal.fire('Error', ticket.error, 'error');
+        // 1. Configuracion siempre desde la mochila (es más rápido y no requiere internet)
+        const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio", direccion: "", cuit: "00-00000000-0", mensaje_ticket: "¡Gracias por su compra!" };
+        
+        let ticket;
+
+        // 2. ¿Es un ticket normal o un ticket del bote salvavidas (Offline)?
+        if (ticketId.toString().startsWith('OFF-')) {
+            // Modo Offline: Lo armamos a mano leyendo la mochila
+            let ventasPendientes = JSON.parse(localStorage.getItem('ventas_offline')) || [];
+            let ventaOffline = ventasPendientes.find(v => v.ticket_temporal === ticketId);
+            
+            if (!ventaOffline) return Swal.fire('Error', 'Ticket offline no encontrado en la memoria.', 'error');
+
+            let subtotalArticulos = ventaOffline.items.reduce((acc, i) => acc + (i.cantidad * i.precio_unitario), 0);
+            let totalCobrado = subtotalArticulos + (ventaOffline.descuento_recargo_global || 0);
+
+            // Fabricamos el "sobre" falso para que la impresora lo entienda
+            ticket = {
+                encabezado: {
+                    numero_ticket: ticketId,
+                    fecha: new Date().toLocaleDateString('es-AR') + ' ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
+                    cliente: ventaOffline.nombre_cliente_factura
+                },
+                detalle_compra: ventaOffline.items.map(item => ({
+                    cantidad: item.cantidad,
+                    nombre: item.nombre_fantasma,
+                    unidad_medida: "un",
+                    precio_unitario: item.precio_unitario,
+                    subtotal: item.cantidad * item.precio_unitario
+                })),
+                totales: {
+                    subtotal_articulos: subtotalArticulos,
+                    descuentos_o_recargos: ventaOffline.descuento_recargo_global || 0,
+                    total_a_pagar: totalCobrado,
+                    metodo_pago: ventaOffline.metodo_pago
+                }
+            };
+        } else {
+            // Modo Normal (Online): Le preguntamos a Python
+            const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
+            ticket = await res.json();
+            if (ticket.error) return Swal.fire('Error', ticket.error, 'error');
+        }
 
         // --- LÓGICA DE DEUDA PENDIENTE ---
         let bloqueDeuda = "";
         if (ticket.encabezado.cliente && ticket.encabezado.cliente !== 'Consumidor Final') {
-            // Buscamos cuánto debe el cliente actualmente (si existe la variable en tu POS)
             let saldoActual = 0;
-            if (typeof clienteSeleccionadoId !== 'undefined' && typeof clientesGlobales !== 'undefined') {
-                const clienteObj = clientesGlobales.find(c => c.id === clienteSeleccionadoId);
+            if (typeof clienteSeleccionadoId !== 'undefined' && typeof clientesGlobalesPOS !== 'undefined') {
+                const clienteObj = clientesGlobalesPOS.find(c => c.id === clienteSeleccionadoId);
                 if (clienteObj) saldoActual = clienteObj.saldo_actual_deudor;
             }
 
@@ -1881,21 +2117,8 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
                 <title>Ticket ${ticket.encabezado.numero_ticket}</title>
                 <style>
                     @page { margin: 0; }
-                    body { 
-                        font-family: Arial, Helvetica, sans-serif; 
-                        font-size: 12px; 
-                        font-weight: 600; 
-                        color: #000;
-                        margin: 0; 
-                        padding: 2mm 4mm; 
-                        width: 72mm; 
-                        -webkit-font-smoothing: none;
-                        text-rendering: crispEdges;
-                    }
-                    .center { text-align: center; }
-                    .right { text-align: right; }
-                    .left { text-align: left; }
-                    .bold { font-weight: bold; }
+                    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 600; color: #000; margin: 0; padding: 2mm 4mm; width: 72mm; -webkit-font-smoothing: none; text-rendering: crispEdges; }
+                    .center { text-align: center; } .right { text-align: right; } .left { text-align: left; } .bold { font-weight: bold; }
                     .divisor { border-top: 1px dashed #000; margin: 4px 0; }
                     .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 4px 0; }
                     table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 5px 0; }
@@ -1906,23 +2129,16 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
                 <div class="center bold" style="font-size: 16px; margin-bottom: 4px; border-bottom: 0.5px solid #ccc;">${config.nombre_negocio.toUpperCase()}</div>
                 <div class="center bold" style="font-size: 11px; margin-bottom: 8px; border: 1px solid #000; padding: 2px;">DOCUMENTO NO VÁLIDO COMO FACTURA</div>
                 <div class="center small" style="margin-bottom: 8px;">${config.direccion} | CUIT: ${config.cuit}</div>
-                
                 <div class="divisor-doble"></div>
                 
                 <div class="left">Ticket N°: ${ticket.encabezado.numero_ticket}</div>
-                <div class="left">Fecha: ${ticket.encabezado.fecha.split(' ')[0]} &nbsp;&nbsp; Hora: ${ticket.encabezado.fecha.split(' ')[1]}</div>
+                <div class="left">Fecha: ${ticket.encabezado.fecha}</div>
                 <div class="left">Cajero: ${typeof empleadoLogueado !== 'undefined' && empleadoLogueado ? empleadoLogueado.nombre : 'Caja Principal'}</div>
                 <div class="left">Cliente: ${ticket.encabezado.cliente || 'Consumidor Final'}</div>
-                
                 <div class="divisor-doble"></div>
                 
                 <table>
-                    <tr>
-                        <th style="width: 10%;">CANT</th>
-                        <th style="width: 50%;">DESCRIPCION</th>
-                        <th class="right" style="width: 20%;">P.UNIT</th>
-                        <th class="right" style="width: 20%;">TOTAL</th>
-                    </tr>
+                    <tr><th style="width: 10%;">CANT</th><th style="width: 50%;">DESCRIPCION</th><th class="right" style="width: 20%;">P.UNIT</th><th class="right" style="width: 20%;">TOTAL</th></tr>
                     <tr><td colspan="4"><div class="divisor"></div></td></tr>
         `;
 
@@ -1941,32 +2157,19 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
         html += `
                     <tr><td colspan="4"><div class="divisor"></div></td></tr>
                 </table>
-                
-                <div style="display: flex; justify-content: space-between;">
-                    <span>SUBTOTAL:</span>
-                    <span>$ ${(ticket.totales.subtotal_articulos).toFixed(2)}</span>
-                </div>
+                <div style="display: flex; justify-content: space-between;"><span>SUBTOTAL:</span><span>$ ${(ticket.totales.subtotal_articulos).toFixed(2)}</span></div>
         `;
 
         let ahorro = 0;
         if (ticket.totales.descuentos_o_recargos < 0) {
             let descGlobal = Math.abs(ticket.totales.descuentos_o_recargos);
-            html += `
-                <div style="display: flex; justify-content: space-between;">
-                    <span>DESC. MANUAL:</span>
-                    <span>-$ ${descGlobal.toFixed(2)}</span>
-                </div>
-            `;
+            html += `<div style="display: flex; justify-content: space-between;"><span>DESC. MANUAL:</span><span>-$ ${descGlobal.toFixed(2)}</span></div>`;
         }
 
         html += `
                 <div class="divisor"></div>
-                <div style="display: flex; justify-content: space-between; font-size: 14px;" class="bold">
-                    <span>TOTAL A PAGAR:</span>
-                    <span>$ ${ticket.totales.total_a_pagar.toFixed(2)}</span>
-                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 14px;" class="bold"><span>TOTAL A PAGAR:</span><span>$ ${ticket.totales.total_a_pagar.toFixed(2)}</span></div>
                 <div class="divisor-doble"></div>
-                
                 <div class="left">Forma de Pago: ${ticket.totales.metodo_pago}</div>
         `;
 
@@ -1974,35 +2177,19 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
         const vuelto = vueltoReal !== null ? vueltoReal : 0;
 
         html += `
-                <div style="display: flex; justify-content: space-between;">
-                    <span>Abonó con:</span>
-                    <span>$ ${abonoCon.toFixed(2)}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span>Vuelto:</span>
-                    <span>$ ${vuelto.toFixed(2)}</span>
-                </div>
+                <div style="display: flex; justify-content: space-between;"><span>Abonó con:</span><span>$ ${abonoCon.toFixed(2)}</span></div>
+                <div style="display: flex; justify-content: space-between;"><span>Vuelto:</span><span>$ ${vuelto.toFixed(2)}</span></div>
         `;
 
-        if (ahorroReal > 0) {
-            html += `<div class="center bold" style="margin-top: 10px; font-size: 14px;">*** TU AHORRO HOY FUE: $ ${ahorroReal.toFixed(2)} ***</div>`;
-        }
+        if (ahorroReal > 0) html += `<div class="center bold" style="margin-top: 10px; font-size: 14px;">*** TU AHORRO HOY FUE: $ ${ahorroReal.toFixed(2)} ***</div>`;
 
-        // ACÁ INYECTAMOS LA DEUDA PENDIENTE (Si es que tiene)
         html += bloqueDeuda;
 
-        // ACÁ ESTÁ EL PRE-WRAP PARA QUE EL MENSAJE DE CONFIGURACIÓN SE VEA PERFECTO
         html += `
                 <div class="divisor-doble"></div>
-                
                 <div class="center bold" style="margin-top: 10px; font-size: 11px; white-space: pre-wrap;">${config.mensaje_ticket || '¡Gracias por su compra!'}</div>
-
-                <div class="center" style="font-size: 9px; color: #555; margin-top: 15px; border-top: 0.5px solid #ccc; padding-top: 5px;">
-                    SISTEMA DE GESTIÓN ERP - 20 DE JUNIO
-                </div>
-                
+                <div class="center" style="font-size: 9px; color: #555; margin-top: 15px; border-top: 0.5px solid #ccc; padding-top: 5px;">SISTEMA DE GESTIÓN ERP - 20 DE JUNIO</div>
                 <div style="margin-bottom: 25mm;"></div> 
-                
             </body>
             </html>
         `;
@@ -2012,10 +2199,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
         ventanaPrint.document.close();
         ventanaPrint.focus();
 
-        setTimeout(() => {
-            ventanaPrint.print();
-            ventanaPrint.close();
-        }, 500);
+        setTimeout(() => { ventanaPrint.print(); ventanaPrint.close(); }, 500);
 
     } catch (e) {
         console.error(e);
@@ -2379,29 +2563,115 @@ let bufferCodigo = '';
 let temporizadorLector = null;
 
 document.addEventListener('keypress', (e) => {
-    // 1. Si la caja está cerrada o hay ventanas modales abiertas, el láser se ignora
     if (!cajaAbierta || document.querySelector('.modal.show') || Swal.isVisible()) return;
-
-    // 2. Si el cajero ya hizo clic manual en un campo de texto, dejamos que escriba normal
     if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
 
-    // 3. El láser siempre manda un 'Enter' al terminar de leer el código
     if (e.key === 'Enter') {
+        e.preventDefault(); // <-- EL ESCUDO: Evita que el Enter presione botones sueltos
         if (bufferCodigo.length > 3) {
-            // Es un código largo, seguro fue el láser
             buscarProducto(bufferCodigo);
-            bufferCodigo = ''; // Vaciamos la recámara
+            bufferCodigo = ''; 
         }
         return;
     }
 
-    // 4. Vamos guardando número por número en la memoria temporal
     bufferCodigo += e.key;
 
-    // 5. El truco maestro: El láser dispara teclas en menos de 20ms. 
-    // Si pasan más de 50ms sin recibir otra tecla, asumimos que fue un humano tocando el teclado por error y borramos la memoria.
     clearTimeout(temporizadorLector);
     temporizadorLector = setTimeout(() => {
         bufferCodigo = '';
     }, 50);
 });
+
+// --- MOTOR OFFLINE-FIRST: EL CATÁLOGO LOCAL ---
+async function descargarCatalogoParaOffline() {
+    try {
+        // Le pedimos al backend la lista completa de productos activos
+        const response = await fetch(`${obtenerBaseUrl()}/productos/listar?estado=1`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            // Guardamos el catálogo en la "mochila" del navegador
+            localStorage.setItem('catalogo_productos_offline', JSON.stringify(data.productos));
+            console.log(`✅ Catálogo Offline actualizado: ${data.productos.length} productos listos para cortes de luz.`);
+        }
+    } catch (error) {
+        console.warn("No se pudo actualizar el catálogo offline. Se usará la última versión guardada.");
+    }
+}
+
+// Disparadores:
+// 1. Que se descargue apenas el cajero abre la pantalla de la caja
+document.addEventListener("DOMContentLoaded", () => {
+    descargarCatalogoParaOffline();
+});
+
+// 2. Que se actualice solo cada 10 minutos por si vos cambiaste algún precio desde la oficina
+setInterval(descargarCatalogoParaOffline, 600000);
+
+// =========================================================
+// MOTOR VISUAL: EL LATIDO (PING REAL A PYTHON)
+// =========================================================
+// =========================================================
+// MOTOR VISUAL: EL LATIDO (PING REAL A PYTHON)
+// =========================================================
+let pythonVivo = true;
+
+function actualizarEstadoRedVisual(estaOnline) {
+    const btnCajaF10 = document.querySelector('[onclick="modalGestion.show()"]');
+    const btnFiados = document.querySelector('[onclick="abrirModalCobroFiado()"]');
+    const btnMayorista = document.querySelector('[onclick="abrirCobroPedidoMayorista()"]');
+
+    let badgeEstado = document.getElementById('badgeEstadoRed');
+    if (!badgeEstado) {
+        // En vez del reloj, lo ponemos al lado del botón Caja F10
+        badgeEstado = document.createElement('span');
+        badgeEstado.id = 'badgeEstadoRed';
+        // Le damos padding (px-3 py-2) y alineación vertical para que quede hermoso
+        badgeEstado.className = 'badge ms-3 px-3 py-2 d-flex align-items-center justify-content-center'; 
+        
+        if (btnCajaF10 && btnCajaF10.parentNode) {
+            btnCajaF10.parentNode.insertBefore(badgeEstado, btnCajaF10.nextSibling);
+        }
+    }
+
+    if (estaOnline) {
+        badgeEstado.className = 'badge bg-success ms-3 px-3 py-2 d-flex align-items-center justify-content-center';
+        badgeEstado.innerHTML = '<i class="bi bi-wifi me-2 fs-6"></i> <span class="fs-6">CONECTADO</span>';
+        
+        if (btnCajaF10) btnCajaF10.style.pointerEvents = 'auto', btnCajaF10.style.opacity = '1';
+        if (btnFiados) btnFiados.style.pointerEvents = 'auto', btnFiados.style.opacity = '1';
+        if (btnMayorista) btnMayorista.style.pointerEvents = 'auto', btnMayorista.style.opacity = '1';
+    } else {
+        badgeEstado.className = 'badge bg-danger ms-3 px-3 py-2 d-flex align-items-center justify-content-center'; 
+        badgeEstado.innerHTML = '<i class="bi bi-wifi-off me-2 fs-6"></i> <span class="fs-6">MODO OFFLINE (Solo Efectivo)</span>';
+        
+        if (btnCajaF10) btnCajaF10.style.pointerEvents = 'none', btnCajaF10.style.opacity = '0.5';
+        if (btnFiados) btnFiados.style.pointerEvents = 'none', btnFiados.style.opacity = '0.5';
+        if (btnMayorista) btnMayorista.style.pointerEvents = 'none', btnMayorista.style.opacity = '0.5';
+    }
+}
+
+// El Latido: Toca la puerta de Python cada 3 segundos
+setInterval(async () => {
+    try {
+        // Le hacemos un llamado cortito a la raíz del servidor
+        const res = await fetch(`${obtenerBaseUrl()}/`, { method: 'GET', cache: 'no-store' });
+        if (res.ok) {
+            if (!pythonVivo) {
+                pythonVivo = true;
+                actualizarEstadoRedVisual(true);
+                sincronizarVentasOffline(); // Volvió Python, mandamos los tickets atrapados
+            }
+        } else {
+            throw new Error("Servidor caído");
+        }
+    } catch (error) {
+        if (pythonVivo) {
+            pythonVivo = false;
+            actualizarEstadoRedVisual(false);
+        }
+    }
+}, 3000);
+
+document.addEventListener("DOMContentLoaded", () => actualizarEstadoRedVisual(true));

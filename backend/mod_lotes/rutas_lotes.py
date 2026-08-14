@@ -58,8 +58,18 @@ def ingresar_lote(lote: LoteNuevo, background_tasks: BackgroundTasks):
         conexion.close()
         return {"mensaje": "¡Mercadería ingresada y costo actualizado!"}
     except Exception as e:
-        conexion.close()
-        return {"error": "Hubo un problema al ingresar el lote", "detalle": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
 
 
 # --- 2. LISTAR STOCK EN GÓNDOLA ---
@@ -124,8 +134,18 @@ def dar_baja_manual(datos: BajaManual, background_tasks: BackgroundTasks):
             "stock_restante_en_lote": nuevo_stock
         }
     except Exception as e:
-        conexion.close()
-        return {"error": "Hubo un problema al ajustar el stock", "detalle": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     
     # --- 4. DESCUENTO AUTOMÁTICO DE STOCK (El método FIFO para Ventas) ---
 class DescuentoStock(BaseModel):
@@ -174,8 +194,18 @@ def descontar_stock_fifo(datos: DescuentoStock):
         return {"mensaje": "¡Stock descontado perfectamente usando el método FIFO!"}
         
     except Exception as e:
-        conexion.close()
-        return {"error": "Hubo un problema al descontar el stock", "detalle": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     
     # --- 5. CONSULTAR STOCK TOTAL DE UN PRODUCTO ---
 @router.get("/stock_total/{producto_id}")

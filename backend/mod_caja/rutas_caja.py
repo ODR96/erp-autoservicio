@@ -5,11 +5,35 @@ from datetime import datetime, timezone, timedelta
 import sqlite3
 from fastapi import BackgroundTasks
 from sincronizador import subir_todo_a_la_nube
+import requests
 
 
 router = APIRouter()
 
 ZONA_AR = timezone(timedelta(hours=-3))
+
+def disparar_alerta_cierre(turno_id, cajero, ventas, declarado, diferencia):
+    # Por ahora dejamos la URL vacía hasta que conectemos tu n8n o tu API definitiva
+    url_webhook = "AQUI_IRA_LA_URL_DE_TU_AUTOMATIZADOR"
+    
+    # Empaquetamos los datos clave de tu negocio de forma segura
+    payload = {
+        "evento": "CIERRE_Z",
+        "sucursal": "Autoservicio 20 de Junio",
+        "turno": turno_id,
+        "cajero": cajero,
+        "ventas_sistema": ventas,
+        "plata_declarada": declarado,
+        "diferencia": diferencia
+    }
+    
+    try:
+        # El servidor dispara el aviso y sigue de largo
+        if url_webhook != "AQUI_IRA_LA_URL_DE_TU_AUTOMATIZADOR":
+            requests.post(url_webhook, json=payload, timeout=5)
+            print("Alerta de Cierre Z disparada con éxito.")
+    except Exception as e:
+        print(f"Error al disparar la alerta: {e}")
 
 # --- 1. LOS GUARDIAS DE LA CAJA ---
 class AperturaCaja(BaseModel):
@@ -57,8 +81,17 @@ def abrir_turno(apertura: AperturaCaja):
         }
         
     except Exception as e:
-        conexion.close()
-        return {"error": "No se pudo abrir la caja", "detalle": str(e)}
+        if conexion:
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL AL ABRIR CAJA: {mensaje_error}")
+            return {"error": "No se pudo abrir la caja por un error interno del servidor."}
+            
+        # 2. Si es un error de negocio tuyo (Ej: "Ya hay un turno abierto"), lo mostramos normal
+        return {"error": mensaje_error}
 
 # --- 3. REGISTRAR MOVIMIENTOS (INGRESO/RETIRO) ---
 @router.post("/movimiento")
@@ -87,12 +120,20 @@ def registrar_movimiento(mov: MovimientoCaja):
         return {"mensaje": f"¡{tipo_mayuscula} de ${mov.monto} registrado correctamente!"}
         
     except Exception as e:
-        conexion.close()
-        return {"error": "No se pudo registrar el movimiento", "detalle": str(e)}
+        if conexion:
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 No se pudo registrar el movimiento: {mensaje_error}")
+            return {"error": "No se pudo registrar el movimiento."}
+            
+        return {"error": mensaje_error}
 
 # --- 4. CIERRE Z (Arqueo Final Blindado, Corregido y con Sincronización) ---
 @router.put("/cerrar")
-def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks): # <-- GATILLO 1: Parámetro agregado
+def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
     conexion = sqlite3.connect('autoservicio_20dejunio.db')
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -103,7 +144,6 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks): # <-- G
         if not turno:
             raise Exception("Ese turno no existe o ya fue cerrado.")
             
-        # GATILLO 2: Le inyectamos ZONA_AR para que no se desfase en la nube
         fecha_cierre = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         fecha_apertura = turno['fecha_hora_apertura']
         
@@ -145,6 +185,15 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks): # <-- G
         # ---> GATILLO 3: EL CAMIÓN DE MUDANZA SE DISPARA DE FONDO <---
         background_tasks.add_task(subir_todo_a_la_nube)
         
+        # ---> GATILLO 4: ALERTA DE WHATSAPP AL DUEÑO <---
+        background_tasks.add_task(
+            disparar_alerta_cierre,
+            turno_id=cierre.turno_id,
+            ventas_efectivo=ventas_efectivo,
+            declarado=cierre.monto_final_declarado,
+            diferencia=diferencia
+        )
+        
         return {
             "mensaje": "¡Cierre Z realizado con éxito! Sincronizando datos con la nube...",
             "resumen": {
@@ -163,7 +212,14 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks): # <-- G
     except Exception as e:
         if conexion:
             conexion.close()
-        return {"error": str(e)}
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 No se pudo cerrar el turno: {mensaje_error}")
+            return {"error": "Error interno al cerrar caja. Contacte a soporte."}
+            
+        return {"error": mensaje_error}
 
 # --- 5. INFORME X (Datos Reales al Momento) ---
 @router.get("/informe_x/{turno_id}")
@@ -211,10 +267,17 @@ def sacar_informe_x(turno_id: int):
             }
         }
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+        if conexion:
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 No se generar el informe X: {mensaje_error}")
+            return {"error": "Error interno: No se genero el informe. Contacte a soporte."}
+            
+        return {"error": mensaje_error}
     
-    # --- 6. MONITOR EN VIVO (Para el panel de Admin) ---
 # --- 6. MONITOR EN VIVO (Para el panel de Admin) ---
 @router.get("/monitor_vivo")
 def monitor_cajas_vivo():
@@ -263,8 +326,16 @@ def monitor_cajas_vivo():
         conexion.close()
         return {"turnos_vivos": turnos_abiertos}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+        if conexion:
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 No se puede visualizar la caja en vivo: {mensaje_error}")
+            return {"error": "No se puede visualizar la caja. Contacte a soporte."}
+            
+        return {"error": mensaje_error}
     
     # --- 8. VERIFICAR ESTADO DE CAJA (Para que el POS tenga memoria) ---
 @router.get("/estado")
@@ -289,8 +360,16 @@ def estado_caja(caja_id: int = 1):
         else:
             return {"estado": "CERRADO"}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+        if conexion:
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 No se puede ver el estado de la caja: {mensaje_error}")
+            return {"error": "Error interno. Contacte a soporte."}
+            
+        return {"error": mensaje_error}
     
 # --- EL GUARDIÁN DEL COBRO MAYORISTA (Ahora acepta mixtos) ---
 class PagoMixtoCaja(BaseModel):
@@ -317,7 +396,7 @@ def cobrar_pedido_mayorista(cobro: CobroPedido):
         turno_abierto = cursor.fetchone()
         
         if not turno_abierto:
-            raise Exception("No hay ningún turno de caja abierto en este momento. ¡Abran la caja primero!")
+            raise Exception("No hay ningún turno de caja abierto en este momento. ¡Abra la caja primero!")
             
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
@@ -363,8 +442,16 @@ def cobrar_pedido_mayorista(cobro: CobroPedido):
         return {"mensaje": "¡Cobro registrado exitosamente!"}
         
     except Exception as e:
-        conexion.rollback()
-        return {"error": str(e)}
+        if conexion:
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 Error al cobrar pedido mayorista: {mensaje_error}")
+            return {"error": "Error interno. Contacte a soporte."}
+            
+        return {"error": mensaje_error}
     finally:
         conexion.close()
         

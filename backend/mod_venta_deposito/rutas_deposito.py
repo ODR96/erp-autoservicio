@@ -96,9 +96,18 @@ def registrar_documento_mayorista(doc: NuevoDocumento):
             "estado": estado_inicial
         }
     except Exception as e:
-        conexion.rollback()
-        conexion.close()
-        return {"error": "Se canceló la carga", "detalle": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
 
 # --- 3. COBRAR EL PEDIDO ---
 class PagoPedido(BaseModel):
@@ -149,9 +158,18 @@ def cobrar_pedido_mayorista(pedido_id: int, pago: PagoPedido):
             }
         }
     except Exception as e:
-        conexion.rollback()
-        conexion.close()
-        return {"error": "Se frenó el cobro", "detalle": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
 
 # --- 4. ENTREGAR MERCADERÍA (Portón) ---
 @router.put("/entregar/{pedido_id}")
@@ -196,9 +214,18 @@ def despachar_pedido_mayorista(pedido_id: int):
         return {"mensaje": "¡Mercadería entregada! Stock físico descontado y reservas liberadas."}
         
     except Exception as e:
-        conexion.rollback()
-        conexion.close()
-        return {"error": "Se frenó la entrega", "detalle": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
 # --- 5. OBTENER DOCUMENTO PARA IMPRESIÓN (Hoja A4/A5) ---
 @router.get("/documento/{doc_id}")
 def obtener_documento_impresion(doc_id: int):
@@ -228,7 +255,18 @@ def obtener_documento_impresion(doc_id: int):
             "detalle": [dict(i) for i in detalle]
         }
     except Exception as e:
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     finally:
         conexion.close()
         
@@ -263,7 +301,18 @@ def listar_documentos_deposito():
         ''')
         return {"documentos": [dict(d) for d in cursor.fetchall()]}
     except Exception as e:
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     finally:
         conexion.close()
         
@@ -313,7 +362,17 @@ def convertir_presupuesto_a_pedido(doc_id: int):
         conexion.commit()
         return {"mensaje": "¡Convertido con éxito! El cliente ya puede pasar por caja a pagar."}
     except Exception as e:
-        conexion.rollback()
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     finally:
         conexion.close()

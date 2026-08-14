@@ -53,8 +53,18 @@ def registrar_proveedor(prov: NuevoProveedor, background_tasks: BackgroundTasks)
         conexion.commit()
         return {"mensaje": "Proveedor registrado", "id": nuevo_id}
     except Exception as e:
-        conexion.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     finally:
         conexion.close()
 
@@ -92,8 +102,18 @@ def actualizar_proveedor(prov_id: int, prov: NuevoProveedor, background_tasks: B
         conexion.commit()
         return {"mensaje": "Proveedor actualizado"}
     except Exception as e:
-        conexion.rollback()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     finally:
         conexion.close()
 
@@ -156,8 +176,18 @@ def registrar_pago_proveedor(pago: PagoProveedor):
         conexion.commit()
         return {"mensaje": "Pago realizado con éxito"}
     except Exception as e:
-        conexion.rollback()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     finally:
         conexion.close()
 
@@ -226,9 +256,18 @@ def ingresar_mercaderia(factura: NuevaFacturaCompra):
         return {"mensaje": "Stock, Precios y Deuda actualizados correctamente", "total": total_final_real}
         
     except Exception as e:
-        conexion.rollback()
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
     # --- HISTORIAL DE COMPRAS ---
 @router.get("/historial/{proveedor_id}")
@@ -249,8 +288,18 @@ def ver_historial_compras(proveedor_id: int):
         conexion.close()
         return {"historial": compras}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
     # --- VER DETALLE DE UNA FACTURA ESPECÍFICA ---
 # --- VER DETALLE DE UNA FACTURA ESPECÍFICA ---
@@ -286,8 +335,18 @@ def ver_detalle_factura(compra_id: int):
             "total_factura": total_real
         }
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
 @router.get("/historial_pagos/{proveedor_id}")
 def ver_pagos(proveedor_id: int):
@@ -304,7 +363,18 @@ def ver_pagos(proveedor_id: int):
         pagos = [dict(row) for row in cursor.fetchall()]
         return {"pagos": pagos}
     except Exception as e:
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     finally:
         conexion.close()
         

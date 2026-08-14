@@ -83,8 +83,18 @@ def crear_usuario(u: UsuarioNuevo, background_tasks: BackgroundTasks):
         conexion.close()
         return {"mensaje": f"Usuario {u.nombre_completo} creado con seguridad de alto nivel."}
     except Exception as e:
-        conexion.close()
-        raise HTTPException(status_code=400, detail=f"Error al crear usuario: {e}")
+        if conexion:
+            conexion.rollback()
+            conexion.close()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL EN USUARIOS: {mensaje_error}")
+            # Pared ciega, pero respetando el formato HTTPException
+            raise HTTPException(status_code=400, detail="Ocurrió un error interno al procesar la solicitud.")
+            
+        # Si es un error normal, lo mostramos respetando el HTTPException
+        raise HTTPException(status_code=400, detail=mensaje_error)
 
 def verificar_pin(pin_plano, pin_hasheado):
     try:
@@ -209,8 +219,18 @@ def listar_usuarios():
         conexion.close()
         return {"usuarios": usuarios}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     
     # --- 5. ACTUALIZAR EMPLEADO ---
 @router.put("/actualizar/{usuario_id}")
@@ -236,8 +256,18 @@ def actualizar_usuario(usuario_id: int, u: UsuarioActualizar, background_tasks: 
         conexion.close()
         return {"mensaje": "Empleado actualizado correctamente"}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
 
 # --- 6. DAR DE BAJA (Despedir / Bloquear) ---
 @router.delete("/baja/{usuario_id}")
@@ -251,8 +281,18 @@ def dar_de_baja_usuario(usuario_id: int):
         conexion.close()
         return {"mensaje": "Empleado dado de baja. Ya no podrá ingresar al sistema."}
     except Exception as e:
-        conexion.close()
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     
 @router.put("/alta/{usuario_id}")
 def reactivar_usuario(usuario_id: int):

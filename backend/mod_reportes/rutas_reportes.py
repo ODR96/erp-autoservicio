@@ -44,8 +44,18 @@ def obtener_alertas_dashboard():
             "alertas_vencimientos": alertas_vencimiento
         }
     except Exception as e:
-        conexion.close()
-        return {"error": "No se pudieron cargar las alertas", "detalle": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
 
 
 # --- 2. LA VERDAD DE LA MILANESA: GANANCIA NETA REAL ---
@@ -104,8 +114,18 @@ def calcular_ganancia_neta(mes: str = None):
             }
         }
     except Exception as e:
-        conexion.close()
-        return {"error": "Error al calcular la ganancia", "detalle": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}
     
 @router.post("/registrar_faltante")
 def registrar_pedido_no_encontrado(p: ProductoFaltante):
@@ -224,6 +244,15 @@ def crear_oferta_urgente(oferta: LanzarOferta):
         return {"mensaje": f"¡Oferta lanzada! El {prod[1]} ahora cuesta ${nuevo_precio}. Imprimí los carteles ahora."}
         
     except Exception as e:
-        conexion.rollback()
-        conexion.close()
-        return {"error": str(e)}
+            if conexion:
+                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+                conexion.close()
+                
+            mensaje_error = str(e)
+            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+                return {"error": "Ocurrió un error interno al procesar la solicitud."}
+                
+            # 2. Si es un error de negocio tuyo, lo mostramos normal
+            return {"error": mensaje_error}

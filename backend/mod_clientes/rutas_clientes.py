@@ -60,7 +60,18 @@ def registrar_cliente(cli: ClienteNuevo):
         conexion.commit()
         return {"mensaje": f"Cliente {cli.nombre_completo} dado de alta con éxito."}
     except Exception as e:
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     finally:
         conexion.close()
 
@@ -77,7 +88,18 @@ def actualizar_cliente(cliente_id: int, cli: ClienteNuevo):
         conexion.commit()
         return {"mensaje": f"Ficha de {cli.nombre_completo} actualizada."}
     except Exception as e:
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     finally:
         conexion.close()
 
@@ -122,8 +144,18 @@ def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
         conexion.commit()
         return {"mensaje": "Pago procesado correctamente."}
     except Exception as e:
-        conexion.rollback()
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     finally:
         conexion.close()
 
@@ -143,7 +175,18 @@ def ver_historial_cliente(cliente_id: int):
         movimientos = [dict(m) for m in cursor.fetchall()]
         return {"movimientos": movimientos}
     except Exception as e:
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     finally:
         conexion.close()
         
@@ -172,8 +215,18 @@ def aplicar_recargo(cliente_id: int, ajuste: AjusteDeuda):
         conexion.commit()
         return {"mensaje": "Recargo aplicado correctamente."}
     except Exception as e:
-        conexion.rollback()
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     finally:
         conexion.close()
 
@@ -238,7 +291,15 @@ def simular_actualizacion_precios(cliente_id: int):
             "deuda_nueva": round(deuda_actual + diferencia_real, 2)
         }
     except Exception as e:
-        return {"error": str(e)}
+        if conexion:
+            conexion.close()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 Error en simulación de actualización de precios 🚨: {mensaje_error}")
+            return {"error": "Error interno. Contacte al soporte técnico"}
+            
+        return {"error": mensaje_error}
     finally:
         conexion.close()
         
@@ -315,6 +376,15 @@ def resumen_pendientes(cliente_id: int):
         return {"error": False, "articulos": lista_final, "saldo_total": cliente['saldo_actual_deudor']}
         
     except Exception as e:
-        return {"error": str(e)}
+        if conexion:
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 No se pudo obtener el resumen del cliente {cliente_id} 🚨: {mensaje_error}")
+            return {"error": "Error interno. Contacte al soporte técnico."}
+            
+        return {"error": mensaje_error}
     finally:
         conexion.close()

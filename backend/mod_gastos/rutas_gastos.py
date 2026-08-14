@@ -26,8 +26,18 @@ def crear_categoria(cat: NuevaCategoria):
         conexion.close()
         return {"mensaje": f"Categoría '{cat.nombre}' creada con éxito."}
     except Exception as e:
-        conexion.close()
-        return {"error": "No se pudo crear la categoría", "detalle": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
 
 @router.get("/categorias")
 def listar_categorias():
@@ -71,9 +81,18 @@ def registrar_gasto_operativo(gasto: NuevoGasto):
         return {"mensaje": "¡Gasto registrado y plata descontada de la caja!"}
         
     except Exception as e:
-        conexion.rollback()
-        conexion.close()
-        return {"error": "Se frenó el registro del gasto", "detalle": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
 
 # --- 4. RESUMEN DEL MES (Para el Dashboard) ---
 @router.get("/resumen_mensual")
@@ -102,5 +121,15 @@ def resumen_gastos_del_mes():
             "gastos_por_categoria": [dict(r) for r in resumen]
         }
     except Exception as e:
-        conexion.close()
-        return {"error": "No se pudo calcular el resumen", "detalle": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}

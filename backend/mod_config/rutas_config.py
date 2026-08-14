@@ -62,8 +62,18 @@ def actualizar_configuracion(
         conexion.commit()
         return {"mensaje": "¡Configuración del negocio guardada con éxito!"}
     except Exception as e:
-        conexion.rollback()
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
     finally:
         conexion.close()
 
@@ -90,7 +100,18 @@ def subir_logo_empresa(archivo: UploadFile = File(...)):
         
         return {"mensaje": "¡Logo actualizado!", "ruta_logo": nombre_archivo}
     except Exception as e:
-        return {"error": str(e)}
+        if conexion:
+            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.close()
+            
+        mensaje_error = str(e)
+        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        # 2. Si es un error de negocio tuyo, lo mostramos normal
+        return {"error": mensaje_error}
 
 # --- 4. LEER LA CONFIGURACIÓN (Para el Frontend y los Tickets) ---
 @router.get("/leer")
