@@ -510,6 +510,9 @@ function llenarSelectEtiquetas() {
 
     try {
     const select = document.getElementById('selectEtiquetaProducto');
+
+    if (!selectEtiquetas) return;
+    
     select.innerHTML = '<option value="">-- Seleccionar producto --</option>';
     productosGlobales.forEach(p => { select.innerHTML += `<option value="${p.id}">${p.nombre} ($${p.precio_venta_final.toFixed(2)})</option>`; });
     } catch (error) {

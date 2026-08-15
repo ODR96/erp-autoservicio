@@ -12,3 +12,9 @@ __pycache__/
 venv/
 env/
 .env
+
+node_modules/
+.pnp
+
+# Instaladores y compilados del frontend
+dist/

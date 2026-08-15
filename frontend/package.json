@@ -1,0 +1,38 @@
+{
+  "name": "frontend",
+  "version": "1.0.0",
+  "description": "Punto de Venta",
+  "main": "main_electron.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.autoservicio.pos",
+    "productName": "POS 20 de Junio",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ODR96",
+        "repo": "erp-autoservicio"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "logo20dejunio.ico"
+    }
+  },
+  "author": "Orlando Repetto",
+  "license": "ISC",
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3"
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true
+  }
+}

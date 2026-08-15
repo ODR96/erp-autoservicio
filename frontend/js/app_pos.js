@@ -137,7 +137,7 @@ async function cerrarSesionCajero() {
 async function iniciarInterfazPOS() {
     const nombre = localStorage.getItem('usuario_nombre');
     const rol = localStorage.getItem('usuario_rol');
-    
+
     document.getElementById('nombreCajeroLogueado').innerText = nombre;
     const configLocal = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio" };
     document.getElementById('uiNombreNegocio').innerText = configLocal.nombre_negocio.toUpperCase();
@@ -164,12 +164,12 @@ async function iniciarInterfazPOS() {
                 }
             }
             // 2. RECUPERAR LAS VENTAS EN ESPERA
-    let esperaGuardada = localStorage.getItem('ventas_espera_pos');
-    if (esperaGuardada) {
-        ventasEnEspera = JSON.parse(esperaGuardada);
-        document.getElementById('badgeEspera').innerText = `${ventasEnEspera.length} en espera`;
-    }
-        } catch(e) {}
+            let esperaGuardada = localStorage.getItem('ventas_espera_pos');
+            if (esperaGuardada) {
+                ventasEnEspera = JSON.parse(esperaGuardada);
+                document.getElementById('badgeEspera').innerText = `${ventasEnEspera.length} en espera`;
+            }
+        } catch (e) { }
     };
 
     try {
@@ -181,7 +181,7 @@ async function iniciarInterfazPOS() {
             turnoActualId = data.turno_id;
             localStorage.setItem('turno_actual_offline', data.turno_id);
             actualizarInfoCabecera(data.turno_id);
-            
+
             cargarCarritoSobreviviente(); // <--- DIBUJA EL CARRITO ACÁ
             setTimeout(() => inputScan.focus(), 500);
         } else {
@@ -191,12 +191,12 @@ async function iniciarInterfazPOS() {
     } catch (error) {
         // MODO SUPERVIVENCIA: Se apretó F5 sin internet
         let turnoGuardado = localStorage.getItem('turno_actual_offline');
-        
+
         if (turnoGuardado) {
             cajaAbierta = true;
             turnoActualId = turnoGuardado;
             actualizarInfoCabecera(turnoGuardado);
-            
+
             cargarCarritoSobreviviente(); // <--- TAMBIÉN LO DIBUJA OFFLINE
             setTimeout(() => inputScan.focus(), 500);
         } else {
@@ -316,7 +316,7 @@ async function confirmarAnulacion(ventaId, ticket) {
         const autorizadoPor = await solicitarAutorizacion(`Anular el Ticket ${ticket} descontará plata de la caja. Requiere autorización de Supervisor.`);
         if (!autorizadoPor) {
             modalHistorial.show(); // Si cancela o erra el PIN, le devolvemos el historial
-            return; 
+            return;
         }
     }
 
@@ -491,20 +491,20 @@ async function buscarProducto(q) {
 
         const response = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
         if (!response.ok) throw new Error("Error servidor");
-        
+
         const data = await response.json();
         procesarResultadosBusqueda(data.productos, query);
 
     } catch (error) {
         // GUARDAVIDAS NIVEL 2: Búsqueda Offline
         if (error.message === "OFFLINE" || error.message === "Failed to fetch" || error.message.includes("NetworkError")) {
-            
+
             let catalogoOffline = JSON.parse(localStorage.getItem('catalogo_productos_offline')) || [];
             if (catalogoOffline.length === 0) return Swal.fire('Sin Internet', 'Sin conexión y el catálogo offline está vacío.', 'error');
 
             // 1. Buscamos por código de barras exacto o ID
             let exactos = catalogoOffline.filter(p => p.codigo_barras === query || p.id.toString() === query);
-            
+
             if (exactos.length > 0) {
                 procesarResultadosBusqueda(exactos, query);
             } else {
@@ -531,7 +531,7 @@ function procesarResultadosBusqueda(productos, queryOriginal) {
     } else if (productos && productos.length > 1) {
         // Modo silencioso para avisar que entró el F3 Offline
         if (!navigator.onLine) Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Resultados múltiples (Modo Offline)', showConfirmButton: false, timer: 1500 });
-        
+
         document.getElementById('inputBusquedaAvanzada').value = queryOriginal;
         abrirBuscadorAvanzado();
     } else {
@@ -779,17 +779,17 @@ function actualizarTabla() {
 let clienteSeleccionadoId = null; // Guardamos el ID real del cliente
 
 function limpiarMostrador() {
-    carrito = []; 
-    porcentajeDescuento = 0; 
-    porcentajeRecargo = 0; 
+    carrito = [];
+    porcentajeDescuento = 0;
+    porcentajeRecargo = 0;
     mult = 1;
     document.getElementById("nombreClienteTicket").innerText = "Consumidor Final";
-    clienteSeleccionadoId = null; 
+    clienteSeleccionadoId = null;
     document.getElementById("visorModificador").classList.add("d-none");
-    
+
     // MAGIA ANTI-F5: Destruimos la memoria del ticket anterior
     localStorage.removeItem('carrito_pos_recupero');
-    
+
     actualizarTabla();
     inputScan.value = ""; inputScan.focus();
 }
@@ -950,7 +950,7 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
         // Convertimos el ID a número. Si es texto, fecha larga o un invento, lo clavamos en 0.
         let idLimpio = parseInt(p.id);
         if (isNaN(idLimpio) || idLimpio > 999999999) {
-            idLimpio = 0; 
+            idLimpio = 0;
         }
 
         return {
@@ -990,31 +990,31 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
         const response = await fetch(`${obtenerBaseUrl()}/ventas/cobrar`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadVenta)
         });
-        
+
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Error en el servidor");
         if (data.error) throw new Error(data.detalle || data.error);
-        
+
         return data;
 
     } catch (error) {
         // EL GUARDAVIDAS: Si el error es de red o tiró OFFLINE, guardamos en la cola
         if (error.message === "OFFLINE" || error.message === "Failed to fetch" || error.message.includes("NetworkError")) {
-            
+
             Swal.close(); // Cerramos el "Procesando..."
-            
+
             // Creamos un ticket temporal falso para que el cajero pueda imprimir el papel
             const ticketTemporalId = "OFF-" + Date.now().toString().slice(-6);
-            
+
             // Guardamos la venta en la mochila (localStorage)
             let ventasPendientes = JSON.parse(localStorage.getItem('ventas_offline')) || [];
-            
+
             // Le agregamos el ID temporal al payload para saber cuál es
             payloadVenta.ticket_temporal = ticketTemporalId;
             ventasPendientes.push(payloadVenta);
-            
+
             localStorage.setItem('ventas_offline', JSON.stringify(ventasPendientes));
-            
+
             // Le avisamos al cajero que se cobró pero en modo sin conexión
             Swal.fire({
                 toast: true, position: 'top-end', icon: 'warning',
@@ -1040,11 +1040,11 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
 // --- MOTOR OFFLINE-FIRST: EL CARTERO ---
 async function sincronizarVentasOffline() {
     let ventasPendientes = JSON.parse(localStorage.getItem('ventas_offline')) || [];
-    
+
     if (ventasPendientes.length === 0) return; // No hay nada que subir
 
     console.log(`Subiendo ${ventasPendientes.length} ventas offline a la nube...`);
-    
+
     let ventasAprobadas = [];
 
     for (let i = 0; i < ventasPendientes.length; i++) {
@@ -1054,7 +1054,7 @@ async function sincronizarVentasOffline() {
             const response = await fetch(`${obtenerBaseUrl()}/ventas/cobrar`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venta)
             });
-            
+
             if (response.ok) {
                 // Si subió bien, la marcamos para borrarla de la memoria local
                 ventasAprobadas.push(venta.ticket_temporal);
@@ -1062,7 +1062,7 @@ async function sincronizarVentasOffline() {
         } catch (e) {
             console.warn("Fallo al sincronizar ticket:", venta.ticket_temporal);
             // Si falla, cortamos el bucle, internet sigue inestable. Se intentará en la próxima.
-            break; 
+            break;
         }
     }
 
@@ -1070,7 +1070,7 @@ async function sincronizarVentasOffline() {
     if (ventasAprobadas.length > 0) {
         ventasPendientes = ventasPendientes.filter(v => !ventasAprobadas.includes(v.ticket_temporal));
         localStorage.setItem('ventas_offline', JSON.stringify(ventasPendientes));
-        
+
         Swal.fire({
             toast: true, position: 'top-end', icon: 'success',
             title: `${ventasAprobadas.length} ventas offline subidas a la nube`,
@@ -1139,7 +1139,7 @@ async function cerrarVentaBasica(metodo) {
     // Si cancela, devolvemos el cursor a la barra de búsqueda
     if (!confirm.isConfirmed) {
         inputScan.focus();
-        return; 
+        return;
     }
 
     Swal.fire({ title: 'Procesando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
@@ -1556,16 +1556,16 @@ async function guardarNuevoCliente() {
 
 function ponerEnEspera() {
     if (carrito.length === 0) return;
-    
+
     ventasEnEspera.push({
         carro: [...carrito], dto: porcentajeDescuento, rec: porcentajeRecargo,
         cliente: document.getElementById("nombreClienteTicket").innerText,
         totalEstimado: totalVenta
     });
-    
+
     // MAGIA: Guardamos la lista de espera en la mochila
     localStorage.setItem('ventas_espera_pos', JSON.stringify(ventasEnEspera));
-    
+
     limpiarMostrador();
     document.getElementById('badgeEspera').innerText = `${ventasEnEspera.length} en espera`;
 }
@@ -1602,10 +1602,10 @@ function recuperarVenta() {
 function cargarVentaEspera(index) {
     Swal.close();
     let recuperado = ventasEnEspera.splice(index, 1)[0];
-    
+
     // MAGIA: Actualizamos la mochila (ahora tiene uno menos)
     localStorage.setItem('ventas_espera_pos', JSON.stringify(ventasEnEspera));
-    
+
     carrito = recuperado.carro; porcentajeDescuento = recuperado.dto; porcentajeRecargo = recuperado.rec;
     document.getElementById("nombreClienteTicket").innerText = recuperado.cliente;
     document.getElementById('badgeEspera').innerText = `${ventasEnEspera.length} en espera`;
@@ -1721,14 +1721,14 @@ async function filtrarAvanzado(event) {
 
     temporizadorF3 = setTimeout(async () => {
         tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm text-primary" role="status"></div> Buscando...</td></tr>';
-        
+
         let resultados = [];
 
         try {
             if (!navigator.onLine) throw new Error("OFFLINE");
             const response = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
             if (!response.ok) throw new Error("Fallo");
-            
+
             const data = await response.json();
             resultados = data.productos;
         } catch (error) {
@@ -1736,7 +1736,7 @@ async function filtrarAvanzado(event) {
             if (error.message === "OFFLINE" || error.message === "Failed to fetch" || error.message.includes("NetworkError")) {
                 let catalogoOffline = JSON.parse(localStorage.getItem('catalogo_productos_offline')) || [];
                 let palabras = query.split(" ");
-                
+
                 resultados = catalogoOffline.filter(p => {
                     let textoProd = (p.nombre + " " + (p.codigo_barras || "")).toLowerCase();
                     return palabras.every(pal => textoProd.includes(pal));
@@ -1808,11 +1808,11 @@ async function agregarDesdeF3(id_producto) {
     modalBuscador.hide();
     try {
         if (!navigator.onLine) throw new Error("OFFLINE");
-        
+
         const res = await fetch(`${obtenerBaseUrl()}/productos/codigo/${id_producto}`);
         const prod = await res.json();
         if (!prod.error) agregarAlCarrito(prod);
-        
+
     } catch (e) {
         if (e.message === "OFFLINE" || e.message === "Failed to fetch" || e.message.includes("NetworkError")) {
             let catalogo = JSON.parse(localStorage.getItem('catalogo_productos_offline')) || [];
@@ -2047,7 +2047,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
     try {
         // 1. Configuracion siempre desde la mochila (es más rápido y no requiere internet)
         const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio", direccion: "", cuit: "00-00000000-0", mensaje_ticket: "¡Gracias por su compra!" };
-        
+
         let ticket;
 
         // 2. ¿Es un ticket normal o un ticket del bote salvavidas (Offline)?
@@ -2055,7 +2055,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
             // Modo Offline: Lo armamos a mano leyendo la mochila
             let ventasPendientes = JSON.parse(localStorage.getItem('ventas_offline')) || [];
             let ventaOffline = ventasPendientes.find(v => v.ticket_temporal === ticketId);
-            
+
             if (!ventaOffline) return Swal.fire('Error', 'Ticket offline no encontrado en la memoria.', 'error');
 
             let subtotalArticulos = ventaOffline.items.reduce((acc, i) => acc + (i.cantidad * i.precio_unitario), 0);
@@ -2194,12 +2194,21 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
             </html>
         `;
 
-        let ventanaPrint = window.open('', '_blank', 'width=300,height=500');
-        ventanaPrint.document.write(html);
-        ventanaPrint.document.close();
-        ventanaPrint.focus();
+        if (typeof require !== 'undefined') {
+            const { ipcRenderer } = require('electron');
+            // Disparo silencioso por Electron
+            ipcRenderer.send('imprimir-silencioso', html);
+        } else {
+            // Plan B: Por si estás en Google Chrome normal
+            let ventanaPrint = window.open('', '_blank', 'width=300,height=500');
+            ventanaPrint.document.write(html);
+            ventanaPrint.document.close();
+            ventanaPrint.focus();
+            setTimeout(() => { ventanaPrint.print(); ventanaPrint.close(); }, 500);
+        }
 
-        setTimeout(() => { ventanaPrint.print(); ventanaPrint.close(); }, 500);
+        // Limpiamos el mostrador para el siguiente cliente
+        limpiarMostrador();
 
     } catch (e) {
         console.error(e);
@@ -2570,7 +2579,7 @@ document.addEventListener('keypress', (e) => {
         e.preventDefault(); // <-- EL ESCUDO: Evita que el Enter presione botones sueltos
         if (bufferCodigo.length > 3) {
             buscarProducto(bufferCodigo);
-            bufferCodigo = ''; 
+            bufferCodigo = '';
         }
         return;
     }
@@ -2588,7 +2597,7 @@ async function descargarCatalogoParaOffline() {
     try {
         // Le pedimos al backend la lista completa de productos activos
         const response = await fetch(`${obtenerBaseUrl()}/productos/listar?estado=1`);
-        
+
         if (response.ok) {
             const data = await response.json();
             // Guardamos el catálogo en la "mochila" del navegador
@@ -2628,8 +2637,8 @@ function actualizarEstadoRedVisual(estaOnline) {
         badgeEstado = document.createElement('span');
         badgeEstado.id = 'badgeEstadoRed';
         // Le damos padding (px-3 py-2) y alineación vertical para que quede hermoso
-        badgeEstado.className = 'badge ms-3 px-3 py-2 d-flex align-items-center justify-content-center'; 
-        
+        badgeEstado.className = 'badge ms-3 px-3 py-2 d-flex align-items-center justify-content-center';
+
         if (btnCajaF10 && btnCajaF10.parentNode) {
             btnCajaF10.parentNode.insertBefore(badgeEstado, btnCajaF10.nextSibling);
         }
@@ -2638,14 +2647,14 @@ function actualizarEstadoRedVisual(estaOnline) {
     if (estaOnline) {
         badgeEstado.className = 'badge bg-success ms-3 px-3 py-2 d-flex align-items-center justify-content-center';
         badgeEstado.innerHTML = '<i class="bi bi-wifi me-2 fs-6"></i> <span class="fs-6">CONECTADO</span>';
-        
+
         if (btnCajaF10) btnCajaF10.style.pointerEvents = 'auto', btnCajaF10.style.opacity = '1';
         if (btnFiados) btnFiados.style.pointerEvents = 'auto', btnFiados.style.opacity = '1';
         if (btnMayorista) btnMayorista.style.pointerEvents = 'auto', btnMayorista.style.opacity = '1';
     } else {
-        badgeEstado.className = 'badge bg-danger ms-3 px-3 py-2 d-flex align-items-center justify-content-center'; 
+        badgeEstado.className = 'badge bg-danger ms-3 px-3 py-2 d-flex align-items-center justify-content-center';
         badgeEstado.innerHTML = '<i class="bi bi-wifi-off me-2 fs-6"></i> <span class="fs-6">MODO OFFLINE (Solo Efectivo)</span>';
-        
+
         if (btnCajaF10) btnCajaF10.style.pointerEvents = 'none', btnCajaF10.style.opacity = '0.5';
         if (btnFiados) btnFiados.style.pointerEvents = 'none', btnFiados.style.opacity = '0.5';
         if (btnMayorista) btnMayorista.style.pointerEvents = 'none', btnMayorista.style.opacity = '0.5';

@@ -1,10 +1,14 @@
 function obtenerBaseUrl() {
-    // Si estás en la red local (mostrador u oficina), usa la IP exacta de la barra de direcciones
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')) {
-        return window.location.origin; 
+    // Le enseñamos a detectar Electron (protocolo file:) además del localhost clásico
+    const protocolo = window.location.protocol;
+    const dominio = window.location.hostname;
+
+    if (protocolo === 'file:' || dominio === 'localhost' || dominio === '127.0.0.1') {
+        return 'http://localhost:8000'; // Tu servidor de pruebas local
     }
-    // Si estás desde tu casa por internet, usa Render
-    return 'https://erp-autoservicio-backend.onrender.com'; 
+    
+    // Si no es ninguno de los de arriba, asume que es el Vercel real y apunta a Render
+    return 'https://tu-api-en-render.onrender.com'; 
 }
 
 // ========================================================
@@ -219,3 +223,28 @@ document.addEventListener("DOMContentLoaded", () => {
     inyectarLayout();
     cargarDolar();
 });
+
+// ========================================================
+// ESCUCHA DE ACTUALIZACIONES AUTOMÁTICAS
+// ========================================================
+if (typeof require !== 'undefined') {
+    const { ipcRenderer } = require('electron');
+    
+    ipcRenderer.on('actualizacion-lista', () => {
+        Swal.fire({
+            title: '¡Actualización Disponible!',
+            text: 'Hay una nueva versión del sistema lista. Se aplicarán mejoras de velocidad y diseño. ¿Desea reiniciar el sistema ahora?',
+            icon: 'info',
+            showCancelButton: true,
+            confirmButtonColor: '#198754',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: '<i class="bi bi-arrow-clockwise"></i> Reiniciar y Actualizar',
+            cancelButtonText: 'Más tarde'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                // Le avisamos al motor de Windows que instale y reinicie
+                ipcRenderer.send('reiniciar-y-actualizar');
+            }
+        });
+    });
+}
