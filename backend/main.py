@@ -2,11 +2,11 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles 
 from fastapi.middleware.cors import CORSMiddleware 
 import subprocess
-import asyncio
 from contextlib import asynccontextmanager
 import os
 import sqlite3
 
+# Importamos todos tus módulos
 from backend.mod_productos.rutas_productos import router as router_productos
 from backend.mod_lotes.rutas_lotes import router as router_lotes
 from backend.mod_ventas.rutas_ventas import router as router_ventas
@@ -18,49 +18,22 @@ from backend.mod_proveedores.rutas_proveedores import router as router_proveedor
 from backend.mod_reportes.rutas_reportes import router as router_reportes
 from backend.mod_usuarios.rutas_usuarios import router as router_usuarios
 from backend.mod_config.rutas_config import router as router_config
-from backend.mod_sincronizacion.rutas_sync import router as rutas_sync
-from sincronizador import subir_todo_a_la_nube, descargar_novedades_oficina 
-from fastapi import BackgroundTasks
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 load_dotenv()
 
-
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-
-
-# --- 0. SALVAVIDAS Y AUTO-PARCHES PARA RENDER Y LOCAL ---
-def inicializar_base_vacia():
-    es_nube = os.environ.get("RENDER") is not None
-    
-    # 1. Si es Render, primero baja el archivo viejo (que todavía no tiene la columna)
-    if es_nube:
-        print("📥 [Render] Despertando: Recuperando memoria desde Supabase Storage...")
-        try:
-            from supabase import create_client
-            nube = create_client(SUPABASE_URL, SUPABASE_KEY)            
-            res = nube.storage.from_('backups').download('autoservicio_20dejunio.db')
-            with open('autoservicio_20dejunio.db', 'wb') as f:
-                f.write(res)
-            print("✅ [Render] Backup base clonado exitosamente.")
-        except Exception as e:
-            print("⚠️ Aviso: No se encontró backup físico aún.")
-
-    # 2. EL AUTO-PARCHE (Se ejecuta SIEMPRE, tanto en la Nube como en el Mostrador local)
+# --- 1. MANTENIMIENTO: AUTO-PARCHES DE BASE DE DATOS ---
+def inicializar_base():
     try:
         conexion = sqlite3.connect('autoservicio_20dejunio.db')
-        # El salvavidas original de usuarios
         conexion.execute("CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre_completo TEXT, rol TEXT, codigo_barras_credencial TEXT, pin_secreto TEXT, estado TEXT DEFAULT 'ACTIVO')")
         
-        # LA MAGIA: Intenta agregar la columna. Si la columna ya existe, SQLite tira error y sigue callado sin romper nada.
+        # Intentamos agregar columnas nuevas (si ya existen, ignora el error)
         try:
             conexion.execute("ALTER TABLE productos ADD COLUMN unidades_por_bulto INTEGER DEFAULT 1")
-            print("🔧 [Auto-Parche] Evolución aplicada: Columna 'unidades_por_bulto' agregada a SQLite.")
         except:
-            pass # Si falla es porque la columna ya existe, está todo perfecto.
+            pass 
         
-        # --- AGREGÁ ESTE BLOQUE NUEVO ---
         try:
             conexion.execute("ALTER TABLE cola_impresion_etiquetas ADD COLUMN plantilla TEXT DEFAULT 'Clasica'")
             conexion.execute("ALTER TABLE cola_impresion_etiquetas ADD COLUMN color_tema TEXT DEFAULT '#1a365d'")
@@ -69,42 +42,14 @@ def inicializar_base_vacia():
             
         conexion.commit()
         conexion.close()
+        print("✅ Base de datos verificada y lista.")
     except Exception as e:
         print("⚠️ Error en el auto-parche:", e)
 
-    # 3. Si es Render, ahora que la base ya está parchada, puede bajar los precios sin que explote
-    if es_nube:
-        try:
-            print("📥 [Render] Aplicando novedades de último minuto...")
-            descargar_novedades_oficina()
-            print("✅ [Render] Memoria 100% curada y actualizada al segundo.")
-        except Exception as e:
-            print(f"⚠️ Error al aplicar novedades: {e}")
-
-# --- 1. DEFINIMOS EL LATIDO INTELIGENTE (PURA SUBIDA) ---
-# --- 1. DEFINIMOS EL LATIDO INTELIGENTE (PURA SUBIDA OPERATIVA) ---
-async def latido_sincronizacion():
-    es_nube = os.environ.get("RENDER") is not None
-    
-    while True:
-        await asyncio.sleep(900)  
-        if es_nube:
-            print("☁️ [Nube] Soy Render. Escuchando pasivamente.")
-        else:
-            print("🏪 [Local] Soy el Mostrador. Subiendo ventas y stock a Supabase...")
-            try:
-                # Al pasarle 'True', el camión sabe que NO debe pisar el catálogo de la Nube
-                await asyncio.to_thread(subir_todo_a_la_nube, True)
-                print("✅ [Latido Automático] Respaldo operativo exitoso.")
-            except Exception as e:
-                print(f"❌ [Latido Automático] Error en el latido: {e}")
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    inicializar_base_vacia() # Corremos el salvavidas antes de arrancar
-    tarea_latido = asyncio.create_task(latido_sincronizacion())
+    inicializar_base() 
     yield
-    tarea_latido.cancel()
 
 # --- 2. CREAMOS LA APP ---
 app = FastAPI(title="ERP Autoservicio 20 de Junio", lifespan=lifespan)
@@ -116,17 +61,13 @@ app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8000",
-        "https://erp-autoservicio.vercel.app",
-        "null"
-    ],
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- 4. LA RUTA DE ACTUALIZACIÓN GIT ---
+# --- 4. LA RUTA DE ACTUALIZACIÓN GIT (Webhook Contabo) ---
 @app.post("/actualizar-sistema")
 def actualizar_codigo_git():
     try:
@@ -153,34 +94,7 @@ app.include_router(router_proveedores, prefix="/proveedores", tags=["Proveedores
 app.include_router(router_reportes, prefix="/reportes", tags=["Dashboard y Estadísticas"])
 app.include_router(router_usuarios, prefix="/usuarios", tags=["Personal y Permisos"])
 app.include_router(router_config, prefix="/config", tags=["Ajustes del Local y Logo"])
-app.include_router(rutas_sync, prefix="/sync")
 
 @app.get("/")
 def leer_raiz():
-    return {"mensaje": "¡El motor principal está encendido y modularizado!"}
-
-@app.get("/radiografia")
-def ver_estado_nube():
-    try:
-        import sqlite3
-        conexion = sqlite3.connect('autoservicio_20dejunio.db')
-        cursor = conexion.cursor()
-        cursor.execute("SELECT count(*) FROM productos")
-        prods = cursor.fetchone()[0]
-        cursor.execute("SELECT count(*) FROM usuarios")
-        usrs = cursor.fetchone()[0]
-        conexion.close()
-        return {
-            "estado": "Render está funcionando perfecto", 
-            "cantidad_productos_en_la_nube": prods, 
-            "cantidad_usuarios_en_la_nube": usrs
-        }
-    except Exception as e:
-        return {"estado": "ERROR", "detalle": str(e)}
-    
-# ESTE ES EL RECEPTOR DEL WALKIE-TALKIE
-@app.get("/sync/aviso-cambio")
-def aviso_de_cambio(background_tasks: BackgroundTasks):
-    # Render recibe el grito y actualiza su memoria interna en segundo plano
-    background_tasks.add_task(descargar_novedades_oficina)
-    return {"mensaje": "Enterado. Actualizando la Nube..."}
+    return {"mensaje": "¡Motor ERP 20 de Junio funcionando al 100% en Contabo!"}
