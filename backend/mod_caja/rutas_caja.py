@@ -4,7 +4,6 @@ from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import sqlite3
 from fastapi import BackgroundTasks
-from sincronizador import subir_todo_a_la_nube
 import requests
 
 
@@ -181,10 +180,7 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         
         conexion.commit()
         conexion.close()
-        
-        # ---> GATILLO 3: EL CAMIÓN DE MUDANZA SE DISPARA DE FONDO <---
-        background_tasks.add_task(subir_todo_a_la_nube)
-        
+                
         # ---> GATILLO 4: ALERTA DE WHATSAPP AL DUEÑO <---
         background_tasks.add_task(
             disparar_alerta_cierre,
