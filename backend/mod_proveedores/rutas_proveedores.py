@@ -5,7 +5,6 @@ from datetime import datetime
 import sqlite3
 import os
 from fastapi import BackgroundTasks
-from backend.replicador import replicar_fila_a_nube
 
 router = APIRouter()
 
@@ -48,8 +47,6 @@ def registrar_proveedor(prov: NuevoProveedor, background_tasks: BackgroundTasks)
                        (prov.nombre_comercial, prov.cuit, prov.telefono_vendedor, prov.observaciones))
         nuevo_id = cursor.lastrowid
         cursor.execute("INSERT INTO proveedores_ctacte (proveedor_id, saldo_deudor) VALUES (?, 0)", (nuevo_id,))
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'proveedores', nuevo_id) # Usar prov_id en el actualizar
         conexion.commit()
         return {"mensaje": "Proveedor registrado", "id": nuevo_id}
     except Exception as e:
@@ -97,8 +94,6 @@ def actualizar_proveedor(prov_id: int, prov: NuevoProveedor, background_tasks: B
         cursor.execute("UPDATE proveedores SET nombre_comercial=?, cuit=?, telefono_vendedor=?, observaciones=? WHERE id=?", 
                        (prov.nombre_comercial, prov.cuit, prov.telefono_vendedor, prov.observaciones, prov_id))
         
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'proveedores', prov_id) # Usar prov_id en el actualizar
         conexion.commit()
         return {"mensaje": "Proveedor actualizado"}
     except Exception as e:

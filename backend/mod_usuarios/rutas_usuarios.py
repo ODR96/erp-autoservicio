@@ -10,7 +10,6 @@ from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks
-from backend.replicador import replicar_fila_a_nube
 
 
 router = APIRouter()
@@ -77,8 +76,7 @@ def crear_usuario(u: UsuarioNuevo, background_tasks: BackgroundTasks):
             VALUES (?, ?, ?, ?)
         ''', (u.nombre_completo, u.rol, u.codigo_barras_credencial, pin_seguro))
         
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'usuarios', u) # Usar prov_id en el actualizar
+
         conexion.commit()
         conexion.close()
         return {"mensaje": f"Usuario {u.nombre_completo} creado con seguridad de alto nivel."}
@@ -250,8 +248,6 @@ def actualizar_usuario(usuario_id: int, u: UsuarioActualizar, background_tasks: 
                 UPDATE usuarios SET nombre_completo = ?, rol = ?, codigo_barras_credencial = ? WHERE id = ?
             ''', (u.nombre_completo, u.rol, u.codigo_barras_credencial, usuario_id))
             
-        if os.environ.get("RENDER") is not None:
-            background_tasks.add_task(replicar_fila_a_nube, 'proveedores', usuario_id) # Usar prov_id en el actualizar
         conexion.commit()
         conexion.close()
         return {"mensaje": "Empleado actualizado correctamente"}
