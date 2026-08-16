@@ -6,7 +6,6 @@ import sqlite3
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
-from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks
@@ -16,8 +15,6 @@ router = APIRouter()
 
 load_dotenv()
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 
 # --- CONFIGURACIÓN DE SEGURIDAD BANCARIA ---
@@ -107,52 +104,40 @@ def verificar_pin(pin_plano, pin_hasheado):
 
 @router.post("/login")
 def iniciar_sesion(credenciales: LoginRequest):
-    es_nube = os.environ.get("RENDER") is not None
-    print(f"🔍 [LOGIN] Intento de acceso - Usuario: {credenciales.codigo_credencial} | Nube: {es_nube}")
+    print(f"🔍 [LOGIN] Intento de acceso - Usuario: {credenciales.codigo_credencial}")
     
-    if es_nube:
-        nube: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        # Sacamos el filtro de 'ACTIVO' temporalmente para ver exactamente qué trae la base
-        respuesta = nube.table('usuarios').select('*').eq('codigo_barras_credencial', credenciales.codigo_credencial).execute()
+    # 1. Conexión directa a tu motor de base de datos en Contabo
+    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    
+    # 2. Buscamos al usuario sin dar vueltas
+    cursor.execute('''
+        SELECT id, nombre_completo, rol, pin_secreto, estado 
+        FROM usuarios 
+        WHERE codigo_barras_credencial = ?
+    ''', (credenciales.codigo_credencial,))
+    
+    fila = cursor.fetchone()
+    conexion.close()
+    
+    # 3. Validaciones estrictas
+    if not fila:
+        raise HTTPException(status_code=401, detail="No se encontró el usuario en la base de datos.")
         
-        print(f"📦 [SUPABASE RESPUESTA]: {respuesta.data}")
+    usuario = dict(fila)
+    
+    if usuario.get('estado') != 'ACTIVO':
+        raise HTTPException(status_code=401, detail=f"Usuario encontrado pero su estado es: {usuario.get('estado')}")
         
-        if not respuesta.data:
-            raise HTTPException(status_code=401, detail="El usuario no existe en la nube. Revisa Supabase.")
-        
-        usuario = respuesta.data[0]
-        
-        if usuario.get('estado') != 'ACTIVO':
-            raise HTTPException(status_code=401, detail=f"Usuario encontrado pero su estado es: {usuario.get('estado')}")
-            
-    else:
-        conexion = sqlite3.connect('autoservicio_20dejunio.db')
-        conexion.row_factory = sqlite3.Row
-        cursor = conexion.cursor()
-        
-        cursor.execute('''
-            SELECT id, nombre_completo, rol, pin_secreto, estado 
-            FROM usuarios 
-            WHERE codigo_barras_credencial = ?
-        ''', (credenciales.codigo_credencial,))
-        
-        fila = cursor.fetchone()
-        conexion.close()
-        
-        if not fila:
-            raise HTTPException(status_code=401, detail="No se encontró el usuario en el local.")
-        usuario = dict(fila)
-        
-        if usuario.get('estado') != 'ACTIVO':
-            raise HTTPException(status_code=401, detail="Usuario inactivo en el local.")
-        
-    # Verificación final del PIN
+    # 4. Verificación de seguridad del PIN
     if not verificar_pin(credenciales.pin_secreto, usuario['pin_secreto']):
         print(f"❌ [LOGIN RECHAZADO] El PIN no coincide para {usuario.get('nombre_completo')}")
         raise HTTPException(status_code=401, detail="Credencial o PIN incorrecto.")
         
     print(f"✅ [LOGIN EXITOSO] Bienvenido {usuario.get('nombre_completo')}")
     
+    # 5. Generación de la llave de acceso (Token)
     datos_token = {"sub": str(usuario['id']), "rol": usuario['rol']}
     token = crear_token_acceso(datos_token)
         
