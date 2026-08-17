@@ -1,14 +1,6 @@
 function obtenerBaseUrl() {
-    // Le enseñamos a detectar Electron (protocolo file:) además del localhost clásico
-    const protocolo = window.location.protocol;
-    const dominio = window.location.hostname;
-
-    if (protocolo === 'file:' || dominio === 'localhost' || dominio === '127.0.0.1') {
-        return 'http://localhost:8000'; // Tu servidor de pruebas local
-    }
-    
-    // Si no es ninguno de los de arriba, asume que es el Vercel real y apunta a Render
-    return 'https://tu-api-en-render.onrender.com'; 
+    // Apunta directamente al motor blindado en la nube
+    return 'http://185.249.225.63:8000'; 
 }
 
 // ========================================================

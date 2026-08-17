@@ -2,10 +2,8 @@
 // DETECTOR INTELIGENTE DE DIRECCIÓN (Local vs Nube)
 // ========================================================
 function obtenerBaseUrl() {
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')) {
-        return 'http://localhost:8000';
-    }
-    return 'https://erp-autoservicio-backend.onrender.com';
+    // Apunta directamente al motor blindado en la nube
+    return 'http://185.249.225.63:8000'; 
 }
 
 async function intentarAcceso() {
