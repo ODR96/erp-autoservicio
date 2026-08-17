@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles 
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware 
 import subprocess
 from contextlib import asynccontextmanager
@@ -58,6 +59,12 @@ app = FastAPI(title="ERP Autoservicio 20 de Junio", lifespan=lifespan)
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
+
+# Ruta para mostrar el ícono en la pestaña del navegador
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    # Como Uvicorn se ejecuta desde la raíz, buscamos el archivo en la carpeta backend
+    return FileResponse("backend/favicon.ico")
 
 app.add_middleware(
     CORSMiddleware,
