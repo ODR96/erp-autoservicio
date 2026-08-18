@@ -3,10 +3,11 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 import sqlite3
+from backend.database import obtener_conexion
 
 # --- PARCHE DE MIGRACIÓN: AGREGAR DIRECCIÓN A CLIENTES ---
 def actualizar_tabla_clientes():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # Intentamos agregar la columna. Si ya existe, da error y pasa de largo.
@@ -37,7 +38,7 @@ class NuevoDocumento(BaseModel):
 # --- 2. CREAR PRESUPUESTO O PEDIDO ---
 @router.post("/crear")
 def registrar_documento_mayorista(doc: NuevoDocumento):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -116,7 +117,7 @@ class PagoPedido(BaseModel):
 
 @router.put("/cobrar/{pedido_id}")
 def cobrar_pedido_mayorista(pedido_id: int, pago: PagoPedido):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -174,7 +175,7 @@ def cobrar_pedido_mayorista(pedido_id: int, pago: PagoPedido):
 # --- 4. ENTREGAR MERCADERÍA (Portón) ---
 @router.put("/entregar/{pedido_id}")
 def despachar_pedido_mayorista(pedido_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -229,7 +230,7 @@ def despachar_pedido_mayorista(pedido_id: int):
 # --- 5. OBTENER DOCUMENTO PARA IMPRESIÓN (Hoja A4/A5) ---
 @router.get("/documento/{doc_id}")
 def obtener_documento_impresion(doc_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -273,7 +274,7 @@ def obtener_documento_impresion(doc_id: int):
 # --- LISTAR TODOS LOS PEDIDOS Y PRESUPUESTOS ---
 @router.get("/listar")
 def listar_documentos_deposito():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -320,7 +321,7 @@ def listar_documentos_deposito():
         # --- 6. CONSULTAR PEDIDO PENDIENTE (Para el Mostrador POS) ---
 @router.get("/pendiente/{doc_id}")
 def obtener_pedido_pendiente(doc_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -346,7 +347,7 @@ def obtener_pedido_pendiente(doc_id: int):
     # --- 7. CONVERTIR PRESUPUESTO A PEDIDO ---
 @router.post("/convertir_presupuesto/{doc_id}")
 def convertir_presupuesto_a_pedido(doc_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # Transformamos el documento para que la Caja lo acepte

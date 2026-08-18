@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import sqlite3
 import shutil
 import os
+from backend.database import obtener_conexion
 
 router = APIRouter()
 
@@ -13,7 +14,7 @@ os.makedirs(CARPETA_LOGOS, exist_ok=True)
 
 # --- 1. PREPARAR LA BASE DE DATOS (MIGRACIÓN INTELIGENTE) ---
 def asegurar_tabla_configuracion():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS configuracion_local (
@@ -51,7 +52,7 @@ def actualizar_configuracion(
     condicion_iva: str = Form(...),
     impresora_por_defecto: str = Form(...)
 ):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute('''
@@ -91,7 +92,7 @@ def subir_logo_empresa(archivo: UploadFile = File(...)):
         with open(ruta_guardado, "wb") as buffer:
             shutil.copyfileobj(archivo.file, buffer)
             
-        conexion = sqlite3.connect('autoservicio_20dejunio.db')
+        conexion = obtener_conexion()
         cursor = conexion.cursor()
         # Guardamos solo el nombre del archivo, el frontend sabe buscar en /static/logos/
         cursor.execute("UPDATE configuracion_local SET ruta_logo = ? WHERE id = 1", (nombre_archivo,))
@@ -116,7 +117,7 @@ def subir_logo_empresa(archivo: UploadFile = File(...)):
 # --- 4. LEER LA CONFIGURACIÓN (Para el Frontend y los Tickets) ---
 @router.get("/leer")
 def obtener_configuracion():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     cursor.execute("SELECT * FROM configuracion_local WHERE id = 1")

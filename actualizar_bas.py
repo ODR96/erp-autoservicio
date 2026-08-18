@@ -1,5 +1,5 @@
 import sqlite3
-conexion = sqlite3.connect('autoservicio_20dejunio.db')
+conexion = obtener_conexion()
 cursor = conexion.cursor()
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS productos_solicitados_faltantes (

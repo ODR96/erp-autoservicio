@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 import sqlite3
+from backend.database import obtener_conexion
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ class PagoDeuda(BaseModel):
 
 # --- FUNCIÓN DE ARRANQUE (Mantenimiento Automático) ---
 def inicializar_tabla_movimientos():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS movimientos_clientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +51,7 @@ inicializar_tabla_movimientos()
 # --- 2. GESTIÓN DE CLIENTES (Crear, Editar y Listar) ---
 @router.post("/registrar")
 def registrar_cliente(cli: ClienteNuevo):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute('''
@@ -77,7 +78,7 @@ def registrar_cliente(cli: ClienteNuevo):
 
 @router.put("/actualizar/{cliente_id}")
 def actualizar_cliente(cliente_id: int, cli: ClienteNuevo):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute('''
@@ -105,7 +106,7 @@ def actualizar_cliente(cliente_id: int, cli: ClienteNuevo):
 
 @router.get("/listado")
 def listar_clientes():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     cursor.execute("SELECT * FROM clientes ORDER BY nombre_completo ASC")
@@ -116,7 +117,7 @@ def listar_clientes():
 # --- 3. COBRO DE DEUDA (Multiuso: Admin o POS) ---
 @router.put("/pagar_deuda/{cliente_id}")
 def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -162,7 +163,7 @@ def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
 # --- 4. HISTORIAL (La Película Completa) ---
 @router.get("/historial/{cliente_id}")
 def ver_historial_cliente(cliente_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -198,7 +199,7 @@ class AjusteDeuda(BaseModel):
 
 @router.put("/aplicar_recargo/{cliente_id}")
 def aplicar_recargo(cliente_id: int, ajuste: AjusteDeuda):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -232,7 +233,7 @@ def aplicar_recargo(cliente_id: int, ajuste: AjusteDeuda):
 
 @router.get("/simular_actualizacion/{cliente_id}")
 def simular_actualizacion_precios(cliente_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -305,7 +306,7 @@ def simular_actualizacion_precios(cliente_id: int):
         
 @router.get("/resumen_pendientes/{cliente_id}")
 def resumen_pendientes(cliente_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     

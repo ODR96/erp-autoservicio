@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime, timezone, timedelta, date
 import os
 from fastapi import BackgroundTasks
+from backend.database import obtener_conexion
 
 router = APIRouter()
 
@@ -54,7 +55,7 @@ class CategoriaPOS(BaseModel):
 
 @router.post("/crear")
 def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -110,7 +111,7 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
 # --- 2. LEER / CATÁLOGO COMPLETO (R) ---
 @router.get("/listar")
 def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, alerta_vencimiento: bool = False):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row 
     cursor = conexion.cursor()
     
@@ -174,7 +175,7 @@ def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, aler
 # --- 3. ACTUALIZAR PRODUCTO CORREGIDO ---
 @router.put("/actualizar/{producto_id}")
 def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -229,7 +230,7 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
 # --- 7. VER UN SOLO PRODUCTO (Con Aspirador Automático de Lotes) ---
 @router.get("/ver/{producto_id}")
 def ver_producto_por_id(producto_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -326,7 +327,7 @@ def ver_producto_por_id(producto_id: int):
 # --- 4. BORRAR (D - Borrado Lógico) ---
 @router.delete("/eliminar/{producto_id}")
 def desactivar_producto(producto_id: int, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # En vez de borrar, lo "apagamos" poniendo activo en 0
@@ -350,7 +351,7 @@ def desactivar_producto(producto_id: int, background_tasks: BackgroundTasks):
     
 @router.put("/restaurar/{producto_id}")
 def restaurar_producto(producto_id: int, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # Lo volvemos a prender poniendo activo en 1
@@ -375,7 +376,7 @@ def restaurar_producto(producto_id: int, background_tasks: BackgroundTasks):
 # --- 6. BUSCADOR AVANZADO (Inteligente, Sin Zombies y CON PROMOS) ---
 @router.get("/buscar")
 def buscar_producto(q: Optional[str] = None, termino: Optional[str] = None, query: Optional[str] = None):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -438,7 +439,7 @@ def buscar_producto(q: Optional[str] = None, termino: Optional[str] = None, quer
 # --- BUSCADOR EXACTO PARA LA PISTOLA (CON PROMOS Y STOCK) ---
 @router.get("/codigo/{codigo_barras}")
 def obtener_por_codigo(codigo_barras: str):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -476,7 +477,7 @@ class ActualizacionMasiva(BaseModel):
 # --- RUTINA DE AUMENTO MASIVO ---
 @router.put("/actualizacion_masiva")
 def actualizar_precios_masivamente(datos: ActualizacionMasiva, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         if datos.es_monto_fijo:
@@ -545,7 +546,7 @@ class PromocionNueva(BaseModel):
 
 @router.post("/promocion")
 def crear_promocion(promo: PromocionNueva):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute('''
@@ -577,7 +578,7 @@ class CategoriaNueva(BaseModel):
 # --- RUTAS DE CATEGORÍAS (RUBROS) ---
 @router.get("/categorias")
 def listar_categorias_activas():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -602,7 +603,7 @@ def listar_categorias_activas():
 
 @router.post("/categorias/crear")
 def crear_categoria(cat: CategoriaNueva, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute("INSERT INTO categorias_productos (nombre) VALUES (?)", (cat.nombre,))
@@ -628,7 +629,7 @@ def crear_categoria(cat: CategoriaNueva, background_tasks: BackgroundTasks):
 
 @router.delete("/categorias/eliminar/{cat_id}")
 def eliminar_categoria(cat_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # Lo eliminamos de la tabla
@@ -661,7 +662,7 @@ class EtiquetaNueva(BaseModel):
 
 @router.post("/etiquetas/encolar")
 def encolar_etiqueta(datos: EtiquetaNueva):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute('''
         INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, texto_personalizado, plantilla, color_tema) 
@@ -673,7 +674,7 @@ def encolar_etiqueta(datos: EtiquetaNueva):
 
 @router.get("/etiquetas/listar")
 def listar_cola_impresion():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     cursor.execute('''
@@ -690,7 +691,7 @@ def listar_cola_impresion():
 
 @router.delete("/etiquetas/vaciar")
 def vaciar_cola():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM cola_impresion_etiquetas")
     conexion.commit()
@@ -700,7 +701,7 @@ def vaciar_cola():
 # <-- NUEVO: RUTA PARA BORRAR UNA SOLA ETIQUETA DE LA BASE DE DATOS -->
 @router.delete("/etiquetas/eliminar/{cola_id}")
 def eliminar_etiqueta_individual(cola_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM cola_impresion_etiquetas WHERE id = ?", (cola_id,))
     conexion.commit()
@@ -710,7 +711,7 @@ def eliminar_etiqueta_individual(cola_id: int):
 # --- GENERADOR DE CÓDIGO INTERNO AUTOMÁTICO ---
 @router.get("/generar_codigo_interno")
 def generar_codigo_interno():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # Busca el código numérico más alto (que tenga hasta 6 dígitos para que sea corto)
@@ -739,7 +740,7 @@ def generar_codigo_interno():
 # --- 7. GESTIÓN DE CATEGORÍAS RÁPIDAS DEL POS ---
 @router.get("/categorias_pos")
 def listar_categorias_pos():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -763,7 +764,7 @@ def listar_categorias_pos():
 
 @router.put("/categorias_pos/{cat_id}")
 def editar_categoria_pos(cat_id: int, cat: CategoriaPOS, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute('''
@@ -791,7 +792,7 @@ def editar_categoria_pos(cat_id: int, cat: CategoriaPOS, background_tasks: Backg
 # --- 9. LISTAR COMBOS (Para la Pestaña Híbrida) ---
 @router.get("/listar_combos")
 def listar_combos_armados():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -833,7 +834,7 @@ def listar_combos_armados():
 # Acordate de sumarle "background_tasks: BackgroundTasks" arriba
 @router.put("/lotes/actualizar/{lote_id}")
 def actualizar_lote_individual(lote_id: int, datos: dict, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute('''
@@ -863,7 +864,7 @@ def actualizar_lote_individual(lote_id: int, datos: dict, background_tasks: Back
 
 @router.delete("/lotes/eliminar/{lote_id}")
 def eliminar_lote_fisico(lote_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # Esto borra el lote de la base de datos definitivamente
@@ -887,7 +888,7 @@ def eliminar_lote_fisico(lote_id: int):
     
 @router.get("/movimientos/{producto_id}")
 def obtener_historial_producto(producto_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:

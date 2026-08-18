@@ -5,6 +5,7 @@ from datetime import datetime
 import sqlite3
 import os
 from fastapi import BackgroundTasks
+from backend.database import obtener_conexion
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ class PagoProveedor(BaseModel):
 # --- 1. GESTIÓN DE PROVEEDORES (ABM COMPLETO) ---
 @router.post("/alta")
 def registrar_proveedor(prov: NuevoProveedor, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # AGREGAMOS LAS OBSERVACIONES AL INSERT
@@ -67,7 +68,7 @@ def registrar_proveedor(prov: NuevoProveedor, background_tasks: BackgroundTasks)
 
 @router.get("/listado")
 def listar_proveedores(solo_activos: bool = False):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -87,7 +88,7 @@ def listar_proveedores(solo_activos: bool = False):
 
 @router.put("/actualizar/{prov_id}")
 def actualizar_proveedor(prov_id: int, prov: NuevoProveedor, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # AGREGAMOS LAS OBSERVACIONES AL UPDATE
@@ -114,7 +115,7 @@ def actualizar_proveedor(prov_id: int, prov: NuevoProveedor, background_tasks: B
 
 @router.delete("/baja/{prov_id}")
 def baja_proveedor(prov_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute("UPDATE proveedores SET activo = 0 WHERE id = ?", (prov_id,))
     conexion.commit()
@@ -123,7 +124,7 @@ def baja_proveedor(prov_id: int):
 
 @router.put("/reactivar/{prov_id}")
 def reactivar_proveedor(prov_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute("UPDATE proveedores SET activo = 1 WHERE id = ?", (prov_id,))
     conexion.commit()
@@ -135,7 +136,7 @@ def reactivar_proveedor(prov_id: int):
 # --- REGISTRAR PAGO Y DESCONTAR DEUDA ---
 @router.post("/pagar")
 def registrar_pago_proveedor(pago: PagoProveedor):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # 0. Creamos la tabla de pagos si por alguna razón no se creó al inicio
@@ -189,7 +190,7 @@ def registrar_pago_proveedor(pago: PagoProveedor):
 # --- 2. INGRESO DE MERCADERÍA (CON ACTUALIZACIÓN DE SALDO) ---
 @router.post("/cargar_factura")
 def ingresar_mercaderia(factura: NuevaFacturaCompra):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -267,7 +268,7 @@ def ingresar_mercaderia(factura: NuevaFacturaCompra):
     # --- HISTORIAL DE COMPRAS ---
 @router.get("/historial/{proveedor_id}")
 def ver_historial_compras(proveedor_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -300,7 +301,7 @@ def ver_historial_compras(proveedor_id: int):
 # --- VER DETALLE DE UNA FACTURA ESPECÍFICA ---
 @router.get("/factura_detalle/{compra_id}")
 def ver_detalle_factura(compra_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -345,7 +346,7 @@ def ver_detalle_factura(compra_id: int):
     
 @router.get("/historial_pagos/{proveedor_id}")
 def ver_pagos(proveedor_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -374,7 +375,7 @@ def ver_pagos(proveedor_id: int):
         conexion.close()
         
 def migrar_proveedores():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute("ALTER TABLE proveedores ADD COLUMN observaciones TEXT DEFAULT ''")

@@ -1,6 +1,6 @@
 import sqlite3
 
-conexion = sqlite3.connect('autoservicio_20dejunio.db')
+conexion = obtener_conexion()
 cursor = conexion.cursor()
 
 # 1. Creamos la tabla de Categorías (que nos habíamos olvidado)

@@ -1,6 +1,6 @@
 import sqlite3
 
-conexion = sqlite3.connect('autoservicio_20dejunio.db')
+conexion = obtener_conexion()
 cursor = conexion.cursor()
 try:
     cursor.execute("ALTER TABLE productos ADD COLUMN unidad_medida TEXT DEFAULT 'Unidad'")

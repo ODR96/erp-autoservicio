@@ -3,12 +3,13 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import sqlite3
+from backend.database import obtener_conexion
 
 router = APIRouter()
 
 @router.get("/por_fecha")
 def obtener_ventas_por_fecha(fecha: str = Query(..., description="Formato YYYY-MM-DD")):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -77,7 +78,7 @@ class NuevaVenta(BaseModel):
 # --- 2. EL MOTOR DE COBRO ---
 @router.post("/cobrar")
 def registrar_venta(venta: NuevaVenta):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row 
     cursor = conexion.cursor()
     
@@ -250,7 +251,7 @@ def registrar_venta(venta: NuevaVenta):
 # --- 3. GENERAR EL TICKET IMPRESO ---
 @router.get("/ticket/{venta_id}")
 def generar_ticket(venta_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -318,7 +319,7 @@ def generar_ticket(venta_id: int):
 # --- 4. TRAER EL HISTORIAL DEL TURNO ---
 @router.get("/historial/{turno_id}")
 def historial_ventas_turno(turno_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -354,7 +355,7 @@ def historial_ventas_turno(turno_id: int):
 # --- 5. ANULAR UNA VENTA Y DEVOLVER EL STOCK Y DINERO ---
 @router.put("/anular/{venta_id}")
 def anular_venta(venta_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # 1. Buscamos el ticket

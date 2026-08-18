@@ -1,9 +1,15 @@
-// ========================================================
-// DETECTOR INTELIGENTE DE DIRECCIÓN (Local vs Nube)
-// ========================================================
 function obtenerBaseUrl() {
-    // Apunta directamente al motor blindado en la nube
-    return 'http://185.249.225.63:8000'; 
+    const protocolo = window.location.protocol;
+    const dominio = window.location.hostname;
+
+    // Si estás en la compu programando/probando localmente:
+    if (dominio === 'localhost' || dominio === '127.0.0.1') {
+        return 'http://localhost:8000'; 
+    }
+    
+    // Si la app corre en el mostrador (Electron usa 'file:') o desde la web remota:
+    // Apunta directo a tu Contabo para tener tiempo real absoluto
+    return 'http://185.249.225.63:8000';
 }
 
 async function intentarAcceso() {
@@ -33,7 +39,6 @@ async function intentarAcceso() {
         const data = await res.json();
 
         if (res.ok && data.token_acceso) {
-            // Guardado de sesión
             localStorage.setItem('token', data.token_acceso);
             localStorage.setItem('usuario_nombre', data.usuario.nombre);
             localStorage.setItem('usuario_id', data.usuario.id);

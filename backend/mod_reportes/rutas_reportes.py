@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 import sqlite3
+from backend.database import obtener_conexion
 
 router = APIRouter()
 
@@ -13,7 +14,7 @@ class ProductoFaltante(BaseModel):
 # --- 1. ALERTAS DEL DASHBOARD (Para ver a la mañana) ---
 @router.get("/alertas")
 def obtener_alertas_dashboard():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
 
@@ -65,7 +66,7 @@ def calcular_ganancia_neta(mes: str = None):
     if not mes:
         mes = datetime.now().strftime("%Y-%m")
 
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
 
     try:
@@ -129,7 +130,7 @@ def calcular_ganancia_neta(mes: str = None):
     
 @router.post("/registrar_faltante")
 def registrar_pedido_no_encontrado(p: ProductoFaltante):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute("INSERT INTO productos_solicitados_faltantes (descripcion_producto, cantidad_pedida, notas) VALUES (?, ?, ?)", 
                    (p.descripcion, p.cantidad, p.notas))
@@ -140,7 +141,7 @@ def registrar_pedido_no_encontrado(p: ProductoFaltante):
 # --- 2. RANKING DE PRODUCTOS (Top Ventas) ---
 @router.get("/ranking_ventas")
 def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -171,7 +172,7 @@ def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
 @router.get("/baja_rotacion")
 def productos_sin_salida():
     # Buscamos productos que tienen stock hace más de 30 días y no se vendieron
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -192,7 +193,7 @@ def productos_sin_salida():
 # --- 4. VENTAS POR MÉTODO DE PAGO (¿Efectivo o Tarjeta?) ---
 @router.get("/ventas_por_pago")
 def ventas_por_metodo():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -214,7 +215,7 @@ class LanzarOferta(BaseModel):
 
 @router.post("/lanzar_oferta")
 def crear_oferta_urgente(oferta: LanzarOferta):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     
     try:

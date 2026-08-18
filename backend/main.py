@@ -23,13 +23,19 @@ from backend.mod_config.rutas_config import router as router_config
 from dotenv import load_dotenv
 load_dotenv()
 
+# 1. Le decimos a Python que averigüe la ruta exacta de la carpeta donde está este main.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 2. Armamos la ruta blindada sumando la carpeta y el archivo .db
+RUTA_DB = os.path.join(BASE_DIR, 'autoservicio_20dejunio.db')
+
 # --- 1. MANTENIMIENTO: AUTO-PARCHES DE BASE DE DATOS ---
 def inicializar_base():
     try:
-        conexion = sqlite3.connect('autoservicio_20dejunio.db')
+        # 3. Nos conectamos usando la ruta dinámica
+        conexion = sqlite3.connect(RUTA_DB)
         conexion.execute("CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre_completo TEXT, rol TEXT, codigo_barras_credencial TEXT, pin_secreto TEXT, estado TEXT DEFAULT 'ACTIVO')")
         
-        # Intentamos agregar columnas nuevas (si ya existen, ignora el error)
         try:
             conexion.execute("ALTER TABLE productos ADD COLUMN unidades_por_bulto INTEGER DEFAULT 1")
         except:
@@ -43,7 +49,7 @@ def inicializar_base():
             
         conexion.commit()
         conexion.close()
-        print("✅ Base de datos verificada y lista.")
+        print(f"✅ Base de datos conectada exitosamente en: {RUTA_DB}")
     except Exception as e:
         print("⚠️ Error en el auto-parche:", e)
 

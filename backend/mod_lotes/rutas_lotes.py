@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone, timedelta
 import sqlite3
 import os
 from fastapi import BackgroundTasks
+from backend.database import obtener_conexion
 
 router = APIRouter()
 
@@ -27,7 +28,7 @@ class BajaManual(BaseModel):
 # --- 1. INGRESAR MERCADERÍA AL DEPÓSITO ---
 @router.post("/ingresar")
 def ingresar_lote(lote: LoteNuevo, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         fecha_hoy = date.today()
@@ -72,7 +73,7 @@ def ingresar_lote(lote: LoteNuevo, background_tasks: BackgroundTasks):
 # --- 2. LISTAR STOCK EN GÓNDOLA ---
 @router.get("/listar_activos")
 def listar_lotes_activos():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row 
     cursor = conexion.cursor()
     cursor.execute('''
@@ -91,7 +92,7 @@ def listar_lotes_activos():
 # --- 3. BAJA MANUAL DE STOCK (Mejorada para reportes) ---
 @router.put("/baja_manual")
 def dar_baja_manual(datos: BajaManual, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # Buscamos de qué producto es este lote para anotarlo bien en el reporte
@@ -150,7 +151,7 @@ class DescuentoStock(BaseModel):
 
 @router.put("/descontar_fifo")
 def descontar_stock_fifo(datos: DescuentoStock):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     
     try:
@@ -206,7 +207,7 @@ def descontar_stock_fifo(datos: DescuentoStock):
     # --- 5. CONSULTAR STOCK TOTAL DE UN PRODUCTO ---
 @router.get("/stock_total/{producto_id}")
 def consultar_stock_total(producto_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     
     # Le pedimos a SQLite que sume todas las cantidades disponibles de los lotes activos de ese producto

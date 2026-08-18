@@ -1,6 +1,6 @@
 import sqlite3
 
-conexion = sqlite3.connect('autoservicio_20dejunio.db')
+conexion = obtener_conexion()
 cursor = conexion.cursor()
 try:
     cursor.execute("ALTER TABLE cola_impresion_etiquetas ADD COLUMN texto_personalizado TEXT DEFAULT ''")

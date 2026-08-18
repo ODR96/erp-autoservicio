@@ -1,7 +1,7 @@
 import sqlite3
 
 try:
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     # Agregamos la columna que me olvidé de crearte al principio del proyecto
     cursor.execute("ALTER TABLE movimientos_stock ADD COLUMN motivo TEXT")

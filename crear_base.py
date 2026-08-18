@@ -12,7 +12,7 @@ pin_encriptado = pwd_context.hash(pin_admin)
 
 print("\nConstruyendo el sistema para 'Autoservicio 20 de Junio'...")
 
-conexion = sqlite3.connect('autoservicio_20dejunio.db')
+conexion = obtener_conexion()
 cursor = conexion.cursor()
 
 # --- MÓDULO 1: PRODUCTOS, STOCK Y CARTELERÍA ---

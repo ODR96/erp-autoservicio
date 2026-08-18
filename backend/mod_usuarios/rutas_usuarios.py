@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks
+from backend.database import obtener_conexion
 
 
 router = APIRouter()
@@ -62,7 +63,7 @@ def crear_token_acceso(data: dict):
 # --- 1. CREAR USUARIO (Con PIN Encriptado) ---
 @router.post("/crear")
 def crear_usuario(u: UsuarioNuevo, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # Encriptamos la contraseña antes de tocar la base de datos
@@ -107,7 +108,7 @@ def iniciar_sesion(credenciales: LoginRequest):
     print(f"🔍 [LOGIN] Intento de acceso - Usuario: {credenciales.codigo_credencial}")
     
     # 1. Conexión directa a tu motor de base de datos en Contabo
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -158,7 +159,7 @@ class AutorizacionRequest(BaseModel):
 
 @router.post("/autorizar")
 def autorizar_accion(req: AutorizacionRequest):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -192,7 +193,7 @@ def verificar_permiso(token: str, roles_permitidos: List[str]):
     # --- 4. LISTAR EMPLEADOS (Para el panel de Admin) ---
 @router.get("/listar")
 def listar_usuarios():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -218,7 +219,7 @@ def listar_usuarios():
     # --- 5. ACTUALIZAR EMPLEADO ---
 @router.put("/actualizar/{usuario_id}")
 def actualizar_usuario(usuario_id: int, u: UsuarioActualizar, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         if u.pin_secreto != "":
@@ -253,7 +254,7 @@ def actualizar_usuario(usuario_id: int, u: UsuarioActualizar, background_tasks: 
 # --- 6. DAR DE BAJA (Despedir / Bloquear) ---
 @router.delete("/baja/{usuario_id}")
 def dar_de_baja_usuario(usuario_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # No lo borramos de la base (para no romper el historial de ventas), solo lo inactivamos
@@ -277,7 +278,7 @@ def dar_de_baja_usuario(usuario_id: int):
     
 @router.put("/alta/{usuario_id}")
 def reactivar_usuario(usuario_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute("UPDATE usuarios SET estado = 'ACTIVO' WHERE id = ?", (usuario_id,))
     conexion.commit()

@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import sqlite3
 from fastapi import BackgroundTasks
 import requests
+from backend.database import obtener_conexion
 
 
 router = APIRouter()
@@ -53,7 +54,7 @@ class CierreCaja(BaseModel):
 # --- 2. ABRIR EL TURNO ---
 @router.post("/abrir")
 def abrir_turno(apertura: AperturaCaja):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     
     try:
@@ -95,7 +96,7 @@ def abrir_turno(apertura: AperturaCaja):
 # --- 3. REGISTRAR MOVIMIENTOS (INGRESO/RETIRO) ---
 @router.post("/movimiento")
 def registrar_movimiento(mov: MovimientoCaja):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     
     try:
@@ -133,7 +134,7 @@ def registrar_movimiento(mov: MovimientoCaja):
 # --- 4. CIERRE Z (Arqueo Final Blindado, Corregido y con Sincronización) ---
 @router.put("/cerrar")
 def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -220,7 +221,7 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
 # --- 5. INFORME X (Datos Reales al Momento) ---
 @router.get("/informe_x/{turno_id}")
 def sacar_informe_x(turno_id: int):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
@@ -277,7 +278,7 @@ def sacar_informe_x(turno_id: int):
 # --- 6. MONITOR EN VIVO (Para el panel de Admin) ---
 @router.get("/monitor_vivo")
 def monitor_cajas_vivo():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -336,7 +337,7 @@ def monitor_cajas_vivo():
     # --- 8. VERIFICAR ESTADO DE CAJA (Para que el POS tenga memoria) ---
 @router.get("/estado")
 def estado_caja(caja_id: int = 1):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
@@ -382,7 +383,7 @@ class CobroPedido(BaseModel):
 # --- RUTA OFICIAL: CONECTAR COBRO CON LOGÍSTICA ---
 @router.post("/cobrar_pedido")
 def cobrar_pedido_mayorista(cobro: CobroPedido):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     

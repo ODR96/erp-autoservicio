@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from datetime import datetime
 import sqlite3
+from backend.database import obtener_conexion
 
 router = APIRouter()
 
@@ -18,7 +19,7 @@ class NuevoGasto(BaseModel):
 # --- 2. CATEGORÍAS DE GASTOS ---
 @router.post("/categorias")
 def crear_categoria(cat: NuevaCategoria):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute("INSERT INTO categorias_gasto (nombre) VALUES (?)", (cat.nombre,))
@@ -41,7 +42,7 @@ def crear_categoria(cat: NuevaCategoria):
 
 @router.get("/categorias")
 def listar_categorias():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     cursor.execute("SELECT * FROM categorias_gasto ORDER BY nombre ASC")
@@ -52,7 +53,7 @@ def listar_categorias():
 # --- 3. REGISTRAR EL GASTO ---
 @router.post("/registrar")
 def registrar_gasto_operativo(gasto: NuevoGasto):
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -97,7 +98,7 @@ def registrar_gasto_operativo(gasto: NuevoGasto):
 # --- 4. RESUMEN DEL MES (Para el Dashboard) ---
 @router.get("/resumen_mensual")
 def resumen_gastos_del_mes():
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     

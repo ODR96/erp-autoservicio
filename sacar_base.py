@@ -2,7 +2,7 @@ import sqlite3
 
 def extraer_esquema():
     # Conectamos a tu base de datos real
-    conexion = sqlite3.connect('autoservicio_20dejunio.db')
+    conexion = obtener_conexion()
     cursor = conexion.cursor()
     
     # Le pedimos a SQLite que nos dé el código de creación de TODAS las tablas
