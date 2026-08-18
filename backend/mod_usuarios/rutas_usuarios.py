@@ -105,7 +105,7 @@ def verificar_pin(pin_plano, pin_hasheado):
 
 @router.post("/login")
 @limiter.limit("5/minute")
-def iniciar_sesion(credenciales: LoginRequest):
+def iniciar_sesion(request: Request, credenciales: LoginRequest):
     print(f"🔍 [LOGIN] Intento de acceso - Usuario: {credenciales.codigo_credencial}")
     
     # 1. Conexión directa a tu motor de base de datos en Contabo
