@@ -6,6 +6,9 @@ import subprocess
 from contextlib import asynccontextmanager
 import os
 import sqlite3
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # Importamos todos tus módulos
 from backend.mod_productos.rutas_productos import router as router_productos
@@ -60,6 +63,11 @@ async def lifespan(app: FastAPI):
 
 # --- 2. CREAMOS LA APP ---
 app = FastAPI(title="ERP Autoservicio 20 de Junio", lifespan=lifespan)
+
+# Creamos el limitador que identifica a los usuarios por su dirección IP
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # --- 3. CONFIGURACIONES DE CARPETAS Y PERMISOS ---
 os.makedirs("static", exist_ok=True)

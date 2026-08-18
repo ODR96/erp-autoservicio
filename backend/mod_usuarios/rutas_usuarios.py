@@ -3,28 +3,28 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List
 import sqlite3
-from passlib.context import CryptContext
 from jose import jwt, JWTError
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks
 from backend.database import obtener_conexion
+import bcrypt
+from fastapi import Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 
 router = APIRouter()
 
 load_dotenv()
 
-
-
 # --- CONFIGURACIÓN DE SEGURIDAD BANCARIA ---
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY") 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 840 # 14 horas de vigencia del token
-
-# Configuramos el motor de encriptación
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class UsuarioNuevo(BaseModel):
     nombre_completo: str
@@ -49,13 +49,15 @@ class LoginRequest(BaseModel):
 #     except ValueError:
 #         # 2. Si falla porque el texto no está encriptado (cargado a mano en BD), lo compara directo
 #         return pin_plano == str(pin_hasheado)
-
 def obtener_hash_pin(pin):
-    return pwd_context.hash(pin)
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(str(pin).encode('utf-8'), salt)
+    return hashed.decode('utf-8')
 
 def crear_token_acceso(data: dict):
     a_codificar = data.copy()
-    expira = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # Usamos la zona horaria UTC explícita para evitar bugs de servidor
+    expira = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     a_codificar.update({"exp": expira})
     token_jwt = jwt.encode(a_codificar, SECRET_KEY, algorithm=ALGORITHM)
     return token_jwt
@@ -94,16 +96,15 @@ def crear_usuario(u: UsuarioNuevo, background_tasks: BackgroundTasks):
 
 def verificar_pin(pin_plano, pin_hasheado):
     try:
-        # Forzamos a que sean textos por si Supabase los guardó como números
-        if pwd_context.verify(str(pin_plano), str(pin_hasheado)):
-            return True
+        # Única validación aceptada: Comparación criptográfica estricta
+        return bcrypt.checkpw(str(pin_plano).encode('utf-8'), str(pin_hasheado).encode('utf-8'))
     except Exception as e:
-        print(f"⚠️ Aviso al verificar hash: {e}")
-        
-    # Si falla el motor, lo comparamos como texto plano asegurando el formato
-    return str(pin_plano).strip() == str(pin_hasheado).strip()
+        # Si el hash está mal formado o hay un error, se rechaza silenciosamente
+        print(f"⚠️ Error criptográfico al verificar PIN: {e}")
+        return False
 
 @router.post("/login")
+@limiter.limit("5/minute")
 def iniciar_sesion(credenciales: LoginRequest):
     print(f"🔍 [LOGIN] Intento de acceso - Usuario: {credenciales.codigo_credencial}")
     
