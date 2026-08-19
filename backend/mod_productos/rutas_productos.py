@@ -1,11 +1,12 @@
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 import sqlite3
 from datetime import datetime, timezone, timedelta, date
 import os
 from fastapi import BackgroundTasks
 from backend.database import obtener_conexion
+from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 router = APIRouter()
 
@@ -53,7 +54,7 @@ class CategoriaPOS(BaseModel):
     icono: str = "bi-box"
     color_fondo: str = "#ffffff"
 
-@router.post("/crear")
+@router.post("/crear", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -109,7 +110,7 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
 
 # --- 2. LEER / CATÁLOGO COMPLETO (R) ---
 # --- 2. LEER / CATÁLOGO COMPLETO (R) ---
-@router.get("/listar")
+@router.get("/listar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, alerta_vencimiento: bool = False):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row 
@@ -173,7 +174,7 @@ def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, aler
     return {"productos": productos}
 
 # --- 3. ACTUALIZAR PRODUCTO CORREGIDO ---
-@router.put("/actualizar/{producto_id}")
+@router.put("/actualizar/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -228,7 +229,7 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
             return {"error": mensaje_error}
     
 # --- 7. VER UN SOLO PRODUCTO (Con Aspirador Automático de Lotes) ---
-@router.get("/ver/{producto_id}")
+@router.get("/ver/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def ver_producto_por_id(producto_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -325,7 +326,7 @@ def ver_producto_por_id(producto_id: int):
             return {"error": mensaje_error}
 
 # --- 4. BORRAR (D - Borrado Lógico) ---
-@router.delete("/eliminar/{producto_id}")
+@router.delete("/eliminar/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def desactivar_producto(producto_id: int, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -349,7 +350,7 @@ def desactivar_producto(producto_id: int, background_tasks: BackgroundTasks):
             # 2. Si es un error de negocio tuyo, lo mostramos normal
             return {"error": mensaje_error}
     
-@router.put("/restaurar/{producto_id}")
+@router.put("/restaurar/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def restaurar_producto(producto_id: int, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -374,7 +375,7 @@ def restaurar_producto(producto_id: int, background_tasks: BackgroundTasks):
             return {"error": mensaje_error}
     
 # --- 6. BUSCADOR AVANZADO (Inteligente, Sin Zombies y CON PROMOS) ---
-@router.get("/buscar")
+@router.get("/buscar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def buscar_producto(q: Optional[str] = None, termino: Optional[str] = None, query: Optional[str] = None):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -437,7 +438,7 @@ def buscar_producto(q: Optional[str] = None, termino: Optional[str] = None, quer
         conexion.close()
 
 # --- BUSCADOR EXACTO PARA LA PISTOLA (CON PROMOS Y STOCK) ---
-@router.get("/codigo/{codigo_barras}")
+@router.get("/codigo/{codigo_barras}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def obtener_por_codigo(codigo_barras: str):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -475,7 +476,7 @@ class ActualizacionMasiva(BaseModel):
     excluir_ids: list[int] = [] # <-- LA LISTA NEGRA
 
 # --- RUTINA DE AUMENTO MASIVO ---
-@router.put("/actualizacion_masiva")
+@router.put("/actualizacion_masiva", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def actualizar_precios_masivamente(datos: ActualizacionMasiva, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -544,7 +545,7 @@ class PromocionNueva(BaseModel):
     cantidad_minima: float
     precio_oferta_unitario: float
 
-@router.post("/promocion")
+@router.post("/promocion", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def crear_promocion(promo: PromocionNueva):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -576,7 +577,7 @@ class CategoriaNueva(BaseModel):
 
 # --- RUTAS DE CATEGORÍAS (RUBROS) ---
 # --- RUTAS DE CATEGORÍAS (RUBROS) ---
-@router.get("/categorias")
+@router.get("/categorias", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_categorias_activas():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -600,8 +601,8 @@ def listar_categorias_activas():
                 
             # 2. Si es un error de negocio tuyo, lo mostramos normal
             return {"error": mensaje_error}
-
-@router.post("/categorias/crear")
+        
+@router.post("/categorias/crear", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def crear_categoria(cat: CategoriaNueva, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -627,7 +628,7 @@ def crear_categoria(cat: CategoriaNueva, background_tasks: BackgroundTasks):
             # 2. Si es un error de negocio tuyo, lo mostramos normal
             return {"error": mensaje_error}
 
-@router.delete("/categorias/eliminar/{cat_id}")
+@router.delete("/categorias/eliminar/{cat_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def eliminar_categoria(cat_id: int):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -660,7 +661,7 @@ class EtiquetaNueva(BaseModel):
     plantilla: str = "Clasica"      # <-- NUEVO
     color_tema: str = "#1a365d"
 
-@router.post("/etiquetas/encolar")
+@router.post("/etiquetas/encolar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def encolar_etiqueta(datos: EtiquetaNueva):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -672,7 +673,7 @@ def encolar_etiqueta(datos: EtiquetaNueva):
     conexion.close()
     return {"mensaje": "Etiqueta encolada con diseño guardado"}
 
-@router.get("/etiquetas/listar")
+@router.get("/etiquetas/listar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def listar_cola_impresion():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -689,7 +690,7 @@ def listar_cola_impresion():
     conexion.close()
     return {"cola": [dict(c) for c in cola]}
 
-@router.delete("/etiquetas/vaciar")
+@router.delete("/etiquetas/vaciar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def vaciar_cola():
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -699,7 +700,7 @@ def vaciar_cola():
     return {"mensaje": "Cola vaciada"}
 
 # <-- NUEVO: RUTA PARA BORRAR UNA SOLA ETIQUETA DE LA BASE DE DATOS -->
-@router.delete("/etiquetas/eliminar/{cola_id}")
+@router.delete("/etiquetas/eliminar/{cola_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def eliminar_etiqueta_individual(cola_id: int):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -709,7 +710,7 @@ def eliminar_etiqueta_individual(cola_id: int):
     return {"mensaje": "Etiqueta eliminada"}
     
 # --- GENERADOR DE CÓDIGO INTERNO AUTOMÁTICO ---
-@router.get("/generar_codigo_interno")
+@router.get("/generar_codigo_interno", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def generar_codigo_interno():
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -738,7 +739,7 @@ def generar_codigo_interno():
             return {"error": mensaje_error}
     
 # --- 7. GESTIÓN DE CATEGORÍAS RÁPIDAS DEL POS ---
-@router.get("/categorias_pos")
+@router.get("/categorias_pos", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_categorias_pos():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -762,7 +763,7 @@ def listar_categorias_pos():
             # 2. Si es un error de negocio tuyo, lo mostramos normal
             return {"error": mensaje_error}
 
-@router.put("/categorias_pos/{cat_id}")
+@router.put("/categorias_pos/{cat_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def editar_categoria_pos(cat_id: int, cat: CategoriaPOS, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -790,7 +791,7 @@ def editar_categoria_pos(cat_id: int, cat: CategoriaPOS, background_tasks: Backg
             return {"error": mensaje_error}
     
 # --- 9. LISTAR COMBOS (Para la Pestaña Híbrida) ---
-@router.get("/listar_combos")
+@router.get("/listar_combos", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_combos_armados():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -832,7 +833,7 @@ def listar_combos_armados():
     
 # --- GESTIÓN DIRECTA DE LOTES (CORRECCIÓN DE ERRORES) ---
 # Acordate de sumarle "background_tasks: BackgroundTasks" arriba
-@router.put("/lotes/actualizar/{lote_id}")
+@router.put("/lotes/actualizar/{lote_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def actualizar_lote_individual(lote_id: int, datos: dict, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -862,7 +863,7 @@ def actualizar_lote_individual(lote_id: int, datos: dict, background_tasks: Back
             # 2. Si es un error de negocio tuyo, lo mostramos normal
             return {"error": mensaje_error}
 
-@router.delete("/lotes/eliminar/{lote_id}")
+@router.delete("/lotes/eliminar/{lote_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def eliminar_lote_fisico(lote_id: int):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -886,7 +887,7 @@ def eliminar_lote_fisico(lote_id: int):
         # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
     
-@router.get("/movimientos/{producto_id}")
+@router.get("/movimientos/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def obtener_historial_producto(producto_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row

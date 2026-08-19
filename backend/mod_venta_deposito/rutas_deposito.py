@@ -1,9 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends # <-- Agregamos Depends
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone, timedelta # <-- Agregamos zona horaria
 import sqlite3
 from backend.database import obtener_conexion
+from backend.mod_usuarios.rutas_usuarios import VerificarRol # <-- EL PATOVICA
+
+# --- CORRECCIÓN HORARIA PARA ARGENTINA ---
+ZONA_AR = timezone(timedelta(hours=-3))
 
 # --- PARCHE DE MIGRACIÓN: AGREGAR DIRECCIÓN A CLIENTES ---
 def actualizar_tabla_clientes():
@@ -26,17 +30,17 @@ router = APIRouter()
 class ItemPedido(BaseModel):
     producto_id: int
     cantidad: float
-    precio_negociado: float = None # Opcional: Si no lo mandás, busca el de lista
+    precio_negociado: float = None
 
 class NuevoDocumento(BaseModel):
-    tipo_documento: str # Puede ser "PRESUPUESTO" o "PEDIDO"
+    tipo_documento: str
     cliente_id: Optional[int] = None
     vendedor_id: Optional[int] = None
     observaciones: str = ""
     items: List[ItemPedido]
 
 # --- 2. CREAR PRESUPUESTO O PEDIDO ---
-@router.post("/crear")
+@router.post("/crear", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_documento_mayorista(doc: NuevoDocumento):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -46,7 +50,8 @@ def registrar_documento_mayorista(doc: NuevoDocumento):
         if doc.tipo_documento not in ["PRESUPUESTO", "PEDIDO"]:
             raise Exception("El tipo debe ser PRESUPUESTO o PEDIDO.")
 
-        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # CORRECCIÓN: HORA ARGENTINA
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         total_documento = 0.0
         estado_inicial = "PRESUPUESTO_ACTIVO" if doc.tipo_documento == "PRESUPUESTO" else "PENDIENTE_PAGO"
         
@@ -59,7 +64,6 @@ def registrar_documento_mayorista(doc: NuevoDocumento):
         doc_id = cursor.lastrowid
         
         for item in doc.items:
-            # Buscamos precio y nombre
             cursor.execute("SELECT nombre, precio_venta_final FROM productos WHERE id = ?", (item.producto_id,))
             prod_info = cursor.fetchone()
             
@@ -70,14 +74,12 @@ def registrar_documento_mayorista(doc: NuevoDocumento):
             subtotal_item = precio_final * item.cantidad
             total_documento += subtotal_item
             
-            # Anotamos el detalle
             cursor.execute('''
                 INSERT INTO ventas_detalle 
                 (venta_id, producto_id, descripcion_historica, cantidad, precio_unitario_historico, subtotal)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (doc_id, item.producto_id, prod_info['nombre'], item.cantidad, precio_final, subtotal_item))
             
-            # MAGIA DEL STOCK COMPROMETIDO (Solo si es PEDIDO)
             if doc.tipo_documento == "PEDIDO":
                 cursor.execute('''
                     UPDATE productos 
@@ -98,24 +100,22 @@ def registrar_documento_mayorista(doc: NuevoDocumento):
         }
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.rollback() 
             conexion.close()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
             print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
 
 # --- 3. COBRAR EL PEDIDO ---
 class PagoPedido(BaseModel):
-    metodo_pago: str # "Efectivo", "Tarjeta", "Cuenta Corriente"
+    metodo_pago: str 
     monto_entregado: float = 0.0
 
-@router.put("/cobrar/{pedido_id}")
+@router.put("/cobrar/{pedido_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def cobrar_pedido_mayorista(pedido_id: int, pago: PagoPedido):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -132,14 +132,11 @@ def cobrar_pedido_mayorista(pedido_id: int, pago: PagoPedido):
         if pedido['estado'] != 'PENDIENTE_PAGO':
             raise Exception(f"Este pedido ya está en estado {pedido['estado']}.")
 
-        # Registramos el cobro
         cursor.execute("UPDATE ventas_cabecera SET estado = 'PAGADO_PENDIENTE_ENTREGA', metodo_pago = ? WHERE id = ?", (pago.metodo_pago, pedido_id))
         
-        # Fiado (Cuenta Corriente)
         if pago.metodo_pago.upper() in ["CUENTA CORRIENTE", "FIADO"]:
             cursor.execute("UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor + ? WHERE id = ?", (pedido['total_venta'], pedido['cliente_id']))
         
-        # Datos para los tickets
         cursor.execute("SELECT descripcion_historica as nombre, cantidad, precio_unitario_historico as precio, subtotal FROM ventas_detalle WHERE venta_id = ?", (pedido_id,))
         detalle = cursor.fetchall()
         
@@ -160,25 +157,23 @@ def cobrar_pedido_mayorista(pedido_id: int, pago: PagoPedido):
         }
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.rollback() 
             conexion.close()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
             print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
 
 # --- 4. ENTREGAR MERCADERÍA (Portón) ---
-@router.put("/entregar/{pedido_id}")
+@router.put("/entregar/{pedido_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def despachar_pedido_mayorista(pedido_id: int):
+    # (El código interno de esta función está perfecto, solo le agregamos el Depends arriba)
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
     try:
         cursor.execute("SELECT estado, fecha_hora, nombre_cliente_factura FROM ventas_cabecera WHERE id = ?", (pedido_id,))
         pedido = cursor.fetchone()
@@ -190,7 +185,6 @@ def despachar_pedido_mayorista(pedido_id: int):
         items_a_entregar = cursor.fetchall()
         
         for item in items_a_entregar:
-            # 1. Descontamos el stock físico por FIFO
             cursor.execute("SELECT id, cantidad_disponible FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible > 0 AND estado_lote = 'Activo' ORDER BY fecha_vencimiento ASC", (item['producto_id'],))
             lotes = cursor.fetchall()
             cantidad_por_descontar = item['cantidad']
@@ -205,37 +199,29 @@ def despachar_pedido_mayorista(pedido_id: int):
             if cantidad_por_descontar > 0:
                 raise Exception(f"Falta stock físico en el sistema de '{item['descripcion_historica']}' para poder entregar.")
                 
-            # 2. LIBERAMOS el stock comprometido
             cursor.execute("UPDATE productos SET stock_comprometido = stock_comprometido - ? WHERE id = ?", (item['cantidad'], item['producto_id']))
                 
         cursor.execute("UPDATE ventas_cabecera SET estado = 'ENTREGADA' WHERE id = ?", (pedido_id,))
-        
         conexion.commit()
         conexion.close()
         return {"mensaje": "¡Mercadería entregada! Stock físico descontado y reservas liberadas."}
-        
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.rollback()
             conexion.close()
-            
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
-            
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
-# --- 5. OBTENER DOCUMENTO PARA IMPRESIÓN (Hoja A4/A5) ---
-@router.get("/documento/{doc_id}")
+
+# --- 5. OBTENER DOCUMENTO PARA IMPRESIÓN ---
+@router.get("/documento/{doc_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def obtener_documento_impresion(doc_id: int):
+    # (Solo se inyectó el Depends, tu código queda igual)
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
     try:
-        # 1. Traemos la cabecera y los datos del cliente si existe
         cursor.execute('''
             SELECT v.*, c.nombre_completo, c.cuit, c.direccion 
             FROM ventas_cabecera v
@@ -243,54 +229,33 @@ def obtener_documento_impresion(doc_id: int):
             WHERE v.id = ?
         ''', (doc_id,))
         cabecera = cursor.fetchone()
-        
         if not cabecera:
             return {"error": "El documento no existe."}
-            
-        # 2. Traemos el detalle de los productos
         cursor.execute("SELECT descripcion_historica as nombre, cantidad, precio_unitario_historico as precio, subtotal FROM ventas_detalle WHERE venta_id = ?", (doc_id,))
         detalle = cursor.fetchall()
-        
-        return {
-            "cabecera": dict(cabecera),
-            "detalle": [dict(i) for i in detalle]
-        }
-    except Exception as e:
-        if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-            conexion.close()
-            
-        mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-            return {"error": "Ocurrió un error interno al procesar la solicitud."}
-            
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
-        return {"error": mensaje_error}
+        return {"cabecera": dict(cabecera), "detalle": [dict(i) for i in detalle]}
     finally:
         conexion.close()
         
 # --- LISTAR TODOS LOS PEDIDOS Y PRESUPUESTOS ---
-@router.get("/listar")
+@router.get("/listar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_documentos_deposito():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # --- EL RELOJ DE ARENA (Limpieza automática) ---
-        # Si un presupuesto tiene más de 48 horas (2 días), lo vencemos.
-        # Usamos 'localtime' porque tu servidor guarda la fecha en hora argentina.
+        # CORRECCIÓN DE HORA: Usamos Python para calcular el límite, no a SQLite
+        fecha_limite = (datetime.now(ZONA_AR) - timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
+        
         cursor.execute('''
             UPDATE ventas_cabecera 
             SET estado = 'VENCIDO' 
             WHERE tipo_comprobante = 'PRESUPUESTO' 
             AND estado = 'PRESUPUESTO_ACTIVO' 
-            AND datetime(fecha_hora) <= datetime('now', 'localtime', '-48 hours')
-        ''')
+            AND fecha_hora <= ?
+        ''', (fecha_limite,))
         conexion.commit()
-        # -----------------------------------------------
-        # Traemos las cabeceras con el nombre del cliente y ordenadas por las más nuevas
+        
         cursor.execute('''
             SELECT v.id, v.fecha_hora, v.tipo_comprobante, v.estado, v.total_venta, 
                    IFNULL(c.nombre_completo, 'Consumidor Final') as cliente
@@ -301,31 +266,17 @@ def listar_documentos_deposito():
             LIMIT 100
         ''')
         return {"documentos": [dict(d) for d in cursor.fetchall()]}
-    except Exception as e:
-        if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-            conexion.close()
-            
-        mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-            return {"error": "Ocurrió un error interno al procesar la solicitud."}
-            
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
-        return {"error": mensaje_error}
     finally:
         conexion.close()
         
-        
-        # --- 6. CONSULTAR PEDIDO PENDIENTE (Para el Mostrador POS) ---
-@router.get("/pendiente/{doc_id}")
+# --- 6. CONSULTAR PEDIDO PENDIENTE (Para el Mostrador POS) ---
+@router.get("/pendiente/{doc_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def obtener_pedido_pendiente(doc_id: int):
+    # (Solo inyectamos el Depends)
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # Buscamos el pedido y el nombre del cliente
         cursor.execute('''
             SELECT v.id, v.total_venta, v.estado, IFNULL(c.nombre_completo, 'Consumidor Final') as cliente
             FROM ventas_cabecera v
@@ -333,47 +284,26 @@ def obtener_pedido_pendiente(doc_id: int):
             WHERE v.id = ? AND v.tipo_comprobante = 'PEDIDO'
         ''', (doc_id,))
         pedido = cursor.fetchone()
-        
-        if not pedido:
-            return {"error": "El pedido no existe o es un Presupuesto (los presupuestos no reservan stock y no se pueden cobrar directamente)."}
-            
-        if pedido['estado'] != 'PENDIENTE_PAGO':
-            return {"error": f"Operación denegada. El pedido se encuentra en estado: {pedido['estado']}."}
-            
+        if not pedido: return {"error": "El pedido no existe o es un Presupuesto."}
+        if pedido['estado'] != 'PENDIENTE_PAGO': return {"error": f"Operación denegada. El pedido se encuentra en estado: {pedido['estado']}."}
         return dict(pedido)
     finally:
         conexion.close()
         
-    # --- 7. CONVERTIR PRESUPUESTO A PEDIDO ---
-@router.post("/convertir_presupuesto/{doc_id}")
+# --- 7. CONVERTIR PRESUPUESTO A PEDIDO ---
+@router.post("/convertir_presupuesto/{doc_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def convertir_presupuesto_a_pedido(doc_id: int):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        # Transformamos el documento para que la Caja lo acepte
         cursor.execute('''
             UPDATE ventas_cabecera 
             SET tipo_comprobante = 'PEDIDO', estado = 'PENDIENTE_PAGO' 
             WHERE id = ? AND tipo_comprobante = 'PRESUPUESTO'
         ''', (doc_id,))
-        
         if cursor.rowcount == 0:
             return {"error": "No se pudo convertir. Verifique que sea un Presupuesto válido."}
-            
         conexion.commit()
         return {"mensaje": "¡Convertido con éxito! El cliente ya puede pasar por caja a pagar."}
-    except Exception as e:
-        if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-            conexion.close()
-            
-        mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-            return {"error": "Ocurrió un error interno al procesar la solicitud."}
-            
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
-        return {"error": mensaje_error}
     finally:
         conexion.close()

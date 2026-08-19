@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta
 import sqlite3
 from backend.database import obtener_conexion
+from fastapi import Depends
+from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 router = APIRouter()
 
@@ -19,22 +21,26 @@ def obtener_alertas_dashboard():
     cursor = conexion.cursor()
 
     try:
-        # A. Stock Crítico: Busca qué productos están por debajo de tu límite de alerta
+# A. Stock Crítico: Excluye los combos para evitar falsos positivos
         cursor.execute('''
             SELECT p.nombre, p.stock_minimo_alerta, 
                    IFNULL((SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo'), 0) as stock_actual
             FROM productos p
-            WHERE stock_actual <= p.stock_minimo_alerta AND p.activo = 1
+            WHERE stock_actual <= p.stock_minimo_alerta 
+            AND p.activo = 1
+            AND p.id NOT IN (SELECT producto_padre_id FROM productos_combos)
         ''')
         alertas_stock = [dict(row) for row in cursor.fetchall()]
 
-        # B. Vencimientos Próximos: Busca qué mercadería vence en los próximos 30 días
+        # B. Vencimientos Próximos: Usa tu columna real 'dias_alerta_vencimiento' y excluye combos
         cursor.execute('''
             SELECT p.nombre, l.numero_lote_proveedor, l.fecha_vencimiento, l.cantidad_disponible 
             FROM lotes_stock l
             JOIN productos p ON l.producto_id = p.id
-            WHERE l.cantidad_disponible > 0 AND l.estado_lote = 'Activo' 
-            AND l.fecha_vencimiento <= date('now', '+30 days')
+            WHERE l.cantidad_disponible > 0 
+            AND l.estado_lote = 'Activo' 
+            AND l.fecha_vencimiento <= date('now', '+' || IFNULL(p.dias_alerta_vencimiento, 30) || ' days')
+            AND p.id NOT IN (SELECT producto_padre_id FROM productos_combos)
             ORDER BY l.fecha_vencimiento ASC
         ''')
         alertas_vencimiento = [dict(row) for row in cursor.fetchall()]
@@ -60,7 +66,7 @@ def obtener_alertas_dashboard():
 
 
 # --- 2. LA VERDAD DE LA MILANESA: GANANCIA NETA REAL ---
-@router.get("/ganancia_neta")
+@router.get("/ganancia_neta", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def calcular_ganancia_neta(mes: str = None):
     # Si no le mandamos mes, analiza el mes actual en curso
     if not mes:
@@ -171,19 +177,22 @@ def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
 # --- 3. BAJA ROTACIÓN (Los "Clavos" que no se mueven) ---
 @router.get("/baja_rotacion")
 def productos_sin_salida():
-    # Buscamos productos que tienen stock hace más de 30 días y no se vendieron
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
+    # Buscamos productos que TIENEN stock, pero NO figuran en ventas en los últimos 30 días
     query = '''
-        SELECT p.nombre, SUM(l.cantidad_disponible) as stock_estancado
+        SELECT p.nombre, 
+               (SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo') as stock_estancado
         FROM productos p
-        JOIN lotes_stock l ON p.id = l.producto_id
-        LEFT JOIN ventas_detalle vd ON p.id = vd.producto_id
-        WHERE l.cantidad_disponible > 0 
-        AND vd.id IS NULL -- Nunca se vendieron (o no en el periodo registrado)
-        GROUP BY p.id
+        WHERE stock_estancado > 0
+        AND p.id NOT IN (
+            SELECT vd.producto_id
+            FROM ventas_detalle vd
+            JOIN ventas_cabecera vc ON vd.venta_id = vc.id
+            WHERE date(vc.fecha_hora) >= date('now', '-30 days')
+        )
     '''
     cursor.execute(query)
     estancados = cursor.fetchall()

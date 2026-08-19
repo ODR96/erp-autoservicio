@@ -1,3 +1,44 @@
+// --- EL INTERCEPTOR DE SEGURIDAD ---
+async function fetchSeguro(url, opciones = {}) {
+    // 1. Buscamos la credencial en la mochila
+    const tokenGuardado = localStorage.getItem('token_pos'); 
+
+    // 2. Preparamos los encabezados combinando los que ya existan con el Token
+    const headers = {
+        'Content-Type': 'application/json',
+        ...(opciones.headers || {}) 
+    };
+
+    if (tokenGuardado) {
+        headers['Authorization'] = `Bearer ${tokenGuardado}`;
+    }
+
+    const configuracionFinal = {
+        ...opciones,
+        headers
+    };
+
+    // 3. Ejecutamos el llamado real
+    const respuesta = await fetch(url, configuracionFinal);
+
+    // 4. EL BLINDAJE GLOBAL: Si Python nos tira un 401 (Token vencido, falso o hackeado)
+    if (respuesta.status === 401) {
+        Swal.fire({
+            title: 'Sesión Expirada',
+            text: 'Por seguridad, tu sesión ha caducado o no tenés permiso.',
+            icon: 'warning',
+            allowOutsideClick: false,
+            confirmButtonText: 'Ir al login'
+        }).then(() => {
+            localStorage.clear();
+            window.location.href = 'index.html'; // Pateamos al usuario a la calle
+        });
+        throw new Error("Acceso denegado (401)");
+    }
+
+    return respuesta;
+}
+
 let clientesGlobales = [];
 let clienteSeleccionadoId = null;
 let clienteEditandoId = null;

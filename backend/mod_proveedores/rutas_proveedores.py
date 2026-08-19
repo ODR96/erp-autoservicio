@@ -1,13 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends # <-- Agregamos Depends
 from pydantic import BaseModel
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta # <-- Agregamos ZONA_AR
 import sqlite3
 import os
-from fastapi import BackgroundTasks
 from backend.database import obtener_conexion
+from backend.mod_usuarios.rutas_usuarios import VerificarRol # <-- EL PATOVICA
 
 router = APIRouter()
+ZONA_AR = timezone(timedelta(hours=-3)) # <-- LA HORA ARGENTINA
 
 class NuevoProveedor(BaseModel):
     nombre_comercial: str
@@ -38,8 +39,8 @@ class PagoProveedor(BaseModel):
     observaciones: str = ""
 
 # --- 1. GESTIÓN DE PROVEEDORES (ABM COMPLETO) ---
-@router.post("/alta")
-def registrar_proveedor(prov: NuevoProveedor, background_tasks: BackgroundTasks):
+@router.post("/alta", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def registrar_proveedor(prov: NuevoProveedor):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
@@ -66,7 +67,7 @@ def registrar_proveedor(prov: NuevoProveedor, background_tasks: BackgroundTasks)
     finally:
         conexion.close()
 
-@router.get("/listado")
+@router.get("/listado", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_proveedores(solo_activos: bool = False):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -86,8 +87,8 @@ def listar_proveedores(solo_activos: bool = False):
     conexion.close()
     return res
 
-@router.put("/actualizar/{prov_id}")
-def actualizar_proveedor(prov_id: int, prov: NuevoProveedor, background_tasks: BackgroundTasks):
+@router.put("/actualizar/{prov_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def actualizar_proveedor(prov_id: int, prov: NuevoProveedor): # <-- Borramos background_tasks
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
@@ -113,7 +114,7 @@ def actualizar_proveedor(prov_id: int, prov: NuevoProveedor, background_tasks: B
     finally:
         conexion.close()
 
-@router.delete("/baja/{prov_id}")
+@router.delete("/baja/{prov_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def baja_proveedor(prov_id: int):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -122,7 +123,7 @@ def baja_proveedor(prov_id: int):
     conexion.close()
     return {"mensaje": "Proveedor desactivado"}
 
-@router.put("/reactivar/{prov_id}")
+@router.put("/reactivar/{prov_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def reactivar_proveedor(prov_id: int):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -134,12 +135,12 @@ def reactivar_proveedor(prov_id: int):
 # --- EL CORAZÓN DE LOS PAGOS (PARCHE AQUÍ) ---
 # --- REGISTRAR PAGO Y DESCONTAR DEUDA ---
 # --- REGISTRAR PAGO Y DESCONTAR DEUDA ---
-@router.post("/pagar")
+@router.post("/pagar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def registrar_pago_proveedor(pago: PagoProveedor):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        # 0. Creamos la tabla de pagos si por alguna razón no se creó al inicio
+        # 0. Creamos la tabla si no existe
         cursor.execute('''CREATE TABLE IF NOT EXISTS pagos_proveedores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             proveedor_id INTEGER,
@@ -149,11 +150,14 @@ def registrar_pago_proveedor(pago: PagoProveedor):
             observaciones TEXT
         )''')
 
-        # 1. Registramos el pago en el historial (Columna correcta: monto_total_pagado)
+        # --- CORRECCIÓN: HORA ARGENTINA ---
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+
+        # 1. Registramos el pago
         cursor.execute('''
             INSERT INTO pagos_proveedores (proveedor_id, fecha_pago, monto_total_pagado, metodo_pago, observaciones)
-            VALUES (?, datetime('now', 'localtime'), ?, ?, ?)
-        ''', (pago.proveedor_id, pago.monto_pagado, pago.metodo_pago, pago.observaciones))
+            VALUES (?, ?, ?, ?, ?)
+        ''', (pago.proveedor_id, fecha_actual, pago.monto_pagado, pago.metodo_pago, pago.observaciones))
         
         # 2. DESCONTAMOS LA DEUDA (EL PARCHE: Usamos la tabla proveedores_ctacte y la columna saldo_deudor)
         cursor.execute("UPDATE proveedores_ctacte SET saldo_deudor = saldo_deudor - ? WHERE proveedor_id = ?", 
@@ -188,7 +192,7 @@ def registrar_pago_proveedor(pago: PagoProveedor):
         conexion.close()
 
 # --- 2. INGRESO DE MERCADERÍA (CON ACTUALIZACIÓN DE SALDO) ---
-@router.post("/cargar_factura")
+@router.post("/cargar_factura", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def ingresar_mercaderia(factura: NuevaFacturaCompra):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -266,7 +270,7 @@ def ingresar_mercaderia(factura: NuevaFacturaCompra):
             return {"error": mensaje_error}
     
     # --- HISTORIAL DE COMPRAS ---
-@router.get("/historial/{proveedor_id}")
+@router.get("/historial/{proveedor_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def ver_historial_compras(proveedor_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -298,8 +302,7 @@ def ver_historial_compras(proveedor_id: int):
             return {"error": mensaje_error}
     
     # --- VER DETALLE DE UNA FACTURA ESPECÍFICA ---
-# --- VER DETALLE DE UNA FACTURA ESPECÍFICA ---
-@router.get("/factura_detalle/{compra_id}")
+@router.get("/factura_detalle/{compra_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def ver_detalle_factura(compra_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -344,7 +347,7 @@ def ver_detalle_factura(compra_id: int):
             # 2. Si es un error de negocio tuyo, lo mostramos normal
             return {"error": mensaje_error}
     
-@router.get("/historial_pagos/{proveedor_id}")
+@router.get("/historial_pagos/{proveedor_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def ver_pagos(proveedor_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse
 from datetime import datetime
 from pydantic import BaseModel
@@ -6,6 +6,7 @@ import sqlite3
 import shutil
 import os
 from backend.database import obtener_conexion
+from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 router = APIRouter()
 
@@ -42,7 +43,7 @@ def asegurar_tabla_configuracion():
 asegurar_tabla_configuracion()
 
 # --- 2. ACTUALIZAR DATOS DE TEXTO ---
-@router.put("/actualizar_datos")
+@router.put("/actualizar_datos", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def actualizar_configuracion(
     nombre_negocio: str = Form(...),
     direccion: str = Form(...),
@@ -64,58 +65,61 @@ def actualizar_configuracion(
         return {"mensaje": "¡Configuración del negocio guardada con éxito!"}
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.rollback()
             conexion.close()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
             print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
     finally:
-        conexion.close()
+        # Usamos check de existencia por si falló el obtener_conexion
+        if 'conexion' in locals() and conexion:
+            conexion.close()
 
-# --- 3. SUBIR EL LOGO DE LA EMPRESA ---
-@router.post("/subir_logo")
+# --- 3. SUBIR EL LOGO DE LA EMPRESA (BUG CORREGIDO Y BLINDADO) ---
+@router.post("/subir_logo", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def subir_logo_empresa(archivo: UploadFile = File(...)):
-    if not archivo.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Debe ser una imagen.")
+    # 1. Blindaje extra: Validar extensiones explícitamente
+    extension = archivo.filename.split(".")[-1].lower()
+    extensiones_permitidas = ["jpg", "jpeg", "png", "webp"]
     
-    extension = archivo.filename.split(".")[-1]
+    if not archivo.content_type.startswith("image/") or extension not in extensiones_permitidas:
+        raise HTTPException(status_code=400, detail="Formato inválido. Debe ser JPG, PNG o WEBP.")
+    
     nombre_archivo = f"logo_empresa.{extension}"
     ruta_guardado = f"{CARPETA_LOGOS}/{nombre_archivo}"
     
+    conexion = None # <-- LA SOLUCIÓN AL BUG (Nace vacía por las dudas)
     try:
         with open(ruta_guardado, "wb") as buffer:
             shutil.copyfileobj(archivo.file, buffer)
             
         conexion = obtener_conexion()
         cursor = conexion.cursor()
-        # Guardamos solo el nombre del archivo, el frontend sabe buscar en /static/logos/
         cursor.execute("UPDATE configuracion_local SET ruta_logo = ? WHERE id = 1", (nombre_archivo,))
         conexion.commit()
-        conexion.close()
         
         return {"mensaje": "¡Logo actualizado!", "ruta_logo": nombre_archivo}
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-            conexion.close()
+            conexion.rollback()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
             print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
-# --- 4. LEER LA CONFIGURACIÓN (Para el Frontend y los Tickets) ---
-@router.get("/leer")
+# --- 4. LEER LA CONFIGURACIÓN ---
+# Esta ruta la usa el POS para imprimir tickets, así que el cajero NECESITA poder leerla
+@router.get("/leer", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def obtener_configuracion():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -125,7 +129,8 @@ def obtener_configuracion():
     conexion.close()
     return dict(config)
 
-@router.get("/descargar_backup")
+# --- 5. DESCARGAR BACKUP (LA RUTA MÁS PELIGROSA, AHORA BLINDADA) ---
+@router.get("/descargar_backup", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def descargar_base_datos():
     fecha = datetime.now().strftime("%Y%m%d_%H%M")
     return FileResponse(

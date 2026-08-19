@@ -1,3 +1,44 @@
+// --- EL INTERCEPTOR DE SEGURIDAD ---
+async function fetchSeguro(url, opciones = {}) {
+    // 1. Buscamos la credencial en la mochila
+    const tokenGuardado = localStorage.getItem('token_pos'); 
+
+    // 2. Preparamos los encabezados combinando los que ya existan con el Token
+    const headers = {
+        'Content-Type': 'application/json',
+        ...(opciones.headers || {}) 
+    };
+
+    if (tokenGuardado) {
+        headers['Authorization'] = `Bearer ${tokenGuardado}`;
+    }
+
+    const configuracionFinal = {
+        ...opciones,
+        headers
+    };
+
+    // 3. Ejecutamos el llamado real
+    const respuesta = await fetch(url, configuracionFinal);
+
+    // 4. EL BLINDAJE GLOBAL: Si Python nos tira un 401 (Token vencido, falso o hackeado)
+    if (respuesta.status === 401) {
+        Swal.fire({
+            title: 'Sesión Expirada',
+            text: 'Por seguridad, tu sesión ha caducado o no tenés permiso.',
+            icon: 'warning',
+            allowOutsideClick: false,
+            confirmButtonText: 'Ir al login'
+        }).then(() => {
+            localStorage.clear();
+            window.location.href = 'index.html'; // Pateamos al usuario a la calle
+        });
+        throw new Error("Acceso denegado (401)");
+    }
+
+    return respuesta;
+}
+
 // --- UTILIDAD: Buscador a prueba de errores ---
 function normalizarTexto(texto) {
     if (!texto) return "";
@@ -24,7 +65,6 @@ const modalApertura = new bootstrap.Modal(document.getElementById('modalApertura
 const modalGestion = new bootstrap.Modal(document.getElementById('modalGestionCaja'));
 const modalDeuda = new bootstrap.Modal(document.getElementById('modalCobrarDeuda'));
 const modalBuscador = new bootstrap.Modal(document.getElementById('modalBuscador'));
-const modalDetalleTicket = new bootstrap.Modal(document.getElementById('modalDetalleTicket'));
 const modalNuevoCliente = new bootstrap.Modal(document.getElementById('modalNuevoCliente'));
 const modalCobroEfectivo = new bootstrap.Modal(document.getElementById('modalCobroEfectivo'));
 const modalSeleccionCliente = new bootstrap.Modal(document.getElementById('modalSeleccionCliente'));
@@ -334,8 +374,17 @@ async function confirmarAnulacion(ventaId, ticket) {
 
     if (confirm.isConfirmed) {
         try {
-            // LLamada a tu backend para anular
-            const res = await fetch(`${obtenerBaseUrl()}/ventas/anular/${ventaId}`, { method: 'PUT' });
+            // LLamada a tu backend para anular (CON TOKEN Y USUARIO)
+            const res = await fetch(`${obtenerBaseUrl()}/ventas/anular/${ventaId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    usuario_id: empleadoLogueado.id // Le mandamos la firma
+                })
+            });
             const data = await res.json();
 
             if (data.error) throw new Error(data.error);
@@ -345,6 +394,7 @@ async function confirmarAnulacion(ventaId, ticket) {
             // Recargamos la tabla para que se vea tachada y volvemos a abrir el historial
             abrirHistorialTurno();
         } catch (e) {
+            // ... sigue igual ...
             Swal.fire('Error', e.message, 'error');
             modalHistorial.show();
         }

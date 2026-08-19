@@ -1,10 +1,14 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import sqlite3
 from backend.database import obtener_conexion
+from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 router = APIRouter()
+
+# --- CORRECCIÓN HORARIA PARA ARGENTINA ---
+ZONA_AR = timezone(timedelta(hours=-3))
 
 # --- 1. GUARDIAS ---
 class NuevaCategoria(BaseModel):
@@ -14,10 +18,11 @@ class NuevoGasto(BaseModel):
     categoria_id: int
     descripcion_detalle: str
     monto: float
-    metodo_pago: str # Ej: "Efectivo Caja", "Transferencia Banco", "Cheque"
+    metodo_pago: str 
+    usuario_id: int = 1 # <-- CORRECCIÓN: Ahora podés mandarle quién hizo el gasto
 
 # --- 2. CATEGORÍAS DE GASTOS ---
-@router.post("/categorias")
+@router.post("/categorias", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def crear_categoria(cat: NuevaCategoria):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -28,19 +33,17 @@ def crear_categoria(cat: NuevaCategoria):
         return {"mensaje": f"Categoría '{cat.nombre}' creada con éxito."}
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.rollback() 
             conexion.close()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
             print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
 
-@router.get("/categorias")
+@router.get("/categorias", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_categorias():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -51,30 +54,30 @@ def listar_categorias():
     return {"categorias": [dict(c) for c in categorias]}
 
 # --- 3. REGISTRAR EL GASTO ---
-@router.post("/registrar")
+@router.post("/registrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def registrar_gasto_operativo(gasto: NuevoGasto):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # CORRECCIÓN: Usamos la hora local real
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
         cursor.execute('''
             INSERT INTO gastos_operativos (fecha, categoria_id, descripcion_detalle, monto, metodo_pago)
             VALUES (?, ?, ?, ?, ?)
         ''', (fecha_actual, gasto.categoria_id, gasto.descripcion_detalle, gasto.monto, gasto.metodo_pago))
         
-        # MAGIA CONTABLE ARREGLADA: Si la palabra "EFECTIVO" está en el método de pago
         if "EFECTIVO" in gasto.metodo_pago.upper():
             cursor.execute("SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO'")
             turno = cursor.fetchone()
             
             if turno:
+                # CORRECCIÓN: Usamos el usuario_id real en vez del "1" hardcodeado
                 cursor.execute('''
                     INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones)
-                    VALUES (?, 1, 'RETIRO', ?, ?)
-                ''', (fecha_actual, gasto.monto, f"Gasto: {gasto.descripcion_detalle}"))
+                    VALUES (?, ?, 'RETIRO', ?, ?)
+                ''', (fecha_actual, gasto.usuario_id, gasto.monto, f"Gasto: {gasto.descripcion_detalle}"))
             else:
-                # Si no hay caja abierta, frenamos todo para que no se te descontrole la contabilidad
                 raise Exception("Trataste de pagar un gasto en Efectivo, pero no hay ningún turno de caja ABIERTO para sacar la plata.")
                 
         conexion.commit()
@@ -83,27 +86,25 @@ def registrar_gasto_operativo(gasto: NuevoGasto):
         
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.rollback() 
             conexion.close()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
             print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
 
-# --- 4. RESUMEN DEL MES (Para el Dashboard) ---
-@router.get("/resumen_mensual")
+# --- 4. RESUMEN DEL MES ---
+@router.get("/resumen_mensual", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def resumen_gastos_del_mes():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
-    # Traemos el año y mes actual para filtrar
-    mes_actual = datetime.now().strftime("%Y-%m")
+    # CORRECCIÓN: Mes local
+    mes_actual = datetime.now(ZONA_AR).strftime("%Y-%m")
     
     try:
         cursor.execute('''
@@ -123,14 +124,12 @@ def resumen_gastos_del_mes():
         }
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
+            conexion.rollback() 
             conexion.close()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
             print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}

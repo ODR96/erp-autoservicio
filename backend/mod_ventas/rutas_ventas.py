@@ -1,13 +1,16 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends # <-- Agregamos Depends
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import sqlite3
 from backend.database import obtener_conexion
+from backend.mod_usuarios.rutas_usuarios import VerificarRol # <-- EL PATOVICA
 
 router = APIRouter()
+ZONA_AR = timezone(timedelta(hours=-3))
 
-@router.get("/por_fecha")
+
+@router.get("/por_fecha", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def obtener_ventas_por_fecha(fecha: str = Query(..., description="Formato YYYY-MM-DD")):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -46,8 +49,6 @@ def obtener_ventas_por_fecha(fecha: str = Query(..., description="Formato YYYY-M
     finally:
         conexion.close()
 
-# --- CONFIGURACIÓN DE HORA ARGENTINA ---
-ZONA_AR = timezone(timedelta(hours=-3))
 
 # --- 1. LOS GUARDIAS ---
 class ItemVenta(BaseModel):
@@ -76,7 +77,7 @@ class NuevaVenta(BaseModel):
     cajero_nombre: str = "Sistema"
 
 # --- 2. EL MOTOR DE COBRO ---
-@router.post("/cobrar")
+@router.post("/cobrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_venta(venta: NuevaVenta):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row 
@@ -249,7 +250,7 @@ def registrar_venta(venta: NuevaVenta):
         return {"error": mensaje_error}
 
 # --- 3. GENERAR EL TICKET IMPRESO ---
-@router.get("/ticket/{venta_id}")
+@router.get("/ticket/{venta_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def generar_ticket(venta_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -317,7 +318,7 @@ def generar_ticket(venta_id: int):
         conexion.close()
     
 # --- 4. TRAER EL HISTORIAL DEL TURNO ---
-@router.get("/historial/{turno_id}")
+@router.get("/historial/{turno_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def historial_ventas_turno(turno_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -352,20 +353,22 @@ def historial_ventas_turno(turno_id: int):
     finally:
         conexion.close()
 
-# --- 5. ANULAR UNA VENTA Y DEVOLVER EL STOCK Y DINERO ---
-@router.put("/anular/{venta_id}")
-def anular_venta(venta_id: int):
+class AnularVentaRequest(BaseModel):
+    usuario_id: int # <-- Ahora pedimos quién anula
+
+@router.put("/anular/{venta_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def anular_venta(venta_id: int, peticion: AnularVentaRequest):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         # 1. Buscamos el ticket
         cursor.execute("SELECT estado, id, metodo_pago, total_venta, cliente_id FROM ventas_cabecera WHERE id = ?", (venta_id,))
         venta = cursor.fetchone()
-        
+
         if not venta: raise Exception("La venta no existe.")
         if venta[0] == 'ANULADA': raise Exception("Esta venta ya está anulada.")
 
-        # 2. REVERSO DE STOCK (El Bug del Motivo arreglado con LIKE)
+        # 2. REVERSO DE STOCK
         cursor.execute('''
             SELECT lote_id, cantidad, producto_id 
             FROM movimientos_stock WHERE motivo LIKE ?
@@ -374,9 +377,7 @@ def anular_venta(venta_id: int):
 
         for mov in movimientos_afectados:
             lote_id, cantidad, producto_id = mov
-            # Devolvemos la cantidad al lote
             cursor.execute("UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible + ? WHERE id = ?", (cantidad, lote_id))
-            # Registramos el movimiento de devolución
             cursor.execute('''
                 INSERT INTO movimientos_stock (producto_id, lote_id, tipo_movimiento, cantidad, motivo)
                 VALUES (?, ?, 'ANULACION', ?, ?)
@@ -386,28 +387,27 @@ def anular_venta(venta_id: int):
         metodo_pago = venta[2].upper()
         total_venta = venta[3]
         cliente_id = venta[4]
-        
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
 
-        # A. Si era fiado, le restamos la deuda al cliente y dejamos registro
+        # A. Fiado
         if metodo_pago in ['FIADO', 'CUENTA CORRIENTE'] and cliente_id:
             cursor.execute("UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor - ? WHERE id = ?", (total_venta, cliente_id))
             cursor.execute('''
                 INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
-                VALUES (?, ?, 'PAGO_ANULACION', ?, ?, 1)
-            ''', (cliente_id, fecha_actual, total_venta, f"Anulación Ticket #{venta_id}"))
+                VALUES (?, ?, 'PAGO_ANULACION', ?, ?, ?)
+            ''', (cliente_id, fecha_actual, total_venta, f"Anulación Ticket #{venta_id}", peticion.usuario_id)) # <-- SE USA EL USUARIO REAL
 
-        # B. Si era EFECTIVO puro (El Bug de la Caja arreglado)
+        # B. Efectivo
         elif metodo_pago == 'EFECTIVO':
             cursor.execute("SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO'")
             turno = cursor.fetchone()
             if turno:
                 cursor.execute('''
                     INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones) 
-                    VALUES (?, 1, 'RETIRO', ?, ?)
-                ''', (fecha_actual, total_venta, f"Anulación Efectivo Ticket #{venta_id}"))
+                    VALUES (?, ?, 'RETIRO', ?, ?)
+                ''', (fecha_actual, peticion.usuario_id, total_venta, f"Anulación Efectivo Ticket #{venta_id}")) # <-- SE USA EL USUARIO REAL
 
-        # C. Si era MIXTO, sacamos solo la parte que era efectivo físico
+        # C. Mixto
         elif metodo_pago == 'MIXTO':
             try:
                 cursor.execute("SELECT monto FROM ventas_pagos_mixtos WHERE venta_id = ? AND metodo_pago = 'EFECTIVO'", (venta_id,))
@@ -418,27 +418,21 @@ def anular_venta(venta_id: int):
                     if turno:
                         cursor.execute('''
                             INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones) 
-                            VALUES (?, 1, 'RETIRO', ?, ?)
-                        ''', (fecha_actual, efvo[0], f"Anulación Efectivo Mixto #{venta_id}"))
+                            VALUES (?, ?, 'RETIRO', ?, ?)
+                        ''', (fecha_actual, peticion.usuario_id, efvo[0], f"Anulación Efectivo Mixto #{venta_id}")) # <-- SE USA EL USUARIO REAL
             except: pass
 
         # 4. Tachamos el ticket definitivamente
         cursor.execute("UPDATE ventas_cabecera SET estado = 'ANULADA' WHERE id = ?", (venta_id,))
-        
+
         conexion.commit()
         return {"mensaje": "Venta anulada, stock devuelto y caja actualizada."}
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-            conexion.close()
-            
+            conexion.rollback()
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
-            
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
     finally:
         conexion.close()

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -6,6 +6,7 @@ import sqlite3
 from fastapi import BackgroundTasks
 import requests
 from backend.database import obtener_conexion
+from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 
 router = APIRouter()
@@ -52,7 +53,7 @@ class CierreCaja(BaseModel):
     monto_final_declarado: float # Los billetes reales que contaste con la mano
 
 # --- 2. ABRIR EL TURNO ---
-@router.post("/abrir")
+@router.post("/abrir", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def abrir_turno(apertura: AperturaCaja):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -94,7 +95,7 @@ def abrir_turno(apertura: AperturaCaja):
         return {"error": mensaje_error}
 
 # --- 3. REGISTRAR MOVIMIENTOS (INGRESO/RETIRO) ---
-@router.post("/movimiento")
+@router.post("/movimiento", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_movimiento(mov: MovimientoCaja):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -132,7 +133,7 @@ def registrar_movimiento(mov: MovimientoCaja):
         return {"error": mensaje_error}
 
 # --- 4. CIERRE Z (Arqueo Final Blindado, Corregido y con Sincronización) ---
-@router.put("/cerrar")
+@router.put("/cerrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -219,7 +220,7 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         return {"error": mensaje_error}
 
 # --- 5. INFORME X (Datos Reales al Momento) ---
-@router.get("/informe_x/{turno_id}")
+@router.get("/informe_x/{turno_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def sacar_informe_x(turno_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -276,7 +277,7 @@ def sacar_informe_x(turno_id: int):
         return {"error": mensaje_error}
     
 # --- 6. MONITOR EN VIVO (Para el panel de Admin) ---
-@router.get("/monitor_vivo")
+@router.get("/monitor_vivo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def monitor_cajas_vivo():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -335,7 +336,7 @@ def monitor_cajas_vivo():
         return {"error": mensaje_error}
     
     # --- 8. VERIFICAR ESTADO DE CAJA (Para que el POS tenga memoria) ---
-@router.get("/estado")
+@router.get("/estado", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def estado_caja(caja_id: int = 1):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -381,7 +382,7 @@ class CobroPedido(BaseModel):
     observaciones: Optional[str] = ""
 
 # --- RUTA OFICIAL: CONECTAR COBRO CON LOGÍSTICA ---
-@router.post("/cobrar_pedido")
+@router.post("/cobrar_pedido", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def cobrar_pedido_mayorista(cobro: CobroPedido):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row

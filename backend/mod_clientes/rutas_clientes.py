@@ -1,9 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 import sqlite3
 from backend.database import obtener_conexion
+from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 router = APIRouter()
 
@@ -49,7 +50,7 @@ def inicializar_tabla_movimientos():
 inicializar_tabla_movimientos()
 
 # --- 2. GESTIÓN DE CLIENTES (Crear, Editar y Listar) ---
-@router.post("/registrar")
+@router.post("/registrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_cliente(cli: ClienteNuevo):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -76,7 +77,7 @@ def registrar_cliente(cli: ClienteNuevo):
     finally:
         conexion.close()
 
-@router.put("/actualizar/{cliente_id}")
+@router.put("/actualizar/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def actualizar_cliente(cliente_id: int, cli: ClienteNuevo):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -104,7 +105,7 @@ def actualizar_cliente(cliente_id: int, cli: ClienteNuevo):
     finally:
         conexion.close()
 
-@router.get("/listado")
+@router.get("/listado", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_clientes():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -115,7 +116,7 @@ def listar_clientes():
     return {"clientes": clientes}
 
 # --- 3. COBRO DE DEUDA (Multiuso: Admin o POS) ---
-@router.put("/pagar_deuda/{cliente_id}")
+@router.put("/pagar_deuda/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -161,7 +162,7 @@ def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
         conexion.close()
 
 # --- 4. HISTORIAL (La Película Completa) ---
-@router.get("/historial/{cliente_id}")
+@router.get("/historial/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def ver_historial_cliente(cliente_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -197,7 +198,7 @@ class AjusteDeuda(BaseModel):
     motivo: str
     usuario_id: int = 1
 
-@router.put("/aplicar_recargo/{cliente_id}")
+@router.put("/aplicar_recargo/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def aplicar_recargo(cliente_id: int, ajuste: AjusteDeuda):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -231,7 +232,7 @@ def aplicar_recargo(cliente_id: int, ajuste: AjusteDeuda):
     finally:
         conexion.close()
 
-@router.get("/simular_actualizacion/{cliente_id}")
+@router.get("/simular_actualizacion/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def simular_actualizacion_precios(cliente_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -304,7 +305,7 @@ def simular_actualizacion_precios(cliente_id: int):
     finally:
         conexion.close()
         
-@router.get("/resumen_pendientes/{cliente_id}")
+@router.get("/resumen_pendientes/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def resumen_pendientes(cliente_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
