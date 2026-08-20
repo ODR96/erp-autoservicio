@@ -1,24 +1,28 @@
 // frontend/js/app_cajas.js
 // --- EL INTERCEPTOR DE SEGURIDAD ---
 // --- INTERCEPTOR DE SEGURIDAD GLOBAL ---
+// --- INTERCEPTOR DE SEGURIDAD GLOBAL ---
 const originalFetch = window.fetch;
 window.fetch = async function() {
     let [recurso, config] = arguments;
     if (!config) config = {};
     if (!config.headers) config.headers = {};
     
-    // Buscamos la llave del empleado logueado
-    const tokenSeguridad = localStorage.getItem('token') || localStorage.getItem('token_pos');
+    // 1. Verificamos si la petición va a TU servidor
+    const vaAMiServidor = recurso.toString().includes(obtenerBaseUrl());
     
-    // Si tenemos llave, se la pegamos a la petición invisiblemente
-    if (tokenSeguridad) {
-        config.headers['Authorization'] = `Bearer ${tokenSeguridad}`;
+    // 2. SOLO si va a tu servidor, le pegamos el token secreto
+    if (vaAMiServidor) {
+        const tokenSeguridad = localStorage.getItem('token') || localStorage.getItem('token_pos');
+        if (tokenSeguridad) {
+            config.headers['Authorization'] = `Bearer ${tokenSeguridad}`;
+        }
     }
     
     const respuesta = await originalFetch(recurso, config);
     
-    // EL BLINDAJE GLOBAL: Si Python nos tira un 401
-    if (respuesta.status === 401) {
+    // 3. El blindaje: Si es nuestro servidor y nos rechaza (401)
+    if (vaAMiServidor && respuesta.status === 401) {
         console.warn("Sesión expirada o sin permisos (401)");
         localStorage.clear();
         window.location.href = 'index.html'; // Pateamos al usuario al login
@@ -27,6 +31,7 @@ window.fetch = async function() {
     
     return respuesta;
 };
+// ---------------------------------------
 // ---------------------------------------
 
 function cambiarPestana(id, evento) {
