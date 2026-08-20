@@ -1,43 +1,32 @@
 // --- EL INTERCEPTOR DE SEGURIDAD ---
-async function fetchSeguro(url, opciones = {}) {
-    // 1. Buscamos la credencial en la mochila
-    const tokenGuardado = localStorage.getItem('token_pos'); 
-
-    // 2. Preparamos los encabezados combinando los que ya existan con el Token
-    const headers = {
-        'Content-Type': 'application/json',
-        ...(opciones.headers || {}) 
-    };
-
-    if (tokenGuardado) {
-        headers['Authorization'] = `Bearer ${tokenGuardado}`;
+// --- INTERCEPTOR DE SEGURIDAD GLOBAL ---
+const originalFetch = window.fetch;
+window.fetch = async function() {
+    let [recurso, config] = arguments;
+    if (!config) config = {};
+    if (!config.headers) config.headers = {};
+    
+    // Buscamos la llave del empleado logueado
+    const tokenSeguridad = localStorage.getItem('token') || localStorage.getItem('token_pos');
+    
+    // Si tenemos llave, se la pegamos a la petición invisiblemente
+    if (tokenSeguridad) {
+        config.headers['Authorization'] = `Bearer ${tokenSeguridad}`;
     }
-
-    const configuracionFinal = {
-        ...opciones,
-        headers
-    };
-
-    // 3. Ejecutamos el llamado real
-    const respuesta = await fetch(url, configuracionFinal);
-
-    // 4. EL BLINDAJE GLOBAL: Si Python nos tira un 401 (Token vencido, falso o hackeado)
+    
+    const respuesta = await originalFetch(recurso, config);
+    
+    // EL BLINDAJE GLOBAL: Si Python nos tira un 401
     if (respuesta.status === 401) {
-        Swal.fire({
-            title: 'Sesión Expirada',
-            text: 'Por seguridad, tu sesión ha caducado o no tenés permiso.',
-            icon: 'warning',
-            allowOutsideClick: false,
-            confirmButtonText: 'Ir al login'
-        }).then(() => {
-            localStorage.clear();
-            window.location.href = 'index.html'; // Pateamos al usuario a la calle
-        });
+        console.warn("Sesión expirada o sin permisos (401)");
+        localStorage.clear();
+        window.location.href = 'index.html'; // Pateamos al usuario al login
         throw new Error("Acceso denegado (401)");
     }
-
+    
     return respuesta;
-}
+};
+// ---------------------------------------
 
 let clientesGlobales = [];
 let clienteSeleccionadoId = null;

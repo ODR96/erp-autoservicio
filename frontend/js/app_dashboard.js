@@ -8,10 +8,26 @@ const formatiarDinero = (monto) => {
 // Función principal para cargar datos
 async function cargarDashboard() {
     try {
-        // Acá está la magia: usamos tu función para que le pegue al puerto 8000
+        // Buscamos la llave maestra donde sea que esté guardada
+        const tokenValido = localStorage.getItem('token') || localStorage.getItem('token_pos');
+        
+        if (!tokenValido) {
+            console.warn("No se encontró sesión activa.");
+            document.getElementById('dash-ingresos').innerText = "SIN SESIÓN";
+            return;
+        }
+
         const res = await fetch(`${obtenerBaseUrl()}/dashboard/datos`, {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            headers: { 
+                'Authorization': `Bearer ${tokenValido}`,
+                'Content-Type': 'application/json'
+            }
         });
+
+        // Si el patovica nos rebota (401), cortamos por lo sano
+        if (res.status === 401) {
+            throw new Error("Permisos insuficientes o sesión vencida (401)");
+        }
         
         if (!res.ok) throw new Error("Error en la respuesta del servidor");
         
@@ -30,7 +46,7 @@ async function cargarDashboard() {
             </li>`;
         });
 
-        // 3. Gráfico
+        // 3. Gráfico (Chart.js)
         const ctx = document.getElementById('graficoHorarios').getContext('2d');
         new Chart(ctx, {
             type: 'bar',
