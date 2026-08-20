@@ -8,63 +8,45 @@ const formatiarDinero = (monto) => {
 // Función principal para cargar datos
 async function cargarDashboard() {
     try {
-        const respuesta = await fetch('/api/dashboard');
-        const json = await respuesta.json();
+        // Acá está la magia: usamos tu función para que le pegue al puerto 8000
+        const res = await fetch(`${obtenerBaseUrl()}/dashboard/datos`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
         
-        if(json.status === 'success') {
-            const data = json.data;
+        if (!res.ok) throw new Error("Error en la respuesta del servidor");
+        
+        const data = await res.json();
 
-            // 1. Llenar Tarjetas Superiores
-            document.getElementById('val-ingresos').innerText = formatiarDinero(data.hoy.ingresos);
-            document.getElementById('val-tickets').innerText = data.hoy.tickets;
-            document.getElementById('val-riesgo').innerText = data.vencimientos.length;
+        // 1. Tarjetas
+        document.getElementById('dash-ingresos').innerText = `$${data.hoy.ingresos.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        document.getElementById('dash-tickets').innerText = data.hoy.tickets;
 
-            // 2. Tabla Stock Crítico
-            const tbodyCritico = document.getElementById('tabla-critico');
-            tbodyCritico.innerHTML = '';
-            data.stock_critico.forEach(item => {
-                tbodyCritico.innerHTML += `
-                    <tr>
-                        <td>${item.nombre}</td>
-                        <td><span class="badge-rojo">${item.stock_real} / ${item.stock_minimo_alerta}</span></td>
-                    </tr>
-                `;
-            });
+        // 2. Stock Crítico
+        const lista = document.getElementById('lista-stock');
+        lista.innerHTML = '';
+        data.stock_critico.forEach(p => {
+            lista.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center">
+                ${p.nombre} <span class="badge bg-danger rounded-pill">${p.stock_real} / ${p.stock_minimo_alerta}</span>
+            </li>`;
+        });
 
-            // 3. Tabla Vencimientos
-            const tbodyVenc = document.getElementById('tabla-vencimientos');
-            tbodyVenc.innerHTML = '';
-            data.vencimientos.forEach(item => {
-                tbodyVenc.innerHTML += `
-                    <tr>
-                        <td>${item.nombre} <br><small style="color: #64748b;">Quedan: ${item.cantidad_disponible}</small></td>
-                        <td>${item.fecha_vencimiento}</td>
-                        <td><button class="btn-promo" onclick="lanzarPromo('${item.nombre}')">Promo</button></td>
-                    </tr>
-                `;
-            });
-
-            // 4. Tabla Faltantes
-            const tbodyFaltantes = document.getElementById('tabla-faltantes');
-            tbodyFaltantes.innerHTML = '';
-            data.faltantes.forEach(item => {
-                tbodyFaltantes.innerHTML += `
-                    <tr>
-                        <td>${item.descripcion_producto}</td>
-                        <td>${item.cantidad_pedida}</td>
-                    </tr>
-                `;
-            });
-
-            // 5. Renderizar Gráfico de Horarios
-            renderizarGrafico(data.horarios_calientes);
-
-            // Hora de actualización
-            const ahora = new Date();
-            document.getElementById('ultima-actualizacion').innerText = `Última act: ${ahora.toLocaleTimeString('es-AR')}`;
-        }
+        // 3. Gráfico
+        const ctx = document.getElementById('graficoHorarios').getContext('2d');
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: data.horarios_calientes.map(d => d.hora + ':00'),
+                datasets: [{
+                    label: 'Tickets',
+                    data: data.horarios_calientes.map(d => d.cantidad_ventas),
+                    backgroundColor: '#1a365d',
+                    borderRadius: 4
+                }]
+            },
+            options: { plugins: { legend: { display: false } } }
+        });
     } catch (error) {
-        console.error("Error al cargar el dashboard:", error);
+        console.error("Error cargando dashboard:", error);
     }
 }
 
