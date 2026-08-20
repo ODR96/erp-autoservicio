@@ -105,7 +105,7 @@ def actualizar_codigo_git():
         }
 
 # --- 5. ENCHUFAMOS TODOS LOS MÓDULOS ---
-app.include_router(router_dashboard.router, prefix="/dashboard", tags=["Dashboard"])
+app.include_router(router_dashboard, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(router_productos, prefix="/productos", tags=["Productos"])
 app.include_router(router_lotes, prefix="/lotes", tags=["Lotes y Stock (FIFO)"])
 app.include_router(router_ventas, prefix="/ventas", tags=["Caja y Ventas"])
