@@ -22,6 +22,7 @@ from backend.mod_proveedores.rutas_proveedores import router as router_proveedor
 from backend.mod_reportes.rutas_reportes import router as router_reportes
 from backend.mod_usuarios.rutas_usuarios import router as router_usuarios
 from backend.mod_config.rutas_config import router as router_config
+from backend.mod_dashboard.rutas_dashboard import router as router_dashboard
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -104,6 +105,7 @@ def actualizar_codigo_git():
         }
 
 # --- 5. ENCHUFAMOS TODOS LOS MÓDULOS ---
+app.include_router(router_dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(router_productos, prefix="/productos", tags=["Productos"])
 app.include_router(router_lotes, prefix="/lotes", tags=["Lotes y Stock (FIFO)"])
 app.include_router(router_ventas, prefix="/ventas", tags=["Caja y Ventas"])

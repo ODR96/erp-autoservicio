@@ -65,7 +65,7 @@ function inyectarLayout() {
                 <small class="text-warning">${nombreLocal}</small> 
             </div>
             <div class="sidebar-menu">
-                <a href="#" class="menu-item"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                <a href="admin_dashboard.html" class="menu-item"><i class="bi bi-speedometer2"></i> Dashboard</a>
                 <a href="pos.html" class="menu-item"><i class="bi bi-display"></i> Abrir POS (Caja)</a>
                 <a href="admin_productos.html" class="menu-item"><i class="bi bi-box-seam"></i> Productos & Stock</a>
                 <a href="admin_mayorista.html" class="menu-item"><i class="bi bi-truck"></i> Venta Depósito</a>

@@ -1,4 +1,6 @@
 import sqlite3
+from backend.database import obtener_conexion
+
 
 def extraer_esquema():
     # Conectamos a tu base de datos real
