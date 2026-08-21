@@ -9,6 +9,7 @@ from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 # --- NUEVA MIGRACIÓN: TABLA DE CAJAS FÍSICAS MÚLTIPLES ---
+# --- NUEVA MIGRACIÓN: TABLA DE CAJAS FÍSICAS MÚLTIPLES ---
 def asegurar_tabla_cajas_fisicas():
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -21,18 +22,24 @@ def asegurar_tabla_cajas_fisicas():
         )
     ''')
     
-    # Insertar cajas por defecto si la tabla está vacía para no romper el sistema actual
+    # --- EL PARCHE: Inyectar columnas si la tabla ya existía de antes ---
+    try: cursor.execute("ALTER TABLE cajas_fisicas ADD COLUMN activa BOOLEAN DEFAULT 1")
+    except: pass
+    try: cursor.execute("ALTER TABLE cajas_fisicas ADD COLUMN solo_admin BOOLEAN DEFAULT 0")
+    except: pass
+    # ---------------------------------------------------------------------
+
+    # Insertar cajas por defecto si la tabla está vacía
     cursor.execute("SELECT COUNT(*) FROM cajas_fisicas")
     if cursor.fetchone()[0] == 0:
-        # La caja del mostrador (Para todos)
         cursor.execute("INSERT INTO cajas_fisicas (id, nombre, activa, solo_admin) VALUES (1, 'Caja 1 (Mostrador Principal)', 1, 0)")
-        # Tu caja personal (Solo Admin)
         cursor.execute("INSERT INTO cajas_fisicas (id, nombre, activa, solo_admin) VALUES (99, 'Caja 99 (Oficina Admin)', 1, 1)")
         
     conexion.commit()
     conexion.close()
 
 asegurar_tabla_cajas_fisicas()
+# ---------------------------------------------------------
 
 
 router = APIRouter()
