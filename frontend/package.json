@@ -1,6 +1,6 @@
 {
   "name": "frontend",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Punto de Venta",
   "main": "main_electron.js",
   "scripts": {
@@ -15,7 +15,8 @@
       {
         "provider": "github",
         "owner": "ODR96",
-        "repo": "erp-autoservicio"
+        "repo": "erp-autoservicio",
+        "releaseType": "release"
       }
     ],
     "win": {

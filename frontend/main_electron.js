@@ -67,15 +67,25 @@ ipcMain.on('imprimir-silencioso', (event, htmlContenido) => {
 // SISTEMA DE ACTUALIZACIONES AUTOMÁTICAS (OTA)
 // ========================================================
 app.on('ready', () => {
-    // Cuando el programa arranca, busca actualizaciones sin molestar
+    // 1. Busca apenas arranca el programa
     autoUpdater.checkForUpdatesAndNotify();
+
+    // 2. Busca automáticamente cada 1 hora (3600000 milisegundos)
+    setInterval(() => {
+        autoUpdater.checkForUpdatesAndNotify();
+    }, 3600000);
+});
+
+autoUpdater.on('error', (err) => {
+    if (ventanaPrincipal) {
+        ventanaPrincipal.webContents.executeJavaScript(`console.error("Error en AutoUpdater: ${err.message}");`);
+    }
 });
 
 // Cuando termina de descargar la versión nueva en la mochila, le avisa a tu HTML
 autoUpdater.on('update-downloaded', () => {
     if (ventanaPrincipal) {
         ventanaPrincipal.webContents.send('actualizacion-lista');
-        ventanaPrincipal.webContents.executeJavaScript(`console.error("Error en AutoUpdater: ${err.message}");`);
     }
 });
 

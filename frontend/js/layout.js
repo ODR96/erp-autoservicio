@@ -26,12 +26,14 @@ function obtenerBaseUrl() {
 
     const rutaActual = window.location.pathname.toLowerCase();
 
+    // 1. El Cajero no entra a la oficina
     if (rol === 'CAJERO' && rutaActual.includes('admin_')) {
         alert("ACCESO DENEGADO: Tu rol de CAJERO no te permite entrar a la administración.");
         window.location.href = "pos.html"; 
         return;
     }
 
+    // 2. El Encargado no toca la configuración profunda
     if (rol === 'ENCARGADO') {
         const zonasProhibidas = [
             'admin_cajas.html', 
@@ -45,6 +47,13 @@ function obtenerBaseUrl() {
             window.location.href = "admin_productos.html"; 
             return;
         }
+    }
+
+    // 3. NUEVO BLINDAJE: El Admin/Dueño NO toca la caja física
+    if ((rol === 'ADMIN' || rol === 'ENCARGADO') && rutaActual.includes('pos.html')) {
+        alert("MODO ADMINISTRADOR: No podés operar el POS para no alterar el saldo físico de los cajeros. Para ver las ventas, usá el Monitor de Cajas o el Dashboard.");
+        window.location.href = "admin_dashboard.html"; 
+        return;
     }
 })();
 // ========================================================
