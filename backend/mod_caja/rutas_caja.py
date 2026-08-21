@@ -8,6 +8,32 @@ import requests
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
+# --- NUEVA MIGRACIÓN: TABLA DE CAJAS FÍSICAS MÚLTIPLES ---
+def asegurar_tabla_cajas_fisicas():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cajas_fisicas (
+            id INTEGER PRIMARY KEY,
+            nombre TEXT NOT NULL,
+            activa BOOLEAN DEFAULT 1,
+            solo_admin BOOLEAN DEFAULT 0
+        )
+    ''')
+    
+    # Insertar cajas por defecto si la tabla está vacía para no romper el sistema actual
+    cursor.execute("SELECT COUNT(*) FROM cajas_fisicas")
+    if cursor.fetchone()[0] == 0:
+        # La caja del mostrador (Para todos)
+        cursor.execute("INSERT INTO cajas_fisicas (id, nombre, activa, solo_admin) VALUES (1, 'Caja 1 (Mostrador Principal)', 1, 0)")
+        # Tu caja personal (Solo Admin)
+        cursor.execute("INSERT INTO cajas_fisicas (id, nombre, activa, solo_admin) VALUES (99, 'Caja 99 (Oficina Admin)', 1, 1)")
+        
+    conexion.commit()
+    conexion.close()
+
+asegurar_tabla_cajas_fisicas()
+
 
 router = APIRouter()
 
@@ -52,6 +78,18 @@ class MovimientoCaja(BaseModel):
 class CierreCaja(BaseModel):
     turno_id: int
     monto_final_declarado: float # Los billetes reales que contaste con la mano
+    
+@router.get("/cajas_fisicas")
+def listar_cajas_fisicas():
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    
+    # Solo mandamos al mostrador las cajas que estén "Activas"
+    cursor.execute("SELECT id, nombre FROM cajas_fisicas WHERE activa = 1 ORDER BY id ASC")
+    cajas = [dict(row) for row in cursor.fetchall()]
+    conexion.close()
+    return {"cajas": cajas}
 
 # --- 2. ABRIR EL TURNO ---
 @router.post("/abrir", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
@@ -60,7 +98,23 @@ def abrir_turno(apertura: AperturaCaja):
     cursor = conexion.cursor()
     
     try:
-        # Verificamos que no haya otro turno abierto en esta caja
+        # 1. EL BLINDAJE NUEVO: ¿Existe la caja y tengo permiso?
+        cursor.execute("SELECT nombre, activa, solo_admin FROM cajas_fisicas WHERE id = ?", (apertura.caja_id,))
+        caja_fisica = cursor.fetchone()
+        
+        if not caja_fisica:
+            raise Exception("Esta terminal no está registrada como una caja válida en el sistema.")
+        if not caja_fisica[1]: # activa == False
+            raise Exception("Esta caja está deshabilitada temporalmente por la administración.")
+            
+        # Si la caja tiene el candado "solo_admin = True"
+        if caja_fisica[2]: 
+            cursor.execute("SELECT rol FROM usuarios WHERE id = ?", (apertura.usuario_id,))
+            usuario = cursor.fetchone()
+            if not usuario or usuario[0] not in ['ADMIN', 'ENCARGADO']:
+                raise Exception("ACCESO DENEGADO: Esta terminal es de uso exclusivo para Administración. Inicie sesión en una caja de mostrador.")
+
+        # 2. Verificamos que no haya otro turno abierto en esta caja
         cursor.execute("SELECT id FROM turnos_caja WHERE caja_id = ? AND estado_turno = 'ABIERTO'", (apertura.caja_id,))
         if cursor.fetchone():
             raise Exception("Ya hay un turno abierto en esta caja. Tenés que cerrarlo primero.")
@@ -74,26 +128,18 @@ def abrir_turno(apertura: AperturaCaja):
         
         turno_id = cursor.lastrowid
         conexion.commit()
-        conexion.close()
-        
-        # PARCHE DEFINITIVO: Ahora sí le mandamos el turno_id al frontend
-        return {
-            "mensaje": f"¡Turno de caja #{turno_id} abierto con éxito!", 
-            "turno_id": turno_id
-        }
+        return {"mensaje": f"¡Turno de caja #{turno_id} abierto con éxito!", "turno_id": turno_id}
         
     except Exception as e:
         if conexion:
             conexion.close()
-            
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR CRÍTICO SQL AL ABRIR CAJA: {mensaje_error}")
-            return {"error": "No se pudo abrir la caja por un error interno del servidor."}
-            
-        # 2. Si es un error de negocio tuyo (Ej: "Ya hay un turno abierto"), lo mostramos normal
+            return {"error": "No se pudo abrir la caja por un error interno."}
         return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
 # --- 3. REGISTRAR MOVIMIENTOS (INGRESO/RETIRO) ---
 @router.post("/movimiento", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
@@ -455,3 +501,58 @@ def cobrar_pedido_mayorista(cobro: CobroPedido):
     finally:
         conexion.close()
         
+class NuevaCaja(BaseModel):
+    id: int # Vos elegís el número (Ej: 3, 4, 99)
+    nombre: str
+    solo_admin: bool
+
+@router.post("/cajas_fisicas/crear", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def crear_caja_fisica(caja: NuevaCaja):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        cursor.execute("SELECT id FROM cajas_fisicas WHERE id = ?", (caja.id,))
+        if cursor.fetchone():
+            raise Exception(f"Ya existe una terminal con el ID {caja.id}. Elegí otro número.")
+            
+        cursor.execute('''
+            INSERT INTO cajas_fisicas (id, nombre, activa, solo_admin) 
+            VALUES (?, ?, 1, ?)
+        ''', (caja.id, caja.nombre, caja.solo_admin))
+        conexion.commit()
+        return {"mensaje": "Terminal registrada correctamente."}
+    except Exception as e:
+        if conexion: conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        if conexion: conexion.close()
+
+@router.put("/cajas_fisicas/toggle/{caja_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def toggle_caja_fisica(caja_id: int):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        cursor.execute("SELECT activa FROM cajas_fisicas WHERE id = ?", (caja_id,))
+        caja = cursor.fetchone()
+        if not caja: raise Exception("La caja no existe.")
+        
+        nuevo_estado = 0 if caja[0] == 1 else 1 # Invierte el estado
+        cursor.execute("UPDATE cajas_fisicas SET activa = ? WHERE id = ?", (nuevo_estado, caja_id))
+        conexion.commit()
+        return {"mensaje": "Estado de la terminal actualizado.", "nuevo_estado": nuevo_estado}
+    except Exception as e:
+        if conexion: conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        if conexion: conexion.close()
+
+# RUTA ESPECIAL: Lista TODAS las cajas para el Admin (incluso las apagadas)
+@router.get("/cajas_fisicas/admin_listado", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def listar_todas_las_cajas():
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    cursor.execute("SELECT * FROM cajas_fisicas ORDER BY id ASC")
+    cajas = [dict(row) for row in cursor.fetchall()]
+    conexion.close()
+    return {"cajas": cajas}
