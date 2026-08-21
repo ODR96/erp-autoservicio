@@ -44,6 +44,7 @@ function cambiarPestana(id, evento) {
 async function cargarDatosEnVivo() {
     cargarMonitor();
     cargarEmpleados();
+    cargarCajasFisicas();
 }
 
 async function cargarMonitor() {
@@ -563,6 +564,78 @@ function imprimirCredencial(nombre, rol, codigo) {
     vent.document.write(html);
     vent.document.close();
 }
+
+// ========================================================
+// GESTIÓN DE HARDWARE (TERMINALES)
+// ========================================================
+async function cargarCajasFisicas() {
+    const tbody = document.getElementById('tablaTerminalesBody');
+    try {
+        const response = await fetch(`${obtenerBaseUrl()}/caja/cajas_fisicas/admin_listado`);
+        const data = await response.json();
+
+        if (data.error) throw new Error(data.error);
+
+        tbody.innerHTML = '';
+        data.cajas.forEach(c => {
+            let badgeEstado = c.activa ? '<span class="badge bg-success">Operativa</span>' : '<span class="badge bg-danger">Apagada / Rota</span>';
+            let badgeAcceso = c.solo_admin ? '<span class="badge bg-dark"><i class="bi bi-lock-fill"></i> Solo Admin</span>' : '<span class="badge bg-info text-dark">Todo el Personal</span>';
+            let btnToggle = c.activa 
+                ? `<button class="btn btn-sm btn-outline-danger fw-bold py-0" onclick="toggleTerminal(${c.id})" title="Desactivar PC"><i class="bi bi-power"></i> Apagar</button>`
+                : `<button class="btn btn-sm btn-success fw-bold py-0" onclick="toggleTerminal(${c.id})" title="Activar PC"><i class="bi bi-check-circle"></i> Habilitar</button>`;
+
+            tbody.innerHTML += `
+                <tr class="${c.activa ? '' : 'bg-light opacity-75'}">
+                    <td class="fw-bold fs-5 text-primary">${c.id}</td>
+                    <td class="text-start fw-bold">${c.nombre}</td>
+                    <td>${badgeAcceso}</td>
+                    <td>${badgeEstado}</td>
+                    <td>${btnToggle}</td>
+                </tr>
+            `;
+        });
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error cargando terminales</td></tr>`;
+    }
+}
+
+async function guardarTerminal() {
+    const id = document.getElementById('termId').value;
+    const nombre = document.getElementById('termNombre').value.trim();
+    const solo_admin = document.getElementById('termSoloAdmin').checked;
+
+    if (!id || !nombre) return Swal.fire('Atención', 'Completá el número y el nombre de la terminal.', 'warning');
+
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/caja/cajas_fisicas/crear`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: parseInt(id), nombre: nombre, solo_admin: solo_admin })
+        });
+        const data = await res.json();
+
+        if (!res.ok || data.error) throw new Error(data.error || "Error al crear");
+
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Terminal creada', showConfirmButton: false, timer: 1500 });
+        bootstrap.Modal.getInstance(document.getElementById('modalNuevaTerminal')).hide();
+        cargarCajasFisicas();
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
+async function toggleTerminal(id) {
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/caja/cajas_fisicas/toggle/${id}`, { method: 'PUT' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        cargarCajasFisicas();
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
+
 // Arrancamos
 document.addEventListener("DOMContentLoaded", () => {
     // Le agregamos el link correcto a la flecha del layout para esta página

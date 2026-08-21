@@ -1,27 +1,27 @@
 const originalFetch = window.fetch;
-window.fetch = async function() {
+window.fetch = async function () {
     let [recurso, config] = arguments;
     if (!config) config = {};
     if (!config.headers) config.headers = {};
-    
+
     const vaAMiServidor = recurso.toString().includes(obtenerBaseUrl());
-    
+
     if (vaAMiServidor) {
         const tokenSeguridad = localStorage.getItem('token') || localStorage.getItem('token_pos');
         if (tokenSeguridad) {
             config.headers['Authorization'] = `Bearer ${tokenSeguridad}`;
         }
     }
-    
+
     const respuesta = await originalFetch(recurso, config);
-    
+
     if (vaAMiServidor && respuesta.status === 401) {
         console.warn("Sesión expirada o sin permisos (401)");
         localStorage.clear();
         window.location.href = 'index.html';
         throw new Error("Acceso denegado (401)");
     }
-    
+
     return respuesta;
 };
 
@@ -64,7 +64,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
     }
 
-    empleadoLogueado = { nombre: nombre, rol: rol, id: 1 }; 
+    empleadoLogueado = { nombre: nombre, rol: rol, id: 1 };
     iniciarInterfazPOS();
 });
 
@@ -172,26 +172,44 @@ async function iniciarInterfazPOS() {
     }
 
     if (!terminal_id) {
-        const { value: cajaSeleccionada } = await Swal.fire({
-            title: '🖥️ Configurar Terminal',
-            text: 'Esta computadora no tiene asignada una caja. ¿Qué número de terminal es?',
-            input: 'select',
-            inputOptions: {
-                '1': 'Caja 1 (Mostrador Principal)',
-                '2': 'Caja 2 (Mostrador Secundario)',
-                '99': 'Caja 99 (Oficina / Notebook Admin)'
-            },
-            inputPlaceholder: 'Seleccione una caja',
-            showCancelButton: false,
-            allowOutsideClick: false,
-            confirmButtonText: 'Guardar Configuración',
-            confirmButtonColor: '#1b365d'
-        });
+        try {
+            // 1. Vamos a buscar las cajas activas a tu servidor Python
+            const resCajas = await fetch(`${obtenerBaseUrl()}/caja/cajas_fisicas`);
+            const dataCajas = await resCajas.json();
 
-        if (cajaSeleccionada) {
-            terminal_id = parseInt(cajaSeleccionada);
-            localStorage.setItem('caja_fisica_id', terminal_id);
-            await Swal.fire('Configurada', `Esta PC ahora está registrada como la Caja ${terminal_id}`, 'success');
+            // 2. Transformamos la respuesta en un diccionario para SweetAlert
+            let opcionesCajas = {};
+            dataCajas.cajas.forEach(c => {
+                opcionesCajas[c.id.toString()] = c.nombre; // Ej: "1": "Caja 1 (Mostrador)"
+            });
+
+            // 3. Mostramos el cartel 100% dinámico
+            const { value: cajaSeleccionada } = await Swal.fire({
+                title: '🖥️ Configurar Terminal',
+                text: 'Asigne esta computadora a una de las cajas habilitadas:',
+                input: 'select',
+                inputOptions: opcionesCajas,
+                inputPlaceholder: 'Seleccione una caja...',
+                showCancelButton: false,
+                allowOutsideClick: false,
+                confirmButtonText: 'Guardar Configuración',
+                confirmButtonColor: '#1b365d',
+                inputValidator: (value) => {
+                    return new Promise((resolve) => {
+                        if (value) resolve();
+                        else resolve('Debe seleccionar una caja para continuar');
+                    });
+                }
+            });
+
+            if (cajaSeleccionada) {
+                terminal_id = parseInt(cajaSeleccionada);
+                localStorage.setItem('caja_fisica_id', terminal_id);
+                await Swal.fire('Configurada', `Terminal asignada correctamente.`, 'success');
+            }
+        } catch (error) {
+            Swal.fire('Error', 'No se pudieron cargar las cajas. Verifique la conexión al servidor.', 'error');
+            return; // Frena la carga del POS si no puede bajar la lista
         }
     }
 

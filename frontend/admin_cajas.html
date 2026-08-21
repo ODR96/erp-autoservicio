@@ -41,6 +41,8 @@
                                 class="bi bi-display"></i> Monitor en Vivo</button></li>
                     <li class="nav-item"><button class="nav-link" onclick="cambiarPestana('empleados', event)"><i
                                 class="bi bi-people"></i> Empleados y Permisos</button></li>
+                    <li class="nav-item"><button class="nav-link" onclick="cambiarPestana('terminales', event)"><i
+                                class="bi bi-pc-display"></i> Terminales</button></li>
                 </ul>
 
                 <div class="tab-content p-4">
@@ -67,6 +69,31 @@
                                     </tr>
                                 </thead>
                                 <tbody id="tablaEmpleadosBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <!-- TABLA DE TERMINALES -->
+                    <div class="tab-pane" id="tab-terminales">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="fw-bold text-secondary mb-0"><i class="bi bi-cpu"></i> Gestión de Hardware</h5>
+                            <button class="btn btn-primary btn-sm fw-bold shadow-sm" data-bs-toggle="modal"
+                                data-bs-target="#modalNuevaTerminal">
+                                <i class="bi bi-plus-circle"></i> Nueva Terminal
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-hover table-custom border align-middle text-center">
+                                <thead>
+                                    <tr>
+                                        <th>N° Terminal</th>
+                                        <th class="text-start">Nombre / Ubicación</th>
+                                        <th>Nivel de Acceso</th>
+                                        <th>Estado de Operación</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tablaTerminalesBody">
                                 </tbody>
                             </table>
                         </div>
@@ -179,6 +206,40 @@
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL NUEVA TERMINAL -->
+    <div class="modal fade" id="modalNuevaTerminal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-primary">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-pc-display"></i> Registrar Nueva Terminal</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Número de Terminal (ID)</label>
+                        <input id="termId" type="number" class="form-control" placeholder="Ej: 3" min="1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Nombre Descriptivo</label>
+                        <input id="termNombre" type="text" class="form-control" placeholder="Ej: Caja 3 (Bebidas)">
+                    </div>
+                    <div class="form-check form-switch mt-4">
+                        <input class="form-check-input" type="checkbox" id="termSoloAdmin">
+                        <label class="form-check-label fw-bold" for="termSoloAdmin">Bloquear para Cajeros (Solo
+                            Admin)</label>
+                        <small class="d-block text-muted">Si se activa, el sistema rechazará a los empleados comunes en
+                            esta PC.</small>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-top">
+                    <button type="button" class="btn btn-secondary fw-bold" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary fw-bold" onclick="guardarTerminal()">Guardar
+                        Terminal</button>
                 </div>
             </div>
         </div>
