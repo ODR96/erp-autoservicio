@@ -75,6 +75,7 @@ app.on('ready', () => {
 autoUpdater.on('update-downloaded', () => {
     if (ventanaPrincipal) {
         ventanaPrincipal.webContents.send('actualizacion-lista');
+        ventanaPrincipal.webContents.executeJavaScript(`console.error("Error en AutoUpdater: ${err.message}");`);
     }
 });
 

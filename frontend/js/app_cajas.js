@@ -50,7 +50,7 @@ async function cargarMonitor() {
     const contenedor = document.getElementById('contenedorMonitorVivo');
 
     try {
-        const response = await fetchSeguro(`${obtenerBaseUrl()}/caja/monitor_vivo`);
+        const response = await fetch(`${obtenerBaseUrl()}/caja/monitor_vivo`);
         const data = await response.json();
 
         if (data.error) throw new Error(data.error);
@@ -138,7 +138,7 @@ async function forzarCierreRemoto(turnoId) {
     if (confirm.isConfirmed) {
         Swal.fire({ title: 'Cerrando caja remotamente...', didOpen: () => Swal.showLoading() });
         try {
-            const res = await fetchSeguro(`${obtenerBaseUrl()}/caja/cerrar`, {
+            const res = await fetch(`${obtenerBaseUrl()}/caja/cerrar`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -171,7 +171,7 @@ async function buscarVentasPorFecha() {
     desglose.classList.add('d-none');
     
     try {
-        const res = await fetchSeguro(`${obtenerBaseUrl()}/ventas/por_fecha?fecha=${fecha}`);
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/por_fecha?fecha=${fecha}`);
         const data = await res.json();
         
         if (!res.ok) {
@@ -258,7 +258,7 @@ function filtrarTablaHistorica() {
 async function verDetalleTicketHistorico(ventaId) {
     Swal.fire({ title: 'Cargando detalle...', didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetchSeguro(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
         const data = await res.json();
 
         if (data.error) throw new Error(data.error);
@@ -299,7 +299,7 @@ async function imprimirTicketHistorico(ticketId) {
     try {
         Swal.fire({ title: 'Preparando impresión...', timer: 1000, showConfirmButton: false, didOpen: () => Swal.showLoading() });
 
-        const res = await fetchSeguro(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
         const ticket = await res.json();
 
         // Buscamos los datos de tu negocio en la memoria o ponemos genéricos
@@ -376,7 +376,7 @@ async function imprimirTicketHistorico(ticketId) {
 async function cargarEmpleados() {
     const tbody = document.getElementById('tablaEmpleadosBody');
     try {
-        const response = await fetchSeguro(`${obtenerBaseUrl()}/usuarios/listar`);
+        const response = await fetch(`${obtenerBaseUrl()}/usuarios/listar`);
         const data = await response.json();
 
         if (data.error) throw new Error(data.error);
@@ -459,7 +459,7 @@ async function guardarEmpleado() {
             metodo = 'PUT';
         }
 
-        const res = await fetchSeguro(url, {
+        const res = await fetch(url, {
             method: metodo,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nombre_completo: nombre, rol: rol, codigo_barras_credencial: credencial, pin_secreto: pin })
@@ -490,7 +490,7 @@ async function darDeBajaEmpleado(id, nombre) {
 
     if (confirm.isConfirmed) {
         try {
-            await fetchSeguro(`${obtenerBaseUrl()}/usuarios/baja/${id}`, { method: 'DELETE' });
+            await fetch(`${obtenerBaseUrl()}/usuarios/baja/${id}`, { method: 'DELETE' });
             Swal.fire('Bloqueado', 'Empleado dado de baja.', 'success');
             cargarEmpleados();
         } catch (e) {
@@ -512,7 +512,7 @@ async function reactivarEmpleado(id, nombre) {
 
     if (confirm.isConfirmed) {
         try {
-            await fetchSeguro(`${obtenerBaseUrl()}/usuarios/alta/${id}`, { method: 'PUT' });
+            await fetch(`${obtenerBaseUrl()}/usuarios/alta/${id}`, { method: 'PUT' });
             Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Usuario reactivado', showConfirmButton: false, timer: 1500 });
             cargarEmpleados();
         } catch (e) {
