@@ -47,6 +47,7 @@ class MovimientoCaja(BaseModel):
     tipo_movimiento: str # "RETIRO" (Sangría) o "INGRESO" (Cambio extra)
     monto: float
     observaciones: str
+    turno_id: int
 
 class CierreCaja(BaseModel):
     turno_id: int
@@ -148,26 +149,26 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         fecha_cierre = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         fecha_apertura = turno['fecha_hora_apertura']
         
-        # 1. Ventas en Efectivo (Ignorando las Anuladas)
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND fecha_hora >= ? AND estado = 'COMPLETADA'", (fecha_apertura,))
+        # 1. Ventas en Efectivo
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
         ventas_efectivo = cursor.fetchone()[0] or 0.0
         
         # 2. Otros Medios (Tarjeta y Billetera)
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%TARJETA%' AND fecha_hora >= ? AND estado = 'COMPLETADA'", (fecha_apertura,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%TARJETA%' AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
         ventas_tarjeta = cursor.fetchone()[0] or 0.0
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%BILLETERA%' AND fecha_hora >= ? AND estado = 'COMPLETADA'", (fecha_apertura,))
-        ventas_virtual = cursor.fetchone()[0] or 0.0
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%BILLETERA%' AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
+        ventas_virtual = cursor.fetchone()[0] or 0.0    
         
         # EL PARCHE DEL FIADO: Buscamos ambos nombres
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND fecha_hora >= ? AND estado = 'COMPLETADA'", (fecha_apertura,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado = 'COMPLETADA'", (fecha_apertura,))
         ventas_fiados = cursor.fetchone()[0] or 0.0
         
         # 3. Movimientos de Caja
-        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND fecha_hora >= ?", (fecha_apertura,))
+        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (fecha_apertura,))
         total_retiros = cursor.fetchone()[0] or 0.0
         
-        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND fecha_hora >= ?", (fecha_apertura,))
+        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?", (fecha_apertura,))
         total_ingresos = cursor.fetchone()[0] or 0.0
         
         # CÁLCULO DE CAJA: Solo el efectivo físico que debe haber en el cajón
@@ -380,6 +381,7 @@ class CobroPedido(BaseModel):
     metodo_pago: str
     pagos_mixtos: Optional[List[PagoMixtoCaja]] = None
     observaciones: Optional[str] = ""
+    turno_id: int
 
 # --- RUTA OFICIAL: CONECTAR COBRO CON LOGÍSTICA ---
 @router.post("/cobrar_pedido", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])

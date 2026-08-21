@@ -10,6 +10,20 @@ router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
 
 
+# --- PARCHE DE MIGRACIÓN: PREPARAR PARA MÚLTIPLES CAJAS ---
+def asegurar_columnas_multi_caja():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try: cursor.execute("ALTER TABLE ventas_cabecera ADD COLUMN turno_id INTEGER DEFAULT 0")
+    except: pass
+    try: cursor.execute("ALTER TABLE movimientos_caja ADD COLUMN turno_id INTEGER DEFAULT 0")
+    except: pass
+    conexion.commit()
+    conexion.close()
+
+asegurar_columnas_multi_caja()
+# ----------------------------------------------------------
+
 @router.get("/por_fecha", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def obtener_ventas_por_fecha(fecha: str = Query(..., description="Formato YYYY-MM-DD")):
     conexion = obtener_conexion()
@@ -75,6 +89,7 @@ class NuevaVenta(BaseModel):
     items: List[ItemVenta]
     pagos_mixtos: Optional[List[PagoMixto]] = None
     cajero_nombre: str = "Sistema"
+    turno_id: int
 
 # --- 2. EL MOTOR DE COBRO ---
 @router.post("/cobrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
@@ -92,10 +107,10 @@ def registrar_venta(venta: NuevaVenta):
         cursor.execute('''
             INSERT INTO ventas_cabecera 
             (fecha_hora, cliente_id, tipo_comprobante, nombre_cliente_factura, documento_cliente, 
-             condicion_iva_cliente, total_venta, metodo_pago, descuento_recargo_global, estado)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'COMPLETADA')
+             condicion_iva_cliente, total_venta, metodo_pago, descuento_recargo_global, estado, turno_id)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'COMPLETADA', ?)
         ''', (fecha_actual, venta.cliente_id, venta.tipo_comprobante, venta.nombre_cliente_factura, 
-              venta.documento_cliente, venta.condicion_iva_cliente, venta.metodo_pago, venta.descuento_recargo_global))
+              venta.documento_cliente, venta.condicion_iva_cliente, venta.metodo_pago, venta.descuento_recargo_global, venta.turno_id))
         
         venta_id = cursor.lastrowid
         
@@ -355,6 +370,8 @@ def historial_ventas_turno(turno_id: int):
 
 class AnularVentaRequest(BaseModel):
     usuario_id: int # <-- Ahora pedimos quién anula
+    turno_id: int
+    
 
 @router.put("/anular/{venta_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def anular_venta(venta_id: int, peticion: AnularVentaRequest):

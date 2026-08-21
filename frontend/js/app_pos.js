@@ -1,15 +1,11 @@
-// --- INTERCEPTOR DE SEGURIDAD GLOBAL ---
-// --- INTERCEPTOR DE SEGURIDAD GLOBAL ---
 const originalFetch = window.fetch;
 window.fetch = async function() {
     let [recurso, config] = arguments;
     if (!config) config = {};
     if (!config.headers) config.headers = {};
     
-    // 1. Verificamos si la petición va a TU servidor
     const vaAMiServidor = recurso.toString().includes(obtenerBaseUrl());
     
-    // 2. SOLO si va a tu servidor, le pegamos el token secreto
     if (vaAMiServidor) {
         const tokenSeguridad = localStorage.getItem('token') || localStorage.getItem('token_pos');
         if (tokenSeguridad) {
@@ -19,26 +15,21 @@ window.fetch = async function() {
     
     const respuesta = await originalFetch(recurso, config);
     
-    // 3. El blindaje: Si es nuestro servidor y nos rechaza (401)
     if (vaAMiServidor && respuesta.status === 401) {
         console.warn("Sesión expirada o sin permisos (401)");
         localStorage.clear();
-        window.location.href = 'index.html'; // Pateamos al usuario al login
+        window.location.href = 'index.html';
         throw new Error("Acceso denegado (401)");
     }
     
     return respuesta;
 };
-// ---------------------------------------
-// ---------------------------------------
 
-// --- UTILIDAD: Buscador a prueba de errores ---
 function normalizarTexto(texto) {
     if (!texto) return "";
     return texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
-// Reloj
 setInterval(() => {
     const d = new Date();
     // Le agregamos el hour12: false para forzar el formato militar/24hs
@@ -48,8 +39,7 @@ setInterval(() => {
 
 // ===== VARIABLES GLOBALES Y SEGURIDAD =====
 let carrito = []; let subtotalVenta = 0; let totalVenta = 0; let porcentajeDescuento = 0; let porcentajeRecargo = 0; let mult = 1; let ventasEnEspera = []; let cajaAbierta = false; let turnoActualId = null;
-
-// PARCHE: Usamos localStorage para que la sesión sobreviva si cambiás de pestaña
+let terminal_id = localStorage.getItem('caja_fisica_id') || null;
 let empleadoLogueado = JSON.parse(localStorage.getItem('empleado_pos')) || null;
 let token = localStorage.getItem('token_pos') || null;
 
@@ -62,22 +52,19 @@ const modalNuevoCliente = new bootstrap.Modal(document.getElementById('modalNuev
 const modalCobroEfectivo = new bootstrap.Modal(document.getElementById('modalCobroEfectivo'));
 const modalSeleccionCliente = new bootstrap.Modal(document.getElementById('modalSeleccionCliente'));
 
-// ===== 1. EL PATOVICA DEL POS (LOGIN) =====
 document.addEventListener("DOMContentLoaded", () => {
     cargarCategoriasRapidas();
 
-    // Leemos la llave del Sótano
     const token = localStorage.getItem('token');
     const rol = localStorage.getItem('usuario_rol');
     const nombre = localStorage.getItem('usuario_nombre');
 
-    // Si alguien quiso entrar al POS sin pasar por index.html, lo pateamos afuera
     if (!token || !nombre) {
         window.location.href = 'index.html';
         return;
     }
 
-    empleadoLogueado = { nombre: nombre, rol: rol, id: 1 }; // (ID temporal para caja)
+    empleadoLogueado = { nombre: nombre, rol: rol, id: 1 }; 
     iniciarInterfazPOS();
 });
 
@@ -166,7 +153,6 @@ async function cerrarSesionCajero() {
     }
 }
 
-// ===== 2. ARRANQUE DEL POS (Memoria de Caja) =====
 async function iniciarInterfazPOS() {
     const nombre = localStorage.getItem('usuario_nombre');
     const rol = localStorage.getItem('usuario_rol');
@@ -185,7 +171,30 @@ async function iniciarInterfazPOS() {
         flechaAdmin.style.display = (rol === 'ADMIN' || rol === 'ENCARGADO') ? 'block' : 'none';
     }
 
-    // Mini-función para dibujar el carrito recuperado solo si la caja abre bien
+    if (!terminal_id) {
+        const { value: cajaSeleccionada } = await Swal.fire({
+            title: '🖥️ Configurar Terminal',
+            text: 'Esta computadora no tiene asignada una caja. ¿Qué número de terminal es?',
+            input: 'select',
+            inputOptions: {
+                '1': 'Caja 1 (Mostrador Principal)',
+                '2': 'Caja 2 (Mostrador Secundario)',
+                '99': 'Caja 99 (Oficina / Notebook Admin)'
+            },
+            inputPlaceholder: 'Seleccione una caja',
+            showCancelButton: false,
+            allowOutsideClick: false,
+            confirmButtonText: 'Guardar Configuración',
+            confirmButtonColor: '#1b365d'
+        });
+
+        if (cajaSeleccionada) {
+            terminal_id = parseInt(cajaSeleccionada);
+            localStorage.setItem('caja_fisica_id', terminal_id);
+            await Swal.fire('Configurada', `Esta PC ahora está registrada como la Caja ${terminal_id}`, 'success');
+        }
+    }
+
     const cargarCarritoSobreviviente = () => {
         try {
             let carritoGuardado = localStorage.getItem('carrito_pos_recupero');
@@ -196,7 +205,6 @@ async function iniciarInterfazPOS() {
                     Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Ticket recuperado', showConfirmButton: false, timer: 2000 });
                 }
             }
-            // 2. RECUPERAR LAS VENTAS EN ESPERA
             let esperaGuardada = localStorage.getItem('ventas_espera_pos');
             if (esperaGuardada) {
                 ventasEnEspera = JSON.parse(esperaGuardada);
@@ -206,7 +214,7 @@ async function iniciarInterfazPOS() {
     };
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/caja/estado?caja_id=1`);
+        const res = await fetch(`${obtenerBaseUrl()}/caja/estado?caja_id=${terminal_id}`);
         const data = await res.json();
 
         if (data.estado === 'ABIERTO') {
@@ -215,22 +223,19 @@ async function iniciarInterfazPOS() {
             localStorage.setItem('turno_actual_offline', data.turno_id);
             actualizarInfoCabecera(data.turno_id);
 
-            cargarCarritoSobreviviente(); // <--- DIBUJA EL CARRITO ACÁ
+            cargarCarritoSobreviviente();
             setTimeout(() => inputScan.focus(), 500);
         } else {
             modalApertura.show();
             setTimeout(() => document.getElementById("montoApertura").focus(), 500);
         }
     } catch (error) {
-        // MODO SUPERVIVENCIA: Se apretó F5 sin internet
         let turnoGuardado = localStorage.getItem('turno_actual_offline');
-
         if (turnoGuardado) {
             cajaAbierta = true;
             turnoActualId = turnoGuardado;
             actualizarInfoCabecera(turnoGuardado);
-
-            cargarCarritoSobreviviente(); // <--- TAMBIÉN LO DIBUJA OFFLINE
+            cargarCarritoSobreviviente();
             setTimeout(() => inputScan.focus(), 500);
         } else {
             modalApertura.show();
@@ -375,7 +380,8 @@ async function confirmarAnulacion(ventaId, ticket) {
                     'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    usuario_id: empleadoLogueado.id // Le mandamos la firma
+                    usuario_id: empleadoLogueado.id,
+                    turno_id: turnoActualId
                 })
             });
             const data = await res.json();
@@ -422,7 +428,7 @@ async function iniciarTurno() {
     Swal.fire({ title: 'Abriendo...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     try {
-        const payload = { caja_id: 1, usuario_id: empleadoLogueado.id, monto_inicial: monto };
+        const payload = { caja_id: terminal_id, usuario_id: empleadoLogueado.id, monto_inicial: monto };
         const response = await fetch(`${obtenerBaseUrl()}/caja/abrir`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await response.json();
         if (data.error) throw new Error(data.error);
@@ -434,11 +440,9 @@ async function iniciarTurno() {
     } catch (error) { Swal.fire('Error', error.message, 'error'); }
 }
 
-// ===== 3. PERMISOS Y RESTRICCIONES =====
 async function anularVentaConAviso() {
     if (carrito.length === 0) return inputScan.focus();
 
-    // Liberado: Cualquier cajero puede limpiar el mostrador para agilizar la fila
     const result = await Swal.fire({
         title: '¿Anular venta?',
         text: "Se borrarán todos los artículos del ticket.",
@@ -989,8 +993,6 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
             if (regla) precioCalculado = regla.precio_oferta_unitario;
         }
 
-        // --- EL BLINDAJE ANTI-ERROR 422 QUE FALTABA ---
-        // Convertimos el ID a número. Si es texto, fecha larga o un invento, lo clavamos en 0.
         let idLimpio = parseInt(p.id);
         if (isNaN(idLimpio) || idLimpio > 999999999) {
             idLimpio = 0;
@@ -1020,12 +1022,12 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
         facturar_afip: false,
         cajero_nombre: empleadoLogueado ? empleadoLogueado.nombre : "Caja Principal",
         items: itemsVenta,
-        pagos_mixtos: arrayPagosMixtos, // <-- ACÁ LE MANDAMOS LA LISTA AL SÓTANO
-        autorizado_por: autorizadoPor
+        pagos_mixtos: arrayPagosMixtos,
+        autorizado_por: autorizadoPor,
+        turno_id: turnoActualId
     };
 
     try {
-        // Chequeo rápido de si el navegador ya sabe que no hay internet
         if (!navigator.onLine) {
             throw new Error("OFFLINE");
         }
@@ -1041,7 +1043,6 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
         return data;
 
     } catch (error) {
-        // EL GUARDAVIDAS: Si el error es de red o tiró OFFLINE, guardamos en la cola
         if (error.message === "OFFLINE" || error.message === "Failed to fetch" || error.message.includes("NetworkError")) {
 
             Swal.close(); // Cerramos el "Procesando..."
@@ -1696,7 +1697,6 @@ async function registrarMovimientoCaja(tipo) {
             if (!monto || monto <= 0) { Swal.showValidationMessage('Ingrese un monto mayor a 0'); return false; }
             if (!motivo) { Swal.showValidationMessage('Debe especificar el motivo'); return false; }
 
-            // EL PATOVICA DIGITAL: Validamos contra la Base de Datos
             if (tipo === 'retiro') {
                 if (!pinEl || !pinEl.value) { Swal.showValidationMessage('Ingrese su PIN secreto'); return false; }
 
@@ -1724,7 +1724,8 @@ async function registrarMovimientoCaja(tipo) {
                 body: JSON.stringify({
                     tipo_movimiento: tipo,
                     monto: formValues.monto,
-                    observaciones: formValues.motivo
+                    observaciones: formValues.motivo,
+                    turno_id: turnoActualId
                 })
             });
 

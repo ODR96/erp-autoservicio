@@ -48,13 +48,6 @@ function obtenerBaseUrl() {
             return;
         }
     }
-
-    // 3. NUEVO BLINDAJE: El Admin/Dueño NO toca la caja física
-    if ((rol === 'ADMIN' || rol === 'ENCARGADO') && rutaActual.includes('pos.html')) {
-        alert("MODO ADMINISTRADOR: No podés operar el POS para no alterar el saldo físico de los cajeros. Para ver las ventas, usá el Monitor de Cajas o el Dashboard.");
-        window.location.href = "admin_dashboard.html"; 
-        return;
-    }
 })();
 // ========================================================
 
