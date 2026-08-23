@@ -274,8 +274,8 @@ function actualizarInfoCabecera(turnoId) {
         const infoBar = document.querySelector(".ticket-info-bar span");
         if (infoBar) {
             const displayTurno = turnoId ? `#${turnoId}` : "---";
-            const numCaja = terminal_id ? terminal_id : "?"; // <--- AGREGAMOS ESTO
-            infoBar.innerHTML = `<strong>Terminal:</strong> ${numCaja} | <strong>Turno:</strong> ${displayTurno} | <strong>Cajero:</strong> ${empleadoLogueado.nombre}`;
+            const numCaja = terminal_id ? terminal_id : "?"; 
+            infoBar.innerHTML = `<strong>Caja:</strong> ${numCaja} | <strong>Turno:</strong> ${displayTurno} | <strong>Cajero:</strong> ${empleadoLogueado.nombre}`;
         }
     }, 100);
 }
@@ -1994,11 +1994,21 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
 </body></html>
 `;
 
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.srcdoc = html;
-    document.body.appendChild(iframe);
-    iframe.onload = () => { iframe.contentWindow.print(); setTimeout(() => { document.body.removeChild(iframe); }, 1000); };
+    if (typeof require !== 'undefined') {
+        // MODO ESCRITORIO (NATIVO)
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.send('imprimir-silencioso', html);
+    } else {
+        // MODO WEB (DE EMERGENCIA)
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.srcdoc = html;
+        document.body.appendChild(iframe);
+        iframe.onload = () => { 
+            iframe.contentWindow.print(); 
+            setTimeout(() => { document.body.removeChild(iframe); }, 1000); 
+        };
+    }
 }
 
 // ==============================================================

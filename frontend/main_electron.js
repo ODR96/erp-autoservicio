@@ -51,12 +51,16 @@ ipcMain.on('imprimir-silencioso', (event, htmlContenido) => {
     winImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContenido)}`);
 
     winImpresion.webContents.on('did-finish-load', () => {
-        // LA MAGIA ESTÁ ACÁ
+        // LA MAGIA ESTÁ ACÁ: Configuración estricta para ticketeras térmicas
         winImpresion.webContents.print({
-            silent: true, // true = No le pregunta nada al cajero
-
-            // deviceName: 'POS-80' // <-- Si algún día necesitas forzar una impresora, le sacás las dos barras de adelante y pones el nombre de Windows acá.
-
+            silent: true,             // true = No le pregunta nada al cajero
+            printBackground: true,    // true = Imprime los fondos grises/negros de los tickets
+            margins: { 
+                marginType: 'none'    // <-- EL ESCUDO: Anula los márgenes gigantes de Windows
+            },
+            scaleFactor: 100          // <-- Forzamos la escala real para que no lo agrande
+            
+            // deviceName: 'POS-80' // <-- Si algún día necesitas forzar una impresora
         }, (success, errorType) => {
             winImpresion.close(); // Destruimos la ventana fantasma
         });

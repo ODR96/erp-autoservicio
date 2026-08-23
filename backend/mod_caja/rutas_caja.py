@@ -347,25 +347,23 @@ def monitor_cajas_vivo():
         
         fecha_corte = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for turno in turnos_abiertos:
-            fecha_apertura = turno['fecha_hora_apertura']
+            turno_id_actual = turno['turno_id']
             
-            # Efectivo
-            cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago = 'EFECTIVO' AND fecha_hora >= ?", (fecha_apertura,))
+            # Ahora filtramos por turno_id, NO por fecha_apertura
+            cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago = 'EFECTIVO' AND turno_id = ?", (turno_id_actual,))
             ventas_efectivo = cursor.fetchone()[0] or 0.0
             
-            # Tarjeta / POS
-            cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago LIKE '%Tarjeta%' AND fecha_hora >= ?", (fecha_apertura,))
+            cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago LIKE '%Tarjeta%' AND turno_id = ?", (turno_id_actual,))
             ventas_tarjeta = cursor.fetchone()[0] or 0.0
             
-            # Billetera / QR
-            cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago LIKE '%Billetera%' AND fecha_hora >= ?", (fecha_apertura,))
+            cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago LIKE '%Billetera%' AND turno_id = ?", (turno_id_actual,))
             ventas_virtual = cursor.fetchone()[0] or 0.0
             
-            # Ingresos y Retiros
-            cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND fecha_hora >= ?", (fecha_apertura,))
+            # Ingresos y Retiros atados al turno
+            cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (turno_id_actual,))
             retiros = cursor.fetchone()[0] or 0.0
             
-            cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND fecha_hora >= ?", (fecha_apertura,))
+            cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?", (turno_id_actual,))
             ingresos = cursor.fetchone()[0] or 0.0
             
             turno['ventas_efectivo'] = ventas_efectivo
