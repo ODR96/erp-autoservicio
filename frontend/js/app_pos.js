@@ -64,7 +64,15 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
     }
 
-    empleadoLogueado = { nombre: nombre, rol: rol, id: 1 };
+    // Leemos el usuario real (Si no está, sacamos el del localStorage global)
+    const idUsuario = localStorage.getItem('usuario_id') || 1;
+    let empleadoGuardado = JSON.parse(localStorage.getItem('empleado_pos'));
+    
+    if (empleadoGuardado) {
+        empleadoLogueado = empleadoGuardado; // Mantiene los datos exactos del cajero
+    } else {
+        empleadoLogueado = { nombre: nombre, rol: rol, id: parseInt(idUsuario) }; 
+    }
     iniciarInterfazPOS();
 });
 
@@ -266,7 +274,8 @@ function actualizarInfoCabecera(turnoId) {
         const infoBar = document.querySelector(".ticket-info-bar span");
         if (infoBar) {
             const displayTurno = turnoId ? `#${turnoId}` : "---";
-            infoBar.innerHTML = `<strong>Turno:</strong> ${displayTurno} | <strong>Cajero:</strong> ${empleadoLogueado.nombre} | <strong>Rol:</strong> ${empleadoLogueado.rol}`;
+            const numCaja = terminal_id ? terminal_id : "?"; // <--- AGREGAMOS ESTO
+            infoBar.innerHTML = `<strong>Terminal:</strong> ${numCaja} | <strong>Turno:</strong> ${displayTurno} | <strong>Cajero:</strong> ${empleadoLogueado.nombre}`;
         }
     }, 100);
 }
@@ -2058,8 +2067,16 @@ async function cierreZ() {
                 allowOutsideClick: false
             });
 
-            // Y PONÉ ESTO:
-            localStorage.clear(); // Esto detona tanto la sesión del POS como la global
+            // Rescatamos el número de terminal antes de la explosión
+            let terminalGuardada = localStorage.getItem('caja_fisica_id');
+            
+            localStorage.clear(); // Detona la sesión
+            
+            // Volvemos a guardar la terminal para que no pierda la memoria
+            if (terminalGuardada) {
+                localStorage.setItem('caja_fisica_id', terminalGuardada);
+            }
+            
             window.location.href = "index.html";
 
         } catch (e) {
