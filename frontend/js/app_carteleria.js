@@ -236,6 +236,7 @@ function imprimirTodo() {
 
         for (let i = 0; i < item.copias; i++) {
             
+            // PLANTILLA 1: CENEFA ESTÁNDAR
             if (item.formato === "Cenefa_Normal") {
                 html += `
                     <div class="cartel" style="width: 100mm; height: 40mm; border: 1px solid #ddd; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;">
@@ -244,12 +245,13 @@ function imprimirTodo() {
                             ${txExtra}
                             <div class="truncate-lines" style="font-size: 11px; font-weight: bold; text-align: center; color: #333; line-height:1.1; margin-top:1mm; min-height: 8mm;">${item.nombre}</div>
                             ${bultoHTML}
-                            <div style="font-size: 32px; font-weight: 900; line-height: 1; margin-top:auto; color: #000; padding-bottom:1mm;">$${pF}</div>
+                            <div style="font-size: 32px; font-weight: 900; line-height: 1; margin-top:auto; color: #000;">$${pF}</div>
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:9mm; width:65mm; margin:0; margin-top:auto;"></svg>` : ''}
                         </div>
                     </div>
                 `;
             } 
+            // PLANTILLA 2: CENEFA DOBLE 
             else if (item.formato === "Cenefa_Doble") {
                 let mitadDer = item.cantMayo 
                     ? `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; justify-content:center; align-items:center; padding: 2mm;">
@@ -265,7 +267,8 @@ function imprimirTodo() {
                             <div style="font-size: 10px; text-transform:uppercase; color: #666; font-weight:bold; background: #f0f0f0; padding: 2px 8px; border-radius: 4px; margin-bottom: 2mm;">PRECIO NORMAL</div>
                             <div class="truncate-lines" style="font-size: 14px; font-weight: bold; text-align: center; line-height:1.1; color:#333; margin-bottom: 1mm;">${item.nombre}</div>
                             ${bultoHTML}
-                            <div style="font-size: 28px; font-weight: bold; color: #000;">$${pF}</div>
+                            <div style="font-size: 28px; font-weight: bold; color: #000; margin-bottom: 1mm;">$${pF}</div>
+                            ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:7mm; width:45mm; margin:0;"></svg>` : ''}
                         </div>
                         ${mitadDer}
                     </div>
@@ -310,10 +313,31 @@ function imprimirTodo() {
     zona.innerHTML = html;
     zona.classList.remove('d-none');
 
+    function borrarLogoLocal() {
+    localStorage.removeItem('logo_empresa_b64');
+    Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Logo eliminado', showConfirmButton: false, timer: 2000 });
+    actualizarPreview();
+}
+
+// ESCUDO CONTRA EL BUG DE LAS FLECHAS
+document.getElementById('inputBuscarEtiqueta').addEventListener('input', (e) => {
+    buscarProductoEtiqueta(e.target.value);
+});
+
     colaImpresion.forEach((item, idx) => {
-        if (item.formato === "Cenefa_Normal" && item.codigo_barras) {
+        if ((item.formato === "Cenefa_Normal" || item.formato === "Cenefa_Doble") && item.codigo_barras) {
             for (let i = 0; i < item.copias; i++) {
-                try { JsBarcode(`#bc-${idx}-${i}`, item.codigo_barras, { format: "CODE128", width: 1.5, height: 35, displayValue: false, margin: 0 }); } catch (e) {}
+                try { 
+                    JsBarcode(`#bc-${idx}-${i}`, item.codigo_barras, { 
+                        format: "CODE128", 
+                        width: 1.5, 
+                        height: 30, 
+                        displayValue: true, // ¡ACÁ ESTÁ LA MAGIA PARA QUE SE VEAN LOS NÚMEROS!
+                        fontSize: 12,
+                        textMargin: 1,
+                        margin: 0 
+                    }); 
+                } catch (e) {}
             }
         }
     });

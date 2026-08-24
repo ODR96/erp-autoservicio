@@ -15,136 +15,138 @@
     <div id="layout-sidebar-placeholder"></div>
     <div class="main-wrapper">
         <div id="layout-navbar-placeholder"></div>
-        <div class="content-area d-print-none">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h3 class="fw-bold mb-0" style="color: #1b365d;"><i class="bi bi-megaphone"></i> Marketing y Cartelería
-                </h3>
-                <div>
-                    <input type="file" id="inputLogo" class="d-none" accept="image/*"
-                        onchange="guardarLogoLocal(event)">
-                    <button class="btn btn-outline-secondary fw-bold shadow-sm"
-                        onclick="document.getElementById('inputLogo').click()">
-                        <i class="bi bi-image"></i> Cargar Logo de Empresa
-                    </button>
-                </div>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h3 class="fw-bold mb-0" style="color: #1b365d;"><i class="bi bi-megaphone"></i> Marketing y Cartelería</h3>
+            <div>
+                <input type="file" id="inputLogo" class="d-none" accept="image/*" onchange="guardarLogoLocal(event)">
+                <button class="btn btn-outline-secondary fw-bold shadow-sm"
+                    onclick="document.getElementById('inputLogo').click()">
+                    <i class="bi bi-image"></i> Logo
+                </button>
+                <!-- NUEVO BOTÓN PARA BORRAR EL LOGO -->
+                <button class="btn btn-outline-danger fw-bold shadow-sm ms-1" onclick="borrarLogoLocal()"
+                    title="Borrar Logo">
+                    <i class="bi bi-trash"></i>
+                </button>
             </div>
+        </div>
 
-            <div class="row g-3">
-                <!-- PANEL IZQUIERDO: DISEÑO -->
-                <div class="col-md-5">
-                    <div class="card border-primary shadow-sm h-100">
-                        <div class="card-header text-white fw-bold" style="background-color: #1b365d;">
-                            <i class="bi bi-palette"></i> Generador de Carteles
+        <div class="row g-3">
+            <!-- PANEL IZQUIERDO: DISEÑO -->
+            <div class="col-md-5">
+                <div class="card border-primary shadow-sm h-100">
+                    <div class="card-header text-white fw-bold" style="background-color: #1b365d;">
+                        <i class="bi bi-palette"></i> Generador de Carteles
+                    </div>
+                    <div class="card-body p-4">
+                        <!-- Switch Modo Libre -->
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="switchModoLibre"
+                                onchange="toggleModoLibre()">
+                            <label class="form-check-label fw-bold text-muted" for="switchModoLibre">Modo Libre (Sin
+                                Base de Datos)</label>
                         </div>
-                        <div class="card-body p-4">
-                            <!-- Switch Modo Libre -->
-                            <div class="form-check form-switch mb-3">
-                                <input class="form-check-input" type="checkbox" id="switchModoLibre"
-                                    onchange="toggleModoLibre()">
-                                <label class="form-check-label fw-bold text-muted" for="switchModoLibre">Modo Libre (Sin
-                                    Base de Datos)</label>
-                            </div>
 
-                            <!-- Buscador de Productos -->
-                            <div id="panelBuscador" class="position-relative mb-3">
-                                <label class="form-label fw-bold small text-primary">Buscar Producto:</label>
-                                <input type="text" id="inputBuscarEtiqueta" class="form-control border-primary"
-                                    placeholder="Ej: Vino Toro, Yerba..." onkeyup="buscarProductoEtiqueta(this.value)">
-                                <div id="resultadosEtiqueta" class="list-group position-absolute w-100 shadow-lg d-none"
-                                    style="z-index: 1050; max-height: 200px; overflow-y: auto;"></div>
-                            </div>
+                        <!-- Buscador de Productos -->
+                        <div id="panelBuscador" class="position-relative mb-3">
+                            <label class="form-label fw-bold small text-primary">Buscar Producto:</label>
+                            <input type="text" id="inputBuscarEtiqueta" class="form-control border-primary"
+                                placeholder="Ej: Vino Toro, Yerba...">
+                            <div id="resultadosEtiqueta" class="list-group position-absolute w-100 shadow-lg d-none"
+                                style="z-index: 1050; max-height: 200px; overflow-y: auto;"></div>
+                        </div>
 
-                            <!-- Panel Modo Libre (Oculto por defecto) -->
-                            <div id="panelLibre" class="mb-3 d-none p-3 bg-light border rounded">
-                                <label class="form-label fw-bold small">Título / Producto Manual:</label>
-                                <input type="text" id="libreTitulo" class="form-control form-control-sm mb-2"
-                                    placeholder="Ej: Hielo en Rolito">
-                                <label class="form-label fw-bold small">Precio Libre ($):</label>
-                                <input type="number" id="librePrecio"
-                                    class="form-control form-control-sm text-success fw-bold mb-2" placeholder="1500">
-                                <label class="form-label fw-bold small text-primary"><i class="bi bi-camera"></i> Foto
-                                    (Solo para Cartel A4):</label>
-                                <input type="file" id="libreFoto" class="form-control form-control-sm border-primary"
-                                    accept="image/*">
-                            </div>
+                        <!-- Panel Modo Libre (Oculto por defecto) -->
+                        <div id="panelLibre" class="mb-3 d-none p-3 bg-light border rounded">
+                            <label class="form-label fw-bold small">Título / Producto Manual:</label>
+                            <input type="text" id="libreTitulo" class="form-control form-control-sm mb-2"
+                                placeholder="Ej: Hielo en Rolito">
+                            <label class="form-label fw-bold small">Precio Libre ($):</label>
+                            <input type="number" id="librePrecio"
+                                class="form-control form-control-sm text-success fw-bold mb-2" placeholder="1500">
+                            <label class="form-label fw-bold small text-primary"><i class="bi bi-camera"></i> Foto
+                                (Solo para Cartel A4):</label>
+                            <input type="file" id="libreFoto" class="form-control form-control-sm border-primary"
+                                accept="image/*">
+                        </div>
 
-                            <hr>
+                        <hr>
 
-                            <!-- Formato y Plantilla -->
-                            <div class="row g-2 mb-3">
-                                <div class="col-6">
-                                    <label class="form-label fw-bold small">Formato Físico:</label>
-                                    <select class="form-select form-select-sm fw-bold" id="selectFormato"
-                                        onchange="actualizarPreview()">
-                                        <option value="Cenefa_Normal">Cenefa Estándar (10x4 cm)</option>
-                                        <option value="Cenefa_Doble">Cenefa Promocional (20x4 cm)</option>
-                                        <option value="Cartel_A4">Cartel Puntera (Hoja A4)</option>
-                                    </select>
-                                </div>
-                                <div class="col-6">
-                                    <label class="form-label fw-bold small">Texto Destacado (Opcional):</label>
-                                    <input type="text" class="form-control form-control-sm" id="inputTextoExtra"
-                                        placeholder="Ej: ¡Oferta Familiar!" oninput="actualizarPreview()">
-                                </div>
+                        <!-- Formato y Plantilla -->
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label fw-bold small">Formato Físico:</label>
+                                <select class="form-select form-select-sm fw-bold" id="selectFormato"
+                                    onchange="actualizarPreview()">
+                                    <option value="Cenefa_Normal">Cenefa Estándar (10x4 cm)</option>
+                                    <option value="Cenefa_Doble">Cenefa Promocional (20x4 cm)</option>
+                                    <option value="Cartel_A4">Cartel Puntera (Hoja A4)</option>
+                                </select>
                             </div>
+                            <div class="col-6">
+                                <label class="form-label fw-bold small">Texto Destacado (Opcional):</label>
+                                <input type="text" class="form-control form-control-sm" id="inputTextoExtra"
+                                    placeholder="Ej: ¡Oferta Familiar!" oninput="actualizarPreview()">
+                            </div>
+                        </div>
 
-                            <!-- Vista Previa -->
-                            <label class="form-label fw-bold small text-muted"><i class="bi bi-eye"></i> Vista Previa en
-                                Vivo:</label>
-                            <div id="previewCanva"
-                                class="border rounded bg-white shadow-inner d-flex justify-content-center align-items-center mb-4"
-                                style="height: 150px; overflow: hidden; background-color: #f8f9fa;">
-                                <div class="text-muted small">Seleccioná un formato para ver el diseño</div>
-                            </div>
+                        <!-- Vista Previa -->
+                        <label class="form-label fw-bold small text-muted"><i class="bi bi-eye"></i> Vista Previa en
+                            Vivo:</label>
+                        <div id="previewCanva"
+                            class="border rounded bg-white shadow-inner d-flex justify-content-center align-items-center mb-4"
+                            style="height: 150px; overflow: hidden; background-color: #f8f9fa;">
+                            <div class="text-muted small">Seleccioná un formato para ver el diseño</div>
+                        </div>
 
-                            <div class="input-group">
-                                <span class="input-group-text fw-bold">Copias:</span>
-                                <input type="number" class="form-control text-center fw-bold border-success"
-                                    id="inputCopias" value="1" min="1">
-                                <button class="btn btn-success fw-bold px-4" onclick="agregarACola()"><i
-                                        class="bi bi-plus-circle"></i> A LA COLA</button>
-                            </div>
+                        <div class="input-group">
+                            <span class="input-group-text fw-bold">Copias:</span>
+                            <input type="number" class="form-control text-center fw-bold border-success"
+                                id="inputCopias" value="1" min="1">
+                            <button class="btn btn-success fw-bold px-4" onclick="agregarACola()"><i
+                                    class="bi bi-plus-circle"></i> A LA COLA</button>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <!-- PANEL DERECHO: COLA DE IMPRESIÓN -->
-                <div class="col-md-7">
-                    <div class="card border-0 shadow-sm h-100">
-                        <div
-                            class="card-header bg-white border-bottom-0 pt-4 pb-0 d-flex justify-content-between align-items-center">
-                            <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-printer"></i> Cola de Impresión</h5>
-                            <button class="btn btn-outline-danger btn-sm fw-bold" onclick="vaciarCola()"><i
-                                    class="bi bi-trash"></i> Vaciar Cola</button>
+            <!-- PANEL DERECHO: COLA DE IMPRESIÓN -->
+            <div class="col-md-7">
+                <div class="card border-0 shadow-sm h-100">
+                    <div
+                        class="card-header bg-white border-bottom-0 pt-4 pb-0 d-flex justify-content-between align-items-center">
+                        <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-printer"></i> Cola de Impresión</h5>
+                        <button class="btn btn-outline-danger btn-sm fw-bold" onclick="vaciarCola()"><i
+                                class="bi bi-trash"></i> Vaciar Cola</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive border rounded mb-3" style="height: 350px; overflow-y: auto;">
+                            <table class="table table-hover align-middle text-center mb-0" id="tablaCola">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th class="text-start ps-3">Cartel</th>
+                                        <th>Precio</th>
+                                        <th>Formato</th>
+                                        <th>Copias</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="5" class="text-muted py-5">No hay carteles en cola.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
-                        <div class="card-body">
-                            <div class="table-responsive border rounded mb-3" style="height: 350px; overflow-y: auto;">
-                                <table class="table table-hover align-middle text-center mb-0" id="tablaCola">
-                                    <thead class="table-light sticky-top">
-                                        <tr>
-                                            <th class="text-start ps-3">Cartel</th>
-                                            <th>Precio</th>
-                                            <th>Formato</th>
-                                            <th>Copias</th>
-                                            <th></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td colspan="5" class="text-muted py-5">No hay carteles en cola.</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <button class="btn btn-primary btn-lg w-100 fw-bold shadow-sm"
-                                style="background-color: #1b365d; border: none;" onclick="imprimirTodo()">
-                                <i class="bi bi-printer-fill"></i> IMPRIMIR CARTELES AHORA
-                            </button>
-                        </div>
+                        <button class="btn btn-primary btn-lg w-100 fw-bold shadow-sm"
+                            style="background-color: #1b365d; border: none;" onclick="imprimirTodo()">
+                            <i class="bi bi-printer-fill"></i> IMPRIMIR CARTELES AHORA
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
+    </div>
     </div>
 
     <!-- CONTENEDOR INVISIBLE PARA LA IMPRESORA -->
