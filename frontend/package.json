@@ -1,6 +1,6 @@
 {
   "name": "frontend",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Punto de Venta",
   "main": "main_electron.js",
   "scripts": {
