@@ -56,6 +56,17 @@ function guardarLogoLocal(event) {
     reader.readAsDataURL(event.target.files[0]);
 }
 
+    function borrarLogoLocal() {
+    localStorage.removeItem('logo_empresa_b64');
+    Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Logo eliminado', showConfirmButton: false, timer: 2000 });
+    actualizarPreview();
+}
+
+// ESCUDO CONTRA EL BUG DE LAS FLECHAS
+document.getElementById('inputBuscarEtiqueta').addEventListener('input', (e) => {
+    buscarProductoEtiqueta(e.target.value);
+});
+
 function toggleModoLibre() {
     const esLibre = document.getElementById('switchModoLibre').checked;
     document.getElementById('panelBuscador').classList.toggle('d-none', esLibre);
@@ -313,16 +324,6 @@ function imprimirTodo() {
     zona.innerHTML = html;
     zona.classList.remove('d-none');
 
-    function borrarLogoLocal() {
-    localStorage.removeItem('logo_empresa_b64');
-    Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Logo eliminado', showConfirmButton: false, timer: 2000 });
-    actualizarPreview();
-}
-
-// ESCUDO CONTRA EL BUG DE LAS FLECHAS
-document.getElementById('inputBuscarEtiqueta').addEventListener('input', (e) => {
-    buscarProductoEtiqueta(e.target.value);
-});
 
     colaImpresion.forEach((item, idx) => {
         if ((item.formato === "Cenefa_Normal" || item.formato === "Cenefa_Doble") && item.codigo_barras) {
