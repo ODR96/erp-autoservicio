@@ -4,9 +4,9 @@ function obtenerBaseUrl() {
 
     // Si estás en la compu programando/probando localmente:
     if (dominio === 'localhost' || dominio === '127.0.0.1') {
-        return 'http://localhost:8000'; 
+        return 'http://localhost:8000';
     }
-    
+
     // Si la app corre en el mostrador (Electron usa 'file:') o desde la web remota:
     // Apunta directo a tu Contabo para tener tiempo real absoluto
     return 'http://185.249.225.63:8000';
@@ -18,7 +18,7 @@ function obtenerBaseUrl() {
 (function verificarPermisosGlobales() {
     const token = localStorage.getItem('token');
     const rol = localStorage.getItem('usuario_rol') || localStorage.getItem('rol');
-    
+
     if (!token) {
         window.location.href = "index.html";
         return;
@@ -29,22 +29,22 @@ function obtenerBaseUrl() {
     // 1. El Cajero no entra a la oficina
     if (rol === 'CAJERO' && rutaActual.includes('admin_')) {
         alert("ACCESO DENEGADO: Tu rol de CAJERO no te permite entrar a la administración.");
-        window.location.href = "pos.html"; 
+        window.location.href = "pos.html";
         return;
     }
 
     // 2. El Encargado no toca la configuración profunda
     if (rol === 'ENCARGADO') {
         const zonasProhibidas = [
-            'admin_cajas.html', 
-            'admin_cheques.html', 
-            'admin_reportes.html', 
+            'admin_cajas.html',
+            'admin_cheques.html',
+            'admin_reportes.html',
             'admin_config.html'
         ];
-        
+
         if (zonasProhibidas.some(zona => rutaActual.includes(zona))) {
             alert("ACCESO RESTRINGIDO: Esta sección es exclusiva del Administrador (Dueño).");
-            window.location.href = "admin_productos.html"; 
+            window.location.href = "admin_productos.html";
             return;
         }
     }
@@ -70,6 +70,11 @@ function inyectarLayout() {
                 <a href="admin_dashboard.html" class="menu-item"><i class="bi bi-speedometer2"></i> Dashboard</a>
                 <a href="pos.html" class="menu-item"><i class="bi bi-display"></i> Abrir POS (Caja)</a>
                 <a href="admin_productos.html" class="menu-item"><i class="bi bi-box-seam"></i> Productos & Stock</a>
+                <li class="sidebar-item">
+    <a href="admin_carteleria.html" class="sidebar-link">
+        <i class="bi bi-megaphone"></i> Cartelería
+    </a>
+</li>
                 <a href="admin_mayorista.html" class="menu-item"><i class="bi bi-truck"></i> Venta Depósito</a>
                 
                 ${esAdmin ? `<a href="admin_cajas.html" class="menu-item"><i class="bi bi-safe"></i> Cajas y Turnos</a>` : ''}
@@ -92,7 +97,7 @@ function inyectarLayout() {
         </button>
     ` : '';
 
-const navbarHTML = `
+    const navbarHTML = `
         <div class="top-navbar d-print-none">
             <!-- BOTÓN HAMBURGUESA QUE HABÍA DESAPARECIDO -->
             <button class="btn-hamburguesa d-md-none me-3" onclick="toggleMenu()" title="Abrir Menú">
@@ -147,7 +152,7 @@ const navbarHTML = `
 function toggleMenu() {
     document.getElementById('sidebarMenu').classList.toggle('mostrar');
     const backdrop = document.getElementById('sidebarBackdrop');
-    if(backdrop) backdrop.classList.toggle('mostrar');
+    if (backdrop) backdrop.classList.toggle('mostrar');
 }
 
 async function cargarDolar() {
@@ -155,7 +160,7 @@ async function cargarDolar() {
         const respuesta = await fetch('https://dolarapi.com/v1/dolares/blue');
         const datos = await respuesta.json();
         const caja = document.getElementById('cajaDolar');
-        if(caja) caja.innerHTML = `<i class="bi bi-currency-dollar text-success"></i> Blue: C $${datos.compra} | V $${datos.venta}`;
+        if (caja) caja.innerHTML = `<i class="bi bi-currency-dollar text-success"></i> Blue: C $${datos.compra} | V $${datos.venta}`;
     } catch (error) {
         console.log("No se pudo cargar el dólar. Sin internet.");
     }
@@ -192,7 +197,7 @@ async function forzarSincronizacion() {
         setTimeout(() => {
             window.location.reload();
         }, 1500);
-        
+
         setTimeout(() => {
             btn.classList.replace('btn-success', 'btn-outline-primary');
             btn.innerHTML = htmlOriginal;
@@ -201,10 +206,10 @@ async function forzarSincronizacion() {
 
     } catch (error) {
         console.error("Error al sincronizar:", error);
-        
+
         btn.classList.replace('btn-outline-primary', 'btn-danger');
         btn.innerHTML = `<i class="bi bi-x-circle-fill"></i> Error`;
-        
+
         setTimeout(() => {
             btn.classList.replace('btn-danger', 'btn-outline-primary');
             btn.innerHTML = htmlOriginal;
@@ -232,7 +237,7 @@ document.addEventListener("DOMContentLoaded", () => {
 // ========================================================
 if (typeof require !== 'undefined') {
     const { ipcRenderer } = require('electron');
-    
+
     ipcRenderer.on('actualizacion-lista', () => {
         Swal.fire({
             title: '¡Actualización Disponible!',
