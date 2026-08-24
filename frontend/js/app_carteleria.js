@@ -1,30 +1,3 @@
-const originalFetch = window.fetch;
-window.fetch = async function() {
-    let [recurso, config] = arguments;
-    if (!config) config = {};
-    if (!config.headers) config.headers = {};
-    
-    const vaAMiServidor = recurso.toString().includes(obtenerBaseUrl());
-    
-    if (vaAMiServidor) {
-        const tokenSeguridad = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        if (tokenSeguridad) {
-            config.headers['Authorization'] = `Bearer ${tokenSeguridad}`;
-        }
-    }
-    
-    const respuesta = await originalFetch(recurso, config);
-    
-    if (vaAMiServidor && respuesta.status === 401) {
-        console.warn("Sesión expirada o sin permisos (401)");
-        localStorage.clear();
-        window.location.href = 'index.html'; 
-        throw new Error("Acceso denegado (401)");
-    }
-    
-    return respuesta;
-};
-
 let catalogoLocal = [];
 let productoSeleccionado = null;
 let colaImpresion = []; 
@@ -33,19 +6,32 @@ const colorInstitucional = "#1b365d";
 let indiceBusqueda = -1;
 let itemsBusquedaActuales = [];
 
+// --- 1. ARRANQUE Y CARGA DE DATOS (CON TOKEN DIRECTO) ---
 document.addEventListener("DOMContentLoaded", async () => {
     try {
         const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        const res = await fetch(`${obtenerBaseUrl()}/productos/listar`, { headers: { 'Authorization': `Bearer ${token}` } });
+        
+        // Petición 1: Catálogo con llave en mano
+        const res = await fetch(`${obtenerBaseUrl()}/productos/listar`, { 
+            headers: { 'Authorization': `Bearer ${token}` } 
+        });
         const data = await res.json();
         catalogoLocal = data.productos || [];
+        
         await cargarColaDesdeDB();
     } catch (e) { console.error("Error cargando catálogo", e); }
 });
 
+// --- 2. CARGA DE COLA (CON TOKEN DIRECTO) ---
 async function cargarColaDesdeDB() {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/productos/etiquetas/listar`);
+        const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
+        
+        // Petición 2: Cola de impresión con llave en mano
+        const res = await fetch(`${obtenerBaseUrl()}/productos/etiquetas/listar`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
         const data = await res.json();
         const itemsDB = (data.cola || []).map(c => {
             return {
@@ -54,6 +40,7 @@ async function cargarColaDesdeDB() {
                 codigo_barras: c.codigo_barras, producto_id: c.producto_id
             };
         });
+        
         itemsDB.forEach(item => {
             const pReal = catalogoLocal.find(p => p.id === item.producto_id);
             if (pReal) {
@@ -67,6 +54,7 @@ async function cargarColaDesdeDB() {
                 }
             }
         });
+        
         colaImpresion = colaImpresion.filter(c => c.esLibre); 
         colaImpresion = [...itemsDB, ...colaImpresion];
         dibujarCola();
@@ -83,13 +71,12 @@ function guardarLogoLocal(event) {
     reader.readAsDataURL(event.target.files[0]);
 }
 
-    function borrarLogoLocal() {
+function borrarLogoLocal() {
     localStorage.removeItem('logo_empresa_b64');
     Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Logo eliminado', showConfirmButton: false, timer: 2000 });
     actualizarPreview();
 }
 
-// ESCUDO CONTRA EL BUG DE LAS FLECHAS
 document.getElementById('inputBuscarEtiqueta').addEventListener('input', (e) => {
     buscarProductoEtiqueta(e.target.value);
 });
@@ -195,7 +182,6 @@ function actualizarPreview() {
     preview.innerHTML = html;
 }
 
-// Lector de Base64 para la foto manual
 const procesarFotoBase64 = file => new Promise((resolve, reject) => {
     const reader = new FileReader(); reader.readAsDataURL(file);
     reader.onload = () => resolve(reader.result); reader.onerror = reject;
@@ -214,7 +200,6 @@ async function agregarACola() {
         item.precio = document.getElementById('librePrecio').value || 0;
         item.codigo_barras = "";
         
-        // Procesamos la foto si subió una
         const inputFotoLibre = document.getElementById('libreFoto');
         if (inputFotoLibre && inputFotoLibre.files.length > 0) {
             item.fotoManual = await procesarFotoBase64(inputFotoLibre.files[0]);
@@ -231,11 +216,32 @@ async function agregarACola() {
     Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Agregado a la cola', showConfirmButton: false, timer: 1000 });
 }
 
-async function vaciarCola() { try { await fetch(`${obtenerBaseUrl()}/productos/etiquetas/vaciar`, { method: 'DELETE' }); colaImpresion = []; dibujarCola(); } catch (e) { } }
+// --- 3. VACIAR Y BORRAR DE COLA (CON TOKEN DIRECTO) ---
+async function vaciarCola() { 
+    try { 
+        const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
+        await fetch(`${obtenerBaseUrl()}/productos/etiquetas/vaciar`, { 
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        }); 
+        colaImpresion = []; 
+        dibujarCola(); 
+    } catch (e) { console.error(e); } 
+}
+
 async function borrarItemCola(idx) { 
     const item = colaImpresion[idx];
-    if (!item.esLibre && item.id_db) { try { await fetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${item.id_db}`, { method: 'DELETE' }); } catch(e){} }
-    colaImpresion.splice(idx, 1); dibujarCola(); 
+    if (!item.esLibre && item.id_db) { 
+        try { 
+            const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
+            await fetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${item.id_db}`, { 
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            }); 
+        } catch(e){} 
+    }
+    colaImpresion.splice(idx, 1); 
+    dibujarCola(); 
 }
 
 function dibujarCola() {
@@ -274,7 +280,6 @@ function imprimirTodo() {
 
         for (let i = 0; i < item.copias; i++) {
             
-            // PLANTILLA 1: CENEFA ESTÁNDAR
             if (item.formato === "Cenefa_Normal") {
                 html += `
                     <div class="cartel" style="width: 100mm; height: 40mm; border: 1px solid #ddd; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;">
@@ -283,13 +288,12 @@ function imprimirTodo() {
                             ${txExtra}
                             <div class="truncate-lines" style="font-size: 11px; font-weight: bold; text-align: center; color: #333; line-height:1.1; margin-top:1mm; min-height: 8mm;">${item.nombre}</div>
                             ${bultoHTML}
-                            <div style="font-size: 32px; font-weight: 900; line-height: 1; margin-top:auto; color: #000;">$${pF}</div>
+                            <div style="font-size: 32px; font-weight: 900; line-height: 1; margin-top:auto; color: #000; padding-bottom:1mm;">$${pF}</div>
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:9mm; width:65mm; margin:0; margin-top:auto;"></svg>` : ''}
                         </div>
                     </div>
                 `;
             } 
-            // PLANTILLA 2: CENEFA DOBLE 
             else if (item.formato === "Cenefa_Doble") {
                 let mitadDer = item.cantMayo 
                     ? `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; justify-content:center; align-items:center; padding: 2mm;">
@@ -305,7 +309,7 @@ function imprimirTodo() {
                             <div style="font-size: 10px; text-transform:uppercase; color: #666; font-weight:bold; background: #f0f0f0; padding: 2px 8px; border-radius: 4px; margin-bottom: 2mm;">PRECIO NORMAL</div>
                             <div class="truncate-lines" style="font-size: 14px; font-weight: bold; text-align: center; line-height:1.1; color:#333; margin-bottom: 1mm;">${item.nombre}</div>
                             ${bultoHTML}
-                            <div style="font-size: 28px; font-weight: bold; color: #000; margin-bottom: 1mm;">$${pF}</div>
+                            <div style="font-size: 28px; font-weight: bold; color: #000;">$${pF}</div>
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:7mm; width:45mm; margin:0;"></svg>` : ''}
                         </div>
                         ${mitadDer}
@@ -317,10 +321,7 @@ function imprimirTodo() {
                     ? `<img src="${logo}" style="max-height: 40mm; object-fit: contain;">` 
                     : `<div style="font-size:30px; font-weight:900; color:${colorInstitucional}; text-transform:uppercase; letter-spacing: 2px;">Autoservicio 20 de Junio</div>`;
 
-                // LA LÓGICA DE FUENTE DINÁMICA (Si es un número gordo, se achica para no desbordar)
                 let fontSizePrecio = pF.length > 8 ? '100px' : (pF.length > 6 ? '120px' : '150px');
-                
-                // LA FOTO MANUAL SI EXISTE
                 let imagenManualHTML = (item.esLibre && item.fotoManual) ? `<img src="${item.fotoManual}" style="max-height: 80mm; max-width:100%; object-fit: contain; margin-bottom: 5mm; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.1);">` : '';
 
                 html += `
@@ -351,7 +352,6 @@ function imprimirTodo() {
     zona.innerHTML = html;
     zona.classList.remove('d-none');
 
-
     colaImpresion.forEach((item, idx) => {
         if ((item.formato === "Cenefa_Normal" || item.formato === "Cenefa_Doble") && item.codigo_barras) {
             for (let i = 0; i < item.copias; i++) {
@@ -360,7 +360,7 @@ function imprimirTodo() {
                         format: "CODE128", 
                         width: 1.5, 
                         height: 30, 
-                        displayValue: true, // ¡ACÁ ESTÁ LA MAGIA PARA QUE SE VEAN LOS NÚMEROS!
+                        displayValue: true,
                         fontSize: 12,
                         textMargin: 1,
                         margin: 0 
