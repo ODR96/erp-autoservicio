@@ -1,7 +1,11 @@
 let catalogoLocal = [];
 let productoSeleccionado = null;
-let colaImpresion = [];
-const colorInstitucional = "#1b365d"; // Tu azul petróleo / navy blue
+let colaImpresion = []; // Mezcla de DB y Manuales
+const colorInstitucional = "#1b365d";
+
+// --- MOTOR DE FLECHAS PARA EL BUSCADOR ---
+let indiceBusqueda = -1;
+let itemsBusquedaActuales = [];
 
 // --- 1. ARRANQUE Y CARGA DE DATOS ---
 document.addEventListener("DOMContentLoaded", async () => {
@@ -12,10 +16,56 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
         const data = await res.json();
         catalogoLocal = data.productos || [];
+        
+        // ¡NUEVO! Leemos la cola automática de la base de datos
+        await cargarColaDesdeDB();
     } catch (e) {
-        console.error("Error cargando catálogo para cartelería", e);
+        console.error("Error cargando catálogo", e);
     }
 });
+
+async function cargarColaDesdeDB() {
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/productos/etiquetas/listar`);
+        const data = await res.json();
+        
+        // Transformamos lo que viene de la DB al formato de nuestro visor
+        const itemsDB = (data.cola || []).map(c => {
+            return {
+                id_db: c.cola_id, // Guardamos el ID real para poder borrarlo
+                formato: c.formato === 'Cenefa' ? 'Cenefa_Normal' : 'Cartel_A4',
+                copias: c.cantidad,
+                textoExtra: c.texto_personalizado || '',
+                esLibre: false,
+                nombre: c.nombre,
+                precio: c.precio_venta_final,
+                codigo_barras: c.codigo_barras,
+                producto_id: c.producto_id
+            };
+        });
+        
+        // Los carteles automáticos no saben si son dobles o no, el frontend lo detecta:
+        itemsDB.forEach(item => {
+            const pReal = catalogoLocal.find(p => p.id === item.producto_id);
+            if (pReal) {
+                if (pReal.unidades_por_bulto > 1) {
+                    item.precio = item.precio * pReal.unidades_por_bulto;
+                    item.txtBulto = `PRECIO X CAJA CERRADA (${pReal.unidades_por_bulto} un.)`;
+                }
+                if (pReal.cant_promo) {
+                    item.formato = item.formato === 'Cenefa_Normal' ? 'Cenefa_Doble' : item.formato;
+                    item.precioMayo = pReal.precio_promo;
+                    item.cantMayo = pReal.cant_promo;
+                }
+            }
+        });
+
+        // Limpiamos los viejos de la DB que teníamos en memoria y sumamos los nuevos
+        colaImpresion = colaImpresion.filter(c => c.esLibre); // Retenemos los manuales
+        colaImpresion = [...itemsDB, ...colaImpresion];
+        dibujarCola();
+    } catch (e) { console.error("Error cargando cola DB", e); }
+}
 
 // --- 2. EL LOGO EN MEMORIA ---
 function guardarLogoLocal(event) {
@@ -40,25 +90,79 @@ function toggleModoLibre() {
 
 function buscarProductoEtiqueta(busqueda) {
     const contenedor = document.getElementById('resultadosEtiqueta');
-    if (busqueda.length < 2) { contenedor.classList.add('d-none'); return; }
+    indiceBusqueda = -1; // Resetea las flechas
 
-    const filtrados = catalogoLocal.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()) || (p.codigo_barras && p.codigo_barras.includes(busqueda))).slice(0, 8);
+    if (busqueda.length < 2) { 
+        contenedor.classList.add('d-none'); 
+        itemsBusquedaActuales = []; 
+        return; 
+    }
+
+    // BUSCADOR AVANZADO: Divide por palabras y busca en cualquier orden
+    let palabras = busqueda.toLowerCase().split(" ").filter(p => p !== "");
+    const filtrados = catalogoLocal.filter(p => {
+        return palabras.every(pal => 
+            p.nombre.toLowerCase().includes(pal) || 
+            (p.codigo_barras && p.codigo_barras.includes(pal))
+        );
+    }).slice(0, 8);
     
+    itemsBusquedaActuales = filtrados;
     contenedor.innerHTML = '';
-    filtrados.forEach(p => {
-        contenedor.innerHTML += `<button type="button" class="list-group-item list-group-item-action small py-2" onclick="seleccionarProd(${p.id})"><b>${p.codigo_barras || 'S/C'}</b> - ${p.nombre}</button>`;
+    
+    filtrados.forEach((p, idx) => {
+        contenedor.innerHTML += `
+            <button type="button" id="btn-busq-${idx}" class="list-group-item list-group-item-action small py-2" onmouseenter="indiceBusqueda = ${idx}; resaltarBusqueda();" onclick="seleccionarProd(${p.id})">
+                <b>${p.codigo_barras || 'S/C'}</b> - ${p.nombre}
+            </button>`;
     });
     contenedor.classList.remove('d-none');
+}
+
+// NAVEGACIÓN CON FLECHAS EN EL BUSCADOR
+document.getElementById('inputBuscarEtiqueta').addEventListener('keydown', (e) => {
+    if (itemsBusquedaActuales.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (indiceBusqueda < itemsBusquedaActuales.length - 1) indiceBusqueda++;
+        resaltarBusqueda();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (indiceBusqueda > 0) indiceBusqueda--;
+        resaltarBusqueda();
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (indiceBusqueda >= 0) {
+            seleccionarProd(itemsBusquedaActuales[indiceBusqueda].id);
+        } else if (itemsBusquedaActuales.length === 1) {
+            seleccionarProd(itemsBusquedaActuales[0].id);
+        }
+    }
+});
+
+function resaltarBusqueda() {
+    const botones = document.querySelectorAll('#resultadosEtiqueta button');
+    botones.forEach(btn => btn.classList.remove('active', 'bg-primary', 'text-white'));
+    if (indiceBusqueda >= 0) {
+        const btnActivo = document.getElementById(`btn-busq-${indiceBusqueda}`);
+        if (btnActivo) btnActivo.classList.add('active', 'bg-primary', 'text-white');
+    }
 }
 
 function seleccionarProd(id) {
     productoSeleccionado = catalogoLocal.find(p => p.id === id);
     document.getElementById('inputBuscarEtiqueta').value = productoSeleccionado.nombre;
     document.getElementById('resultadosEtiqueta').classList.add('d-none');
+    
+    // Autoselección inteligente de plantilla
+    if (productoSeleccionado.cant_promo) document.getElementById('selectFormato').value = 'Cenefa_Doble';
+    else document.getElementById('selectFormato').value = 'Cenefa_Normal';
+    
     actualizarPreview();
 }
 
-// --- 4. VISTA PREVIA (Miniaturas de Referencia) ---
+// --- 4. VISTA PREVIA (Miniaturas Refinadas) ---
 function actualizarPreview() {
     const preview = document.getElementById('previewCanva');
     const formato = document.getElementById('selectFormato').value;
@@ -66,12 +170,7 @@ function actualizarPreview() {
     const textoExtra = document.getElementById('inputTextoExtra').value.toUpperCase();
     const logo = localStorage.getItem('logo_empresa_b64');
 
-    let nombre = "SELECCIONE PRODUCTO";
-    let precio = "0.00";
-    let esMayorista = false;
-    let precioMayo = 0;
-    let cantMayo = 0;
-    let txtBulto = "";
+    let nombre = "SELECCIONE PRODUCTO"; let precio = "0.00"; let esMayorista = false; let precioMayo = 0; let cantMayo = 0; let txtBulto = "";
 
     if (esLibre) {
         nombre = document.getElementById('libreTitulo').value || "TÍTULO MANUAL";
@@ -79,16 +178,12 @@ function actualizarPreview() {
     } else if (productoSeleccionado) {
         nombre = productoSeleccionado.nombre;
         precio = productoSeleccionado.precio_venta_final;
-        // Si el bulto trae más de 1, lo avisamos automáticamente
         if (productoSeleccionado.unidades_por_bulto > 1) {
-            txtBulto = `CAJA/BULTO X ${productoSeleccionado.unidades_por_bulto}`;
-            precio = precio * productoSeleccionado.unidades_por_bulto; // Multiplica solo!
+            txtBulto = `X CAJA/BULTO CERRADO`;
+            precio = precio * productoSeleccionado.unidades_por_bulto; 
         }
-        // Detecta si tiene promo
         if (productoSeleccionado.cant_promo) {
-            esMayorista = true;
-            precioMayo = productoSeleccionado.precio_promo;
-            cantMayo = productoSeleccionado.cant_promo;
+            esMayorista = true; precioMayo = productoSeleccionado.precio_promo; cantMayo = productoSeleccionado.cant_promo;
         }
     }
 
@@ -96,18 +191,20 @@ function actualizarPreview() {
     let html = "";
 
     if (formato === "Cenefa_Normal") {
-        html = `<div style="width: 150px; height: 60px; border: 1px solid #ccc; background: white; border-left: 5px solid ${colorInstitucional}; display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative;">
-                    ${textoExtra ? `<div style="background:${colorInstitucional}; color:white; font-size:6px; padding:2px; position:absolute; top:0;">${textoExtra}</div>` : ''}
-                    <div style="font-size: 8px; font-weight:bold; margin-top:5px;">${nombre}</div>
-                    <div style="font-size: 16px; font-weight:900;">$${pF}</div>
+        html = `<div style="width: 150px; height: 60px; border: 1px solid #ccc; background: white; border-top: 4px solid ${colorInstitucional}; display:flex; flex-direction:column; align-items:center; position:relative;">
+                    ${textoExtra ? `<div style="background:#dc3545; color:white; font-size:6px; padding:2px 5px; border-radius:3px; margin-top:2px;">${textoExtra}</div>` : ''}
+                    <div style="font-size: 8px; font-weight:bold; margin-top:auto; text-align:center; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${nombre}</div>
+                    <div style="font-size: 16px; font-weight:900; margin-top:auto;">$${pF}</div>
                 </div>`;
     } else if (formato === "Cenefa_Doble") {
         let mitadDerecha = esMayorista 
-            ? `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:7px;"><span>Llevando ${cantMayo}</span><span style="font-size:14px; font-weight:bold;">$${precioMayo}</span></div>` 
+            ? `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                <span style="font-size:6px;">OFERTA MAYORISTA</span><span style="font-size:14px; font-weight:bold;">$${precioMayo}</span><span style="font-size:6px;">Llevando ${cantMayo} o más</span></div>` 
             : `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:bold;">$${pF}</div>`;
             
         html = `<div style="width: 250px; height: 60px; border: 1px solid #333; display:flex; background:white;">
                     <div style="width:50%; padding:5px; text-align:center; display:flex; flex-direction:column; justify-content:center;">
+                        ${textoExtra ? `<div style="font-size:6px; color:#dc3545; font-weight:bold;">${textoExtra}</div>` : ''}
                         <div style="font-size:8px; font-weight:bold;">${nombre}</div>
                         ${txtBulto ? `<div style="font-size:6px; color:red;">${txtBulto}</div>` : ''}
                         <div style="font-size:12px; font-weight:bold;">$${pF}</div>
@@ -115,7 +212,7 @@ function actualizarPreview() {
                     ${mitadDerecha}
                 </div>`;
     } else if (formato === "Cartel_A4") {
-        html = `<div style="width: 100px; height: 140px; border: 3px solid ${colorInstitucional}; background:white; display:flex; flex-direction:column; align-items:center; padding:10px;">
+        html = `<div style="width: 100px; height: 140px; border: 3px solid ${colorInstitucional}; border-radius:8px; background:white; display:flex; flex-direction:column; align-items:center; padding:10px;">
                     ${logo ? `<img src="${logo}" style="max-height:20px; margin-bottom:5px;">` : `<div style="font-size:8px; font-weight:bold; color:${colorInstitucional};">Autoservicio</div>`}
                     <div style="font-size:8px; font-weight:bold; text-align:center; margin-top:10px;">${nombre}</div>
                     <div style="font-size:18px; font-weight:900; color:#198754; margin-top:auto;">$${pF}</div>
@@ -146,7 +243,7 @@ function agregarACola() {
         
         if (productoSeleccionado.unidades_por_bulto > 1) {
             item.precio = item.precio * productoSeleccionado.unidades_por_bulto;
-            item.txtBulto = `CAJA/BULTO X ${productoSeleccionado.unidades_por_bulto}`;
+            item.txtBulto = `PRECIO X CAJA CERRADA (${productoSeleccionado.unidades_por_bulto} un.)`;
         }
         if (productoSeleccionado.cant_promo) {
             item.precioMayo = productoSeleccionado.precio_promo;
@@ -159,8 +256,23 @@ function agregarACola() {
     Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Agregado a la cola', showConfirmButton: false, timer: 1000 });
 }
 
-function vaciarCola() { colaImpresion = []; dibujarCola(); }
-function borrarItemCola(idx) { colaImpresion.splice(idx, 1); dibujarCola(); }
+async function vaciarCola() { 
+    try {
+        await fetch(`${obtenerBaseUrl()}/productos/etiquetas/vaciar`, { method: 'DELETE' });
+        colaImpresion = []; 
+        dibujarCola(); 
+    } catch (e) { console.error("Error vaciando cola", e); }
+}
+
+async function borrarItemCola(idx) { 
+    const item = colaImpresion[idx];
+    if (!item.esLibre && item.id_db) {
+        // Borramos de la base de datos si era automático
+        try { await fetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${item.id_db}`, { method: 'DELETE' }); } catch(e){}
+    }
+    colaImpresion.splice(idx, 1); 
+    dibujarCola(); 
+}
 
 function dibujarCola() {
     const tbody = document.querySelector('#tablaCola tbody');
@@ -171,9 +283,10 @@ function dibujarCola() {
     }
     colaImpresion.forEach((c, idx) => {
         let badge = c.formato.includes("Normal") ? "bg-secondary" : (c.formato.includes("Doble") ? "bg-primary" : "bg-success");
+        let txtDB = c.id_db ? '<i class="bi bi-robot text-primary" title="Generado Automáticamente"></i>' : '';
         tbody.innerHTML += `
             <tr>
-                <td class="text-start ps-3 fw-bold">${c.nombre}</td>
+                <td class="text-start ps-3 fw-bold">${txtDB} ${c.nombre}</td>
                 <td class="text-success fw-bold">$${parseFloat(c.precio).toFixed(2)}</td>
                 <td><span class="badge ${badge}">${c.formato.replace('_', ' ')}</span></td>
                 <td class="fw-bold">${c.copias}</td>
@@ -189,7 +302,6 @@ function imprimirTodo() {
     const zona = document.getElementById('zonaImpresion');
     const logo = localStorage.getItem('logo_empresa_b64');
     
-    // CSS ESTRICTO PARA ELECTRON Y CHROME
     let html = `
         <style>
             @media print {
@@ -199,70 +311,79 @@ function imprimirTodo() {
                 #zonaImpresion { display: flex !important; flex-wrap: wrap; gap: 5mm; visibility: visible !important; position: absolute; left: 0; top: 0; width: 100%; }
                 .cartel { page-break-inside: avoid; box-sizing: border-box; overflow: hidden; background: white !important; }
                 .bg-print { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                .truncate-lines { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; }
             }
         </style>
     `;
 
     colaImpresion.forEach((item, idx) => {
         let pF = parseFloat(item.precio).toLocaleString('es-AR', {minimumFractionDigits: 2});
-        let txExtra = item.textoExtra ? `<div class="bg-print" style="background:${colorInstitucional}; color:white; font-size:10px; font-weight:bold; text-align:center; text-transform:uppercase; padding:2px 5px; border-radius:3px; margin-bottom:2px;">${item.textoExtra}</div>` : '';
+        let txExtra = item.textoExtra ? `<div class="bg-print" style="background:#dc3545; color:white; font-size:10px; font-weight:bold; text-align:center; text-transform:uppercase; padding:2px 5px; border-radius:3px; margin-bottom:2px;">${item.textoExtra}</div>` : '';
         let bultoHTML = item.txtBulto ? `<div style="font-size:9px; color:red; font-weight:bold; margin-bottom:2px;">${item.txtBulto}</div>` : '';
 
         for (let i = 0; i < item.copias; i++) {
             
-            // PLANTILLA 1: CENEFA ESTÁNDAR (100mm x 40mm)
+            // PLANTILLA 1: CENEFA ESTÁNDAR (BLINDADA CONTRA NOMBRES LARGOS)
             if (item.formato === "Cenefa_Normal") {
                 html += `
-                    <div class="cartel" style="width: 100mm; height: 40mm; border: 1px solid #ddd; border-left: 6px solid ${colorInstitucional}; padding: 3mm; display: flex; flex-direction: column; align-items: center; justify-content: space-between;">
+                    <div class="cartel" style="width: 100mm; height: 40mm; border: 1px solid #ddd; border-top: 5px solid ${colorInstitucional}; padding: 2mm 3mm; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;">
                         ${txExtra}
-                        <div style="font-size: 11px; font-weight: bold; text-align: center; color: #333; line-height:1.1;">${item.nombre}</div>
+                        <div class="truncate-lines" style="font-size: 11px; font-weight: bold; text-align: center; color: #333; line-height:1.1; margin-top:2mm; min-height: 8mm;">${item.nombre}</div>
                         ${bultoHTML}
                         <div style="font-size: 32px; font-weight: 900; line-height: 1; margin-top:auto; color: #000;">$${pF}</div>
-                        ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:12mm; width:70mm; margin:0;"></svg>` : ''}
+                        ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:10mm; width:70mm; margin:0; margin-top:auto;"></svg>` : ''}
                     </div>
                 `;
             } 
             
-            // PLANTILLA 2: CENEFA DOBLE/MAYORISTA (200mm x 40mm)
+            // PLANTILLA 2: CENEFA DOBLE (DISEÑO MAYORISTA REAL)
             else if (item.formato === "Cenefa_Doble") {
                 let mitadDer = item.cantMayo 
                     ? `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; justify-content:center; align-items:center; padding: 2mm;">
-                           <div style="font-size:12px; text-transform:uppercase;">Precio Mayorista</div>
-                           <div style="font-size:40px; font-weight:900; line-height:1;">$${parseFloat(item.precioMayo).toLocaleString('es-AR', {minimumFractionDigits:2})}</div>
-                           <div style="background:white; color:${colorInstitucional}; font-size:10px; font-weight:bold; padding:2px 5px; border-radius:3px; margin-top:2px;">Llevando ${item.cantMayo} o más</div>
+                           <div style="font-size:12px; text-transform:uppercase; font-weight:bold; color: rgba(255,255,255,0.8);">Oferta Mayorista</div>
+                           <div style="font-size:42px; font-weight:900; line-height:1; margin:2mm 0;">$${parseFloat(item.precioMayo).toLocaleString('es-AR', {minimumFractionDigits:2})}</div>
+                           <div style="background:white; color:${colorInstitucional}; font-size:10px; font-weight:bold; padding:3px 8px; border-radius:4px;">Llevando ${item.cantMayo} un. o más</div>
                        </div>`
                     : `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; align-items:center; justify-content:center; font-size:45px; font-weight:900;">$${pF}</div>`;
 
                 html += `
-                    <div class="cartel" style="width: 200mm; height: 40mm; border: 2px solid #333; display: flex; flex-direction: row;">
-                        <div style="width: 50%; padding: 2mm; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 2px dashed #999;">
+                    <div class="cartel" style="width: 200mm; height: 40mm; border: 2px solid #333; display: flex; flex-direction: row; border-radius: 4px;">
+                        <div style="width: 50%; padding: 2mm; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 2px dashed #999; background: white;">
                             ${txExtra}
-                            <div style="font-size: 14px; font-weight: bold; text-align: center; line-height:1.1; color:#333;">${item.nombre}</div>
+                            <div style="font-size: 10px; text-transform:uppercase; color: #666; font-weight:bold;">Precio Minorista</div>
+                            <div class="truncate-lines" style="font-size: 14px; font-weight: bold; text-align: center; line-height:1.1; color:#333; margin: 2mm 0;">${item.nombre}</div>
                             ${bultoHTML}
-                            <div style="font-size: 28px; font-weight: bold; color: #000; margin-top:3px;">$${pF}</div>
+                            <div style="font-size: 30px; font-weight: 900; color: #000;">$${pF}</div>
                         </div>
                         ${mitadDer}
                     </div>
                 `;
             }
 
-            // PLANTILLA 3: CARTEL A4 (200mm x 285mm - Dejamos 5mm de margen de seguridad para impresoras)
+            // PLANTILLA 3: CARTEL A4 (PUNTERA DE ALTO IMPACTO)
             else if (item.formato === "Cartel_A4") {
                 let logoHTML = logo 
-                    ? `<img src="${logo}" style="max-height: 35mm; margin-bottom: 10mm;">` 
-                    : `<div class="bg-print" style="background:${colorInstitucional}; color:white; width:100%; text-align:center; padding:5mm; font-size:20px; font-weight:900; text-transform:uppercase; margin-bottom:10mm;">Autoservicio 20 de Junio</div>`;
+                    ? `<img src="${logo}" style="max-height: 40mm; object-fit: contain;">` 
+                    : `<div style="font-size:30px; font-weight:900; color:${colorInstitucional}; text-transform:uppercase; letter-spacing: 2px;">Autoservicio 20 de Junio</div>`;
 
                 html += `
-                    <div class="cartel" style="width: 195mm; height: 280mm; border: 5px solid ${colorInstitucional}; display: flex; flex-direction: column; align-items: center; padding: 10mm; text-align:center; position:relative;">
-                        ${logoHTML}
-                        ${txExtra ? `<div class="bg-print" style="background:red; color:white; font-size:25px; font-weight:900; padding:5mm 15mm; border-radius:10px; margin-bottom:15mm;">${item.textoExtra}</div>` : ''}
+                    <div class="cartel" style="width: 195mm; height: 280mm; border: 6px solid ${colorInstitucional}; border-radius: 20px; display: flex; flex-direction: column; align-items: center; padding: 0; text-align:center; position:relative; box-shadow: 0 0 20px rgba(0,0,0,0.1);">
                         
-                        <div style="font-size: 40px; font-weight: 900; color: #333; line-height: 1.1; margin-bottom: 5mm;">${item.nombre}</div>
-                        ${item.txtBulto ? `<div style="font-size:25px; color:${colorInstitucional}; font-weight:bold; margin-bottom:10mm; border: 2px solid ${colorInstitucional}; padding:3mm 10mm;">${item.txtBulto}</div>` : ''}
-                        
-                        <div style="font-size: 130px; font-weight: 900; color: #198754; line-height: 0.9; margin-top:auto;">$${pF}</div>
-                        
-                        ${item.cantMayo ? `<div style="font-size:30px; font-weight:bold; color:#666; margin-top:10mm;">O llevá ${item.cantMayo} a <span style="color:${colorInstitucional};">$${item.precioMayo}</span> c/u</div>` : ''}
+                        <!-- ENCABEZADO -->
+                        <div class="bg-print" style="width: 100%; padding: 10mm; border-bottom: 2px solid ${colorInstitucional}; display:flex; justify-content:center; align-items:center; background-color: #f8f9fa;">
+                            ${logoHTML}
+                        </div>
+
+                        <div style="padding: 15mm; flex-grow: 1; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%;">
+                            ${txExtra ? `<div class="bg-print" style="background:#dc3545; color:white; font-size:35px; font-weight:900; padding:5mm 20mm; border-radius:15px; margin-bottom:15mm; text-transform:uppercase; letter-spacing:2px; box-shadow: 5px 5px 0px rgba(0,0,0,0.2);">${item.textoExtra}</div>` : ''}
+                            
+                            <div style="font-size: 45px; font-weight: 900; color: #333; line-height: 1.1; margin-bottom: 5mm;">${item.nombre}</div>
+                            ${item.txtBulto ? `<div style="font-size:25px; color:#dc3545; font-weight:bold; margin-bottom:10mm; border: 3px solid #dc3545; padding:3mm 10mm; border-radius:10px;">${item.txtBulto}</div>` : ''}
+                            
+                            <div style="font-size: 150px; font-weight: 900; color: #198754; line-height: 0.9; margin-top:20mm; text-shadow: 4px 4px 0px rgba(0,0,0,0.1);">$${pF}</div>
+                            
+                            ${item.cantMayo ? `<div class="bg-print" style="margin-top:20mm; background:${colorInstitucional}; color:white; padding: 10mm; border-radius:15px; width:90%;"><div style="font-size:30px; font-weight:bold;">OFERTA MAYORISTA LLEVANDO ${item.cantMayo} UNIDADES</div><div style="font-size:60px; font-weight:900; margin-top:5mm;">$${item.precioMayo} c/u</div></div>` : ''}
+                        </div>
                     </div>
                 `;
             }
@@ -282,17 +403,14 @@ function imprimirTodo() {
     });
 
     Swal.fire({ title: 'Enviando a la impresora...', icon: 'info', timer: 1000, showConfirmButton: false }).then(() => {
-        
-        // Si estamos en entorno Electron Nativo (Tu POS)
         if (typeof require !== 'undefined') {
             const { ipcRenderer } = require('electron');
             ipcRenderer.send('imprimir-silencioso', document.documentElement.outerHTML);
         } else {
-            // Entorno Web
             window.print();
         }
-        
         zona.classList.add('d-none');
         zona.innerHTML = '';
+        vaciarCola(); // Limpiamos todo al terminar de imprimir
     });
 }
