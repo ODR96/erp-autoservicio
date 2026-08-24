@@ -467,13 +467,13 @@ def obtener_por_codigo(codigo_barras: str):
 # --- MODELO PARA ACTUALIZACIÓN MASIVA ---
 # --- MODELO PARA ACTUALIZACIÓN MASIVA (MEJORADO CON EXCLUSIONES) ---
 class ActualizacionMasiva(BaseModel):
-    porcentaje: float
+    valor: float # <-- Cambio clave: Renombramos porcentaje a valor
+    tipo_ajuste: str # 'porcentaje', 'sumar', 'fijo'
     tipo_filtro: str  
     filtro_id: int
     afectar_costo: bool
     palabra_clave: str = ""
-    es_monto_fijo: bool = False
-    excluir_ids: list[int] = [] # <-- LA LISTA NEGRA
+    excluir_ids: list[int] = []
 
 # --- RUTINA DE AUMENTO MASIVO ---
 @router.put("/actualizacion_masiva", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
@@ -481,14 +481,21 @@ def actualizar_precios_masivamente(datos: ActualizacionMasiva, background_tasks:
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        if datos.es_monto_fijo:
+        if datos.tipo_ajuste == 'fijo':
             query = "UPDATE productos SET precio_venta_final = ROUND(?, 2)"
-            parametros = [datos.porcentaje]
+            parametros = [datos.valor]
+            # Si forzamos Precio Fijo Exacto, IGNORAMOS el check de afectar costo 
+            # para no romper el margen de ganancia histórico de la empresa.
+
+        elif datos.tipo_ajuste == 'sumar':
+            query = "UPDATE productos SET precio_venta_final = ROUND(precio_venta_final + ?, 2)"
+            parametros = [datos.valor]
             if datos.afectar_costo:
-                query = "UPDATE productos SET costo_sin_iva = ROUND(?, 2), precio_venta_final = ROUND(?, 2)"
-                parametros = [datos.porcentaje, datos.porcentaje]
-        else:
-            factor = 1 + (datos.porcentaje / 100.0)
+                query = "UPDATE productos SET costo_sin_iva = ROUND(costo_sin_iva + ?, 2), precio_venta_final = ROUND(precio_venta_final + ?, 2)"
+                parametros = [datos.valor, datos.valor]
+
+        else: # porcentaje
+            factor = 1 + (datos.valor / 100.0)
             query = "UPDATE productos SET precio_venta_final = ROUND(precio_venta_final * ?, 2)"
             parametros = [factor]
             if datos.afectar_costo:
@@ -508,36 +515,26 @@ def actualizar_precios_masivamente(datos: ActualizacionMasiva, background_tasks:
             query += " AND nombre LIKE ?"
             parametros.append(f"%{datos.palabra_clave}%")
             
-        # ¡NUEVO! Filtramos los que tachaste en la pantalla
         if datos.excluir_ids:
             placeholders = ','.join('?' for _ in datos.excluir_ids)
             query += f" AND id NOT IN ({placeholders})"
             parametros.extend(datos.excluir_ids)
             
-        # --- LA MAGIA: LE PEDIMOS A SQLITE QUE NOS DEVUELVA LOS IDs AFECTADOS ---
-        query += " RETURNING id"
         cursor.execute(query, tuple(parametros))
-        afectados = cursor.fetchall()
-        filas_afectadas = len(afectados)
-    
-        
         conexion.commit()
         conexion.close()
-        return {"mensaje": f"¡Éxito! Se actualizaron {filas_afectadas} productos y se subieron a la Nube."}
+        return {"mensaje": "¡Éxito! Precios actualizados masivamente."}
         
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback() 
+            conexion.close()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
 
 # --- 8. PROMOCIONES POR VOLUMEN (Ej: Llevando 3, pagás menos) ---
 class PromocionNueva(BaseModel):

@@ -603,19 +603,45 @@ function dibujarColaEtiquetas() {
 function lanzarImpresion(filtro) {
     let hay = colaEtiquetasActual.some(i => (filtro === "Solo Cenefas" && i.formato === "Cenefa") || (filtro === "Solo A4" && i.formato === "Oferta A4"));
     if (!hay) return Swal.fire('Aviso', `No hay etiquetas '${filtro}'.`, 'info');
+    
     prepararHojaImpresion(filtro);
-    Swal.fire({ title: 'Generando PDF', text: `Preparando ${filtro}...`, icon: 'info', timer: 800, showConfirmButton: false }).then(() => { window.print(); document.getElementById('hojaImpresionLimpia').innerHTML = ''; });
+    
+    // MAGIA ELECTRON: Quitamos el "d-none" justo antes de mandar la orden de imprimir
+    const cajaImpresion = document.getElementById('hojaImpresionLimpia');
+    cajaImpresion.classList.remove('d-none');
+
+    Swal.fire({ title: 'Generando PDF', text: `Preparando ${filtro}...`, icon: 'info', timer: 800, showConfirmButton: false }).then(() => { 
+        window.print(); 
+        
+        // Volvemos a ocultar y limpiamos
+        cajaImpresion.classList.add('d-none');
+        cajaImpresion.innerHTML = ''; 
+    });
 }
+
 function prepararHojaImpresion(filtro) {
     const hoja = document.getElementById('hojaImpresionLimpia');
     hoja.innerHTML = ''; 
 
     let items = colaEtiquetasActual.filter(i => filtro === "Solo Cenefas" ? i.formato === "Cenefa" : i.formato === "Oferta A4");
-
     const columnas = parseInt(document.getElementById('selectColumnasCenefa').value) || 2;
 
-    let contenedorHTML = `<div class="print-container" style="${filtro === 'Solo Cenefas' ? 
-        `display: grid !important; grid-template-columns: repeat(${columnas}, 1fr) !important; gap: 4mm !important; width: 100% !important; max-width: 200mm !important; margin: 0 auto !important; padding-left: 12mm !important; padding-top: 5mm !important;` 
+    // EL BLINDAJE DE IMPRESIÓN: Le ordenamos a Electron/Chrome que respete el formato A4
+    let estiloA4 = `
+        <style>
+            @media print {
+                @page { size: A4 portrait; margin: 10mm; }
+                body { background: white !important; margin: 0; padding: 0; }
+                #app-container, .main-wrapper, .modal, .swal2-container { display: none !important; }
+                #hojaImpresionLimpia { display: block !important; visibility: visible !important; position: absolute; left: 0; top: 0; width: 100%; }
+                .print-cenefa { page-break-inside: avoid; }
+                .print-cartelMediano { page-break-inside: avoid; }
+            }
+        </style>
+    `;
+
+    let contenedorHTML = estiloA4 + `<div class="print-container" style="${filtro === 'Solo Cenefas' ? 
+        `display: grid !important; grid-template-columns: repeat(${columnas}, 1fr) !important; gap: 4mm !important; width: 100% !important; max-width: 190mm !important; margin: 0 auto !important; padding-top: 5mm !important;` 
         : 'display: block !important;'}">`;
 
     items.forEach((item, idxItem) => {
@@ -626,7 +652,6 @@ function prepararHojaImpresion(filtro) {
         let pG = productosGlobales.find(p => p.id === item.producto_id) || {}; 
         let tU = pG.unidad_medida && pG.unidad_medida !== "Unidad" ? ` x ${pG.unidad_medida}` : '';
         
-        // LEEMOS LOS DATOS DEL MINI CANVA (Si no hay, usamos tu Azul por defecto)
         let colorTema = item.color_tema || '#1a365d';
         let tipoPlantilla = item.plantilla || 'Clasica';
 
@@ -636,7 +661,6 @@ function prepararHojaImpresion(filtro) {
             let txtBulto = textoCaja ? `<div style="font-size:8px; font-weight:bold; color:${colorTema}; border: 1px solid ${colorTema}; background:#fff; border-radius:3px; padding:2px 5px; display:inline-block; margin-bottom:3px; text-transform:uppercase;">${textoCaja}</div>` : '';                
 
             if(item.formato === "Cenefa") {
-                // ... DISEÑO CENEFA ...
                 let fontSizePrecio = (columnas === 2) ? '34px' : '26px';
                 if (pMostrarF.length >= 7) fontSizePrecio = (columnas === 2) ? '28px' : '20px';
 
@@ -662,7 +686,6 @@ function prepararHojaImpresion(filtro) {
                 let htmlInterno = '';
 
                 if (tipoPlantilla === "La Bomba") {
-                    // PLANTILLA 1: LA BOMBA ROJA/COLOR TEMA
                     let precioViejo = item.precio_falso ? `<div style="font-size:25px; font-weight:bold; color:#888; text-decoration:line-through; margin-bottom:-10px;">Antes: $${pRealF}</div>` : '';
                     htmlInterno = `
                         <div class="print-cartelMediano" style="width: 135mm !important; height: 95mm !important; border: 8px solid ${colorTema}; border-radius: 15px; display: inline-flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; padding: 15px !important; box-sizing: border-box !important; background: white !important; margin: 5mm; float: left; page-break-inside: avoid; position: relative;">
@@ -675,7 +698,6 @@ function prepararHojaImpresion(filtro) {
                         </div>
                     `;
                 } else if (tipoPlantilla === "Mayorista" && pG.cant_promo) {
-                    // PLANTILLA 2: LA DIVIDIDA (Tu especialidad comercial)
                     let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
                     htmlInterno = `
                         <div class="print-cartelMediano" style="width: 135mm !important; height: 95mm !important; border: 4px solid #333; display: inline-flex !important; flex-direction: column !important; justify-content: space-between !important; align-items: center !important; text-align: center !important; box-sizing: border-box !important; background: white !important; margin: 5mm; float: left; page-break-inside: avoid; overflow:hidden;">
@@ -695,7 +717,6 @@ function prepararHojaImpresion(filtro) {
                         </div>
                     `;
                 } else {
-                    // PLANTILLA 3: CLÁSICA (La elegante con el azul petróleo)
                     htmlInterno = `
                         <div class="print-cartelMediano" style="width: 135mm !important; height: 95mm !important; border: 3px solid ${colorTema}; display: inline-flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; padding: 0 !important; box-sizing: border-box !important; background: white !important; margin: 5mm; float: left; page-break-inside: avoid; overflow:hidden;">
                             <div style="width:100%; background:${colorTema}; color:white; text-align:center; padding:5px; font-weight:bold; font-size:14px; text-transform:uppercase; letter-spacing:2px; -webkit-print-color-adjust: exact; print-color-adjust: exact;">Autoservicio 20 de Junio</div>
@@ -718,13 +739,10 @@ function prepararHojaImpresion(filtro) {
     contenedorHTML += `</div>`;
     hoja.innerHTML = contenedorHTML;
 
-    // Inyectamos los códigos de barras de las cenefas
     items.forEach((item, idxItem) => { 
         if(item.formato === "Cenefa" && item.codigo_barras) { 
             for(let i=0; i < item.cantidad; i++) { 
-                try { 
-                    JsBarcode(`#barcode-${idxItem}-${i}`, item.codigo_barras, { format: "CODE128", width: 1.2, height: 30, displayValue: false, margin: 0 }); 
-                } catch (e) {} 
+                try { JsBarcode(`#barcode-${idxItem}-${i}`, item.codigo_barras, { format: "CODE128", width: 1.2, height: 30, displayValue: false, margin: 0 }); } catch (e) {} 
             } 
         } 
     });
@@ -798,17 +816,18 @@ let idsExcluidosMasiva = []; // Memoria para la lista negra
 
 // NUEVA FUNCION PARA EL ICONO
 function cambiarIconoAjuste() {
-    const esFijo = document.getElementById('masivaTipoFijo').checked;
+    const esPorcentaje = document.getElementById('masivaTipoPorcentaje').checked;
     const icono = document.getElementById('iconoAjusteMasivo');
-    icono.innerText = esFijo ? '$' : '%';
-    icono.className = esFijo ? 'input-group-text fw-bold text-success' : 'input-group-text fw-bold text-primary';
+    icono.innerText = esPorcentaje ? '%' : '$';
+    icono.className = esPorcentaje ? 'input-group-text fw-bold text-primary' : 'input-group-text fw-bold text-success';
 }
 
 async function simularAjusteMasivo() {
-    idsExcluidosMasiva = []; // Reseteamos la lista negra cada vez que simulamos
+    idsExcluidosMasiva = []; 
     
     const valorAjuste = parseFloat(document.getElementById('masivaValor').value);
     const esFijo = document.getElementById('masivaTipoFijo').checked; 
+    const esSumar = document.getElementById('masivaTipoSumar').checked; // <-- NUEVO
     
     if (isNaN(valorAjuste)) return Swal.fire('Error', 'Ingresá un valor válido', 'warning');
 
@@ -845,7 +864,10 @@ async function simularAjusteMasivo() {
 
         if (esFijo) {
             n = valorAjuste;
-            if (afCosto) nC = valorAjuste;
+            if (afCosto) nC = c; // ESCUDO: Si forzás precio exacto, NO pisamos el costo para no destruir el margen.
+        } else if (esSumar) {
+            n = v + valorAjuste;
+            if (afCosto) nC = c + valorAjuste;
         } else {
             const fac = 1 + (valorAjuste / 100);
             n = v * fac;
@@ -893,19 +915,21 @@ async function confirmarAjusteMasivo() {
     const pal = document.getElementById('masivaPalabra').value.trim(); 
     const valorNum = parseFloat(document.getElementById('masivaValor').value); 
     const afCosto = document.getElementById('masivaCostoYVenta').checked; 
-    const esFijo = document.getElementById('masivaTipoFijo').checked; 
+    
+    // Identificamos exactamente qué tipo de ajuste eligió
+    const tAjuste = document.getElementById('masivaTipoPorcentaje').checked ? 'porcentaje' : (document.getElementById('masivaTipoSumar').checked ? 'sumar' : 'fijo');
     
     try { 
         await fetch(`${obtenerBaseUrl()}/productos/actualizacion_masiva`, { 
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ 
-                porcentaje: valorNum, 
+                valor: valorNum, 
+                tipo_ajuste: tAjuste, 
                 tipo_filtro: tF, 
                 filtro_id: fId, 
                 afectar_costo: afCosto, 
                 palabra_clave: pal, 
-                es_monto_fijo: esFijo,
-                excluir_ids: idsExcluidosMasiva // <-- Mandamos la lista negra a Python
+                excluir_ids: idsExcluidosMasiva 
             }) 
         }); 
         Swal.fire('¡Aplicado!', '', 'success'); limpiarSimulacion(); cargarCatalogo(); cambiarPestana('catalogo'); 
