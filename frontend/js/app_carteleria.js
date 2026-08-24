@@ -6,32 +6,21 @@ const colorInstitucional = "#1b365d";
 let indiceBusqueda = -1;
 let itemsBusquedaActuales = [];
 
-// --- 1. ARRANQUE Y CARGA DE DATOS (CON TOKEN DIRECTO) ---
+// --- 1. ARRANQUE Y CARGA DE DATOS ---
 document.addEventListener("DOMContentLoaded", async () => {
     try {
         const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        
-        // Petición 1: Catálogo con llave en mano
-        const res = await fetch(`${obtenerBaseUrl()}/productos/listar`, { 
-            headers: { 'Authorization': `Bearer ${token}` } 
-        });
+        const res = await fetch(`${obtenerBaseUrl()}/productos/listar`, { headers: { 'Authorization': `Bearer ${token}` } });
         const data = await res.json();
         catalogoLocal = data.productos || [];
-        
         await cargarColaDesdeDB();
     } catch (e) { console.error("Error cargando catálogo", e); }
 });
 
-// --- 2. CARGA DE COLA (CON TOKEN DIRECTO) ---
 async function cargarColaDesdeDB() {
     try {
         const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        
-        // Petición 2: Cola de impresión con llave en mano
-        const res = await fetch(`${obtenerBaseUrl()}/productos/etiquetas/listar`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
+        const res = await fetch(`${obtenerBaseUrl()}/productos/etiquetas/listar`, { headers: { 'Authorization': `Bearer ${token}` } });
         const data = await res.json();
         const itemsDB = (data.cola || []).map(c => {
             return {
@@ -40,21 +29,28 @@ async function cargarColaDesdeDB() {
                 codigo_barras: c.codigo_barras, producto_id: c.producto_id
             };
         });
-        
+
         itemsDB.forEach(item => {
             const pReal = catalogoLocal.find(p => p.id === item.producto_id);
             if (pReal) {
-                if (pReal.unidades_por_bulto > 1) {
-                    item.precio = item.precio * pReal.unidades_por_bulto;
-                    item.txtBulto = `PRECIO X CAJA CERRADA (${pReal.unidades_por_bulto} un.)`;
-                }
+                item.uxb = pReal.unidades_por_bulto || 1; // Guardamos el bulto
+                
+                // Si tiene promo, activamos la cenefa doble
                 if (pReal.cant_promo) {
                     item.formato = item.formato === 'Cenefa_Normal' ? 'Cenefa_Doble' : item.formato;
-                    item.precioMayo = pReal.precio_promo; item.cantMayo = pReal.cant_promo;
+                    item.precioMayo = pReal.precio_promo; 
+                    item.cantMayo = pReal.cant_promo;
+                }
+
+                // Si es un Cartel A4, aplicamos la regla de multiplicar todo por el bulto
+                if (pReal.unidades_por_bulto > 1 && item.formato === 'Cartel_A4') {
+                    item.precio = item.precio * pReal.unidades_por_bulto;
+                    item.txtBulto = `PRECIO X CAJA CERRADA (${pReal.unidades_por_bulto} un.)`;
+                    if (item.precioMayo) item.precioMayo = item.precioMayo * pReal.unidades_por_bulto;
                 }
             }
         });
-        
+
         colaImpresion = colaImpresion.filter(c => c.esLibre); 
         colaImpresion = [...itemsDB, ...colaImpresion];
         dibujarCola();
@@ -65,7 +61,7 @@ function guardarLogoLocal(event) {
     const reader = new FileReader();
     reader.onload = (e) => {
         localStorage.setItem('logo_empresa_b64', e.target.result);
-        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Logo guardado en memoria', showConfirmButton: false, timer: 2000 });
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Logo guardado', showConfirmButton: false, timer: 2000 });
         actualizarPreview();
     };
     reader.readAsDataURL(event.target.files[0]);
@@ -77,6 +73,7 @@ function borrarLogoLocal() {
     actualizarPreview();
 }
 
+// ESCUDO DEL BUSCADOR
 document.getElementById('inputBuscarEtiqueta').addEventListener('input', (e) => {
     buscarProductoEtiqueta(e.target.value);
 });
@@ -136,19 +133,34 @@ function actualizarPreview() {
     const textoExtra = document.getElementById('inputTextoExtra').value.toUpperCase();
     const logo = localStorage.getItem('logo_empresa_b64');
 
-    let nombre = "SELECCIONE PRODUCTO"; let precio = "0.00"; let esMayorista = false; let precioMayo = 0; let cantMayo = 0; let txtBulto = "";
+    let nombre = "SELECCIONE PRODUCTO"; let precio = "0.00"; let esMayorista = false; let precioMayo = 0; let cantMayo = 0; let txtBulto = ""; let uxb = 1;
 
     if (esLibre) {
         nombre = document.getElementById('libreTitulo').value || "TÍTULO MANUAL";
         precio = document.getElementById('librePrecio').value || "0.00";
     } else if (productoSeleccionado) {
-        nombre = productoSeleccionado.nombre; precio = productoSeleccionado.precio_venta_final;
-        if (productoSeleccionado.unidades_por_bulto > 1) { txtBulto = `X CAJA/BULTO CERRADO`; precio = precio * productoSeleccionado.unidades_por_bulto; }
-        if (productoSeleccionado.cant_promo) { esMayorista = true; precioMayo = productoSeleccionado.precio_promo; cantMayo = productoSeleccionado.cant_promo; }
+        nombre = productoSeleccionado.nombre; 
+        precio = productoSeleccionado.precio_venta_final;
+        uxb = productoSeleccionado.unidades_por_bulto || 1;
+
+        if (productoSeleccionado.cant_promo) { 
+            esMayorista = true; precioMayo = productoSeleccionado.precio_promo; cantMayo = productoSeleccionado.cant_promo; 
+        }
+
+        // Regla: A4 multiplica por bulto, Cenefas NO.
+        if (uxb > 1 && formato === "Cartel_A4") { 
+            txtBulto = `X CAJA CERRADA (${uxb} un.)`; 
+            precio = precio * uxb; 
+            if (esMayorista) precioMayo = precioMayo * uxb;
+        }
     }
 
     let pF = parseFloat(precio).toLocaleString('es-AR', {minimumFractionDigits: 2});
     let html = "";
+
+    // LÓGICA DE UXB PARA VISTA PREVIA (Solo visible en Cenefa Doble)
+    let previewPrecioBulto = esMayorista ? (precioMayo * uxb) : (precio * uxb);
+    let htmlUxB_preview = (uxb > 1 && formato === "Cenefa_Doble") ? `<div style="background:white; color:${colorInstitucional}; font-size:6px; font-weight:bold; padding:1px 4px; border-radius:3px; margin-top:2px;">UxB: ${uxb} | Caja: $${previewPrecioBulto.toLocaleString('es-AR', {minimumFractionDigits:2})}</div>` : '';
 
     if (formato === "Cenefa_Normal") {
         html = `<div style="width: 150px; height: 60px; border: 1px solid #ccc; background: white; display:flex; flex-direction:column; align-items:center; position:relative;">
@@ -160,14 +172,20 @@ function actualizarPreview() {
     } else if (formato === "Cenefa_Doble") {
         let mitadDerecha = esMayorista 
             ? `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-                <span style="background:#dc3545; border-radius:5px; padding:1px 4px; font-size:5px; margin-bottom:2px;">OFERTA MAYORISTA</span><span style="font-size:14px; font-weight:bold;">$${precioMayo}</span><span style="font-size:6px;">Llevando ${cantMayo} o más</span></div>` 
-            : `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:bold;">$${pF}</div>`;
+                <span style="background:#dc3545; border-radius:5px; padding:1px 4px; font-size:5px; margin-bottom:2px;">OFERTA MAYORISTA</span>
+                <span style="font-size:14px; font-weight:bold;">$${precioMayo}</span>
+                <span style="font-size:6px;">Llevando ${cantMayo} o más</span>
+                ${htmlUxB_preview}
+               </div>` 
+            : `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                <span style="font-size:16px; font-weight:bold;">$${pF}</span>
+                ${htmlUxB_preview}
+               </div>`;
             
         html = `<div style="width: 250px; height: 60px; border: 1px solid #333; display:flex; background:white;">
                     <div style="width:50%; padding:5px; text-align:center; display:flex; flex-direction:column; justify-content:center;">
                         ${textoExtra ? `<div style="font-size:6px; color:#dc3545; font-weight:bold;">${textoExtra}</div>` : '<div style="font-size:6px; color:#666; font-weight:bold;">PRECIO NORMAL</div>'}
                         <div style="font-size:8px; font-weight:bold;">${nombre}</div>
-                        ${txtBulto ? `<div style="font-size:6px; color:red;">${txtBulto}</div>` : ''}
                         <div style="font-size:12px; font-weight:bold;">$${pF}</div>
                     </div>
                     ${mitadDerecha}
@@ -193,40 +211,46 @@ async function agregarACola() {
     const copias = parseInt(document.getElementById('inputCopias').value);
     const textoExtra = document.getElementById('inputTextoExtra').value;
 
-    let item = { id: Date.now(), formato, copias, textoExtra, esLibre };
+    let item = { id: Date.now(), formato, copias, textoExtra, esLibre, uxb: 1 };
 
     if (esLibre) {
         item.nombre = document.getElementById('libreTitulo').value || "Cartel Manual";
         item.precio = document.getElementById('librePrecio').value || 0;
         item.codigo_barras = "";
-        
         const inputFotoLibre = document.getElementById('libreFoto');
         if (inputFotoLibre && inputFotoLibre.files.length > 0) {
             item.fotoManual = await procesarFotoBase64(inputFotoLibre.files[0]);
         }
     } else {
         if (!productoSeleccionado) return Swal.fire('Aviso', 'Seleccioná un producto primero.', 'warning');
-        item.nombre = productoSeleccionado.nombre; item.precio = productoSeleccionado.precio_venta_final; item.codigo_barras = productoSeleccionado.codigo_barras;
+        item.nombre = productoSeleccionado.nombre; 
+        item.precio = productoSeleccionado.precio_venta_final; 
+        item.codigo_barras = productoSeleccionado.codigo_barras;
+        item.uxb = productoSeleccionado.unidades_por_bulto || 1;
         
-        if (productoSeleccionado.unidades_por_bulto > 1) { item.precio = item.precio * productoSeleccionado.unidades_por_bulto; item.txtBulto = `PRECIO X CAJA CERRADA (${productoSeleccionado.unidades_por_bulto} un.)`; }
-        if (productoSeleccionado.cant_promo) { item.precioMayo = productoSeleccionado.precio_promo; item.cantMayo = productoSeleccionado.cant_promo; }
+        if (productoSeleccionado.cant_promo) { 
+            item.precioMayo = productoSeleccionado.precio_promo; 
+            item.cantMayo = productoSeleccionado.cant_promo; 
+        }
+
+        // Regla: A4 multiplica por bulto, Cenefas NO.
+        if (item.uxb > 1 && formato === "Cartel_A4") { 
+            item.precio = item.precio * item.uxb; 
+            item.txtBulto = `PRECIO X CAJA CERRADA (${item.uxb} un.)`; 
+            if (item.precioMayo) item.precioMayo = item.precioMayo * item.uxb;
+        }
     }
 
     colaImpresion.push(item); dibujarCola();
     Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Agregado a la cola', showConfirmButton: false, timer: 1000 });
 }
 
-// --- 3. VACIAR Y BORRAR DE COLA (CON TOKEN DIRECTO) ---
 async function vaciarCola() { 
     try { 
         const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        await fetch(`${obtenerBaseUrl()}/productos/etiquetas/vaciar`, { 
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-        }); 
-        colaImpresion = []; 
-        dibujarCola(); 
-    } catch (e) { console.error(e); } 
+        await fetch(`${obtenerBaseUrl()}/productos/etiquetas/vaciar`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }); 
+        colaImpresion = []; dibujarCola(); 
+    } catch (e) { } 
 }
 
 async function borrarItemCola(idx) { 
@@ -234,14 +258,10 @@ async function borrarItemCola(idx) {
     if (!item.esLibre && item.id_db) { 
         try { 
             const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-            await fetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${item.id_db}`, { 
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
-            }); 
+            await fetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${item.id_db}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }); 
         } catch(e){} 
     }
-    colaImpresion.splice(idx, 1); 
-    dibujarCola(); 
+    colaImpresion.splice(idx, 1); dibujarCola(); 
 }
 
 function dibujarCola() {
@@ -249,7 +269,7 @@ function dibujarCola() {
     if (colaImpresion.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="text-muted py-5">No hay carteles en cola.</td></tr>'; return; }
     colaImpresion.forEach((c, idx) => {
         let badge = c.formato.includes("Normal") ? "bg-secondary" : (c.formato.includes("Doble") ? "bg-primary" : "bg-success");
-        let txtDB = c.id_db ? '<i class="bi bi-robot text-primary" title="Generado Automáticamente"></i>' : '';
+        let txtDB = c.id_db ? '<i class="bi bi-robot text-primary" title="Automático"></i>' : '';
         let fotito = c.fotoManual ? '<i class="bi bi-image text-info ms-1"></i>' : '';
         tbody.innerHTML += `<tr><td class="text-start ps-3 fw-bold">${txtDB} ${c.nombre} ${fotito}</td><td class="text-success fw-bold">$${parseFloat(c.precio).toFixed(2)}</td><td><span class="badge ${badge}">${c.formato.replace('_', ' ')}</span></td><td class="fw-bold">${c.copias}</td><td><button class="btn btn-sm text-danger border-0" onclick="borrarItemCola(${idx})"><i class="bi bi-trash"></i></button></td></tr>`;
     });
@@ -276,6 +296,12 @@ function imprimirTodo() {
     colaImpresion.forEach((item, idx) => {
         let pF = parseFloat(item.precio).toLocaleString('es-AR', {minimumFractionDigits: 2});
         let txExtra = item.textoExtra ? `<div class="bg-print" style="background:#dc3545; color:white; font-size:10px; font-weight:bold; text-align:center; text-transform:uppercase; padding:2px 5px; border-radius:3px; margin-bottom:2px;">${item.textoExtra}</div>` : '';
+        
+        // MATEMÁTICA DE UXB PARA IMPRESIÓN (Solo Cenefas)
+        let uxb = item.uxb || 1;
+        let precioBultoNum = item.cantMayo ? (item.precioMayo * uxb) : (item.precio * uxb);
+        let htmlUxB_print = (uxb > 1 && item.formato === "Cenefa_Doble") ? `<div class="bg-print" style="background:white; color:${colorInstitucional}; font-size:10px; font-weight:bold; padding:2px 8px; border-radius:4px; margin-top:2px;">UxB: ${uxb} | Caja: $${precioBultoNum.toLocaleString('es-AR', {minimumFractionDigits:2})}</div>` : '';
+
         let bultoHTML = item.txtBulto ? `<div style="font-size:9px; color:red; font-weight:bold; margin-bottom:2px; text-align:center;">${item.txtBulto}</div>` : '';
 
         for (let i = 0; i < item.copias; i++) {
@@ -287,7 +313,6 @@ function imprimirTodo() {
                         <div style="padding: 1mm 2mm; width: 100%; display: flex; flex-direction: column; align-items: center; height: 100%;">
                             ${txExtra}
                             <div class="truncate-lines" style="font-size: 11px; font-weight: bold; text-align: center; color: #333; line-height:1.1; margin-top:1mm; min-height: 8mm;">${item.nombre}</div>
-                            ${bultoHTML}
                             <div style="font-size: 32px; font-weight: 900; line-height: 1; margin-top:auto; color: #000; padding-bottom:1mm;">$${pF}</div>
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:9mm; width:65mm; margin:0; margin-top:auto;"></svg>` : ''}
                         </div>
@@ -297,10 +322,15 @@ function imprimirTodo() {
             else if (item.formato === "Cenefa_Doble") {
                 let mitadDer = item.cantMayo 
                     ? `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; justify-content:center; align-items:center; padding: 2mm;">
-                           <div class="bg-print" style="background:#dc3545; color:white; font-size:11px; font-weight:bold; text-transform:uppercase; padding: 2px 10px; border-radius: 10px; margin-bottom: 2mm; letter-spacing: 1px;">OFERTA LLEVANDO ${item.cantMayo}</div>
+                           <div class="bg-print" style="background:#dc3545; color:white; font-size:11px; font-weight:bold; text-transform:uppercase; padding: 2px 10px; border-radius: 10px; margin-bottom: 1mm; letter-spacing: 1px;">OFERTA MAYORISTA</div>
                            <div style="font-size:45px; font-weight:900; line-height:1;">$${parseFloat(item.precioMayo).toLocaleString('es-AR', {minimumFractionDigits:2})}</div>
+                           <div style="font-size:10px; font-weight:bold; color: rgba(255,255,255,0.9); margin-top: 1mm; margin-bottom: 1mm;">Llevando ${item.cantMayo} un. o más</div>
+                           ${htmlUxB_print}
                        </div>`
-                    : `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; align-items:center; justify-content:center; font-size:45px; font-weight:900;">$${pF}</div>`;
+                    : `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                           <div style="font-size:45px; font-weight:900;">$${pF}</div>
+                           ${htmlUxB_print}
+                       </div>`;
 
                 html += `
                     <div class="cartel" style="width: 200mm; height: 40mm; border: 2px solid #333; display: flex; flex-direction: row; border-radius: 4px;">
@@ -308,8 +338,7 @@ function imprimirTodo() {
                             ${txExtra}
                             <div style="font-size: 10px; text-transform:uppercase; color: #666; font-weight:bold; background: #f0f0f0; padding: 2px 8px; border-radius: 4px; margin-bottom: 2mm;">PRECIO NORMAL</div>
                             <div class="truncate-lines" style="font-size: 14px; font-weight: bold; text-align: center; line-height:1.1; color:#333; margin-bottom: 1mm;">${item.nombre}</div>
-                            ${bultoHTML}
-                            <div style="font-size: 28px; font-weight: bold; color: #000;">$${pF}</div>
+                            <div style="font-size: 28px; font-weight: bold; color: #000; margin-bottom: 1mm;">$${pF}</div>
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:7mm; width:45mm; margin:0;"></svg>` : ''}
                         </div>
                         ${mitadDer}
@@ -326,21 +355,15 @@ function imprimirTodo() {
 
                 html += `
                     <div class="cartel" style="width: 195mm; height: 280mm; border: 6px solid ${colorInstitucional}; border-radius: 20px; display: flex; flex-direction: column; align-items: center; padding: 0; text-align:center; position:relative; box-shadow: 0 0 20px rgba(0,0,0,0.1);">
-                        
                         <div class="bg-print" style="width: 100%; padding: 10mm; border-bottom: 2px solid ${colorInstitucional}; display:flex; justify-content:center; align-items:center; background-color: #f8f9fa;">
                             ${logoHTML}
                         </div>
-
                         <div style="padding: 10mm; flex-grow: 1; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%;">
                             ${txExtra ? `<div class="bg-print" style="background:#dc3545; color:white; font-size:35px; font-weight:900; padding:5mm 20mm; border-radius:15px; margin-bottom:10mm; text-transform:uppercase; letter-spacing:2px; box-shadow: 5px 5px 0px rgba(0,0,0,0.2);">${item.textoExtra}</div>` : ''}
-                            
                             ${imagenManualHTML}
-                            
                             <div style="font-size: 45px; font-weight: 900; color: #333; line-height: 1.1; margin-bottom: 5mm;">${item.nombre}</div>
-                            ${item.txtBulto ? `<div style="font-size:25px; color:#dc3545; font-weight:bold; margin-bottom:5mm; border: 3px solid #dc3545; padding:3mm 10mm; border-radius:10px;">${item.txtBulto}</div>` : ''}
-                            
+                            ${bultoHTML}
                             <div style="font-size: ${fontSizePrecio}; font-weight: 900; color: #198754; line-height: 0.9; margin-top:auto; text-shadow: 4px 4px 0px rgba(0,0,0,0.1);">$${pF}</div>
-                            
                             ${item.cantMayo ? `<div class="bg-print" style="margin-top:10mm; background:${colorInstitucional}; color:white; padding: 8mm; border-radius:15px; width:90%;"><div style="font-size:25px; font-weight:bold;">OFERTA MAYORISTA LLEVANDO ${item.cantMayo} UNIDADES</div><div style="font-size:60px; font-weight:900; margin-top:2mm;">$${item.precioMayo} c/u</div></div>` : ''}
                         </div>
                     </div>
@@ -357,21 +380,16 @@ function imprimirTodo() {
             for (let i = 0; i < item.copias; i++) {
                 try { 
                     JsBarcode(`#bc-${idx}-${i}`, item.codigo_barras, { 
-                        format: "CODE128", 
-                        width: 1.5, 
-                        height: 30, 
-                        displayValue: true,
-                        fontSize: 12,
-                        textMargin: 1,
-                        margin: 0 
+                        format: "CODE128", width: 1.5, height: 30, displayValue: true, fontSize: 12, textMargin: 1, margin: 0 
                     }); 
                 } catch (e) {}
             }
         }
     });
 
-    Swal.fire({ title: 'Enviando a la impresora...', icon: 'info', timer: 1000, showConfirmButton: false }).then(() => {
-        if (typeof require !== 'undefined') { const { ipcRenderer } = require('electron'); ipcRenderer.send('imprimir-silencioso', document.documentElement.outerHTML); } else { window.print(); }
+    Swal.fire({ title: 'Generando Vista Previa...', icon: 'info', timer: 800, showConfirmButton: false }).then(() => {
+        // Al usar window.print() el sistema abre la ventana nativa de impresión
+        window.print(); 
         zona.classList.add('d-none'); zona.innerHTML = ''; vaciarCola(); 
     });
 }
