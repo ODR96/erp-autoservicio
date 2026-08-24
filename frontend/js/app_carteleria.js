@@ -1,3 +1,30 @@
+const originalFetch = window.fetch;
+window.fetch = async function() {
+    let [recurso, config] = arguments;
+    if (!config) config = {};
+    if (!config.headers) config.headers = {};
+    
+    const vaAMiServidor = recurso.toString().includes(obtenerBaseUrl());
+    
+    if (vaAMiServidor) {
+        const tokenSeguridad = localStorage.getItem('token') || localStorage.getItem('token_pos');
+        if (tokenSeguridad) {
+            config.headers['Authorization'] = `Bearer ${tokenSeguridad}`;
+        }
+    }
+    
+    const respuesta = await originalFetch(recurso, config);
+    
+    if (vaAMiServidor && respuesta.status === 401) {
+        console.warn("Sesión expirada o sin permisos (401)");
+        localStorage.clear();
+        window.location.href = 'index.html'; 
+        throw new Error("Acceso denegado (401)");
+    }
+    
+    return respuesta;
+};
+
 let catalogoLocal = [];
 let productoSeleccionado = null;
 let colaImpresion = []; 
