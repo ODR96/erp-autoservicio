@@ -1694,7 +1694,6 @@ async function registrarMovimientoCaja(tipo) {
         '<input id="swal-motivo" type="text" class="swal2-input" placeholder="Motivo / Concepto" style="max-width: 80%;">';
 
     if (tipo === 'retiro') {
-        // Quitamos el 1234 del placeholder visualmente
         inputsHtml += '<hr><input id="swal-pin" type="password" class="swal2-input" placeholder="PIN Encargado" style="max-width: 80%; border-color: #ffc107;">';
     }
 
@@ -1716,7 +1715,7 @@ async function registrarMovimientoCaja(tipo) {
             });
             setTimeout(() => document.getElementById('swal-monto').focus(), 300);
         },
-        preConfirm: async () => { // <-- HACEMOS EL PRECONFIRM ASÍNCRONO
+        preConfirm: async () => {
             const monto = document.getElementById('swal-monto').value;
             const motivo = document.getElementById('swal-motivo').value;
             const pinEl = document.getElementById('swal-pin');
@@ -1726,7 +1725,6 @@ async function registrarMovimientoCaja(tipo) {
 
             if (tipo === 'retiro') {
                 if (!pinEl || !pinEl.value) { Swal.showValidationMessage('Ingrese su PIN secreto'); return false; }
-
                 try {
                     const resAuth = await fetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1745,20 +1743,33 @@ async function registrarMovimientoCaja(tipo) {
 
     if (formValues) {
         try {
-            await fetch(`${obtenerBaseUrl()}/caja/movimiento`, {
+            // INYECTAMOS LA CABALLERÍA PESADA
+            const payloadMovimiento = {
+                tipo_movimiento: tipo,
+                monto: formValues.monto,
+                observaciones: formValues.motivo,
+                turno_id: turnoActualId,
+                caja_id: terminal_id, // Para que la plata afecte a ESTA caja
+                usuario_id: empleadoLogueado.id // Para que sepamos qué cajero la tocó
+            };
+
+            const response = await fetch(`${obtenerBaseUrl()}/caja/movimiento`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    tipo_movimiento: tipo,
-                    monto: formValues.monto,
-                    observaciones: formValues.motivo,
-                    turno_id: turnoActualId
-                })
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}` // Usamos la llave maestra
+                },
+                body: JSON.stringify(payloadMovimiento)
             });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.detail || "Fallo en el servidor");
+            }
 
             Swal.fire({ title: '✅ Registrado', text: `Se guardó un ${tipo} de $${formValues.monto} en el sistema.`, icon: 'success', timer: 2000, showConfirmButton: false });
         } catch (e) {
-            Swal.fire('Error', 'No se pudo guardar el movimiento.', 'error');
+            Swal.fire('Error', e.message, 'error');
         }
         setTimeout(() => inputScan.focus(), 2000);
     } else {

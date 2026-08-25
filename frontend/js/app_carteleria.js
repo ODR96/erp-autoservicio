@@ -282,11 +282,31 @@ function imprimirTodo() {
     let html = `
         <style>
             @media print {
-                @page { size: A4; margin: 0; }
-                body { margin: 0; padding: 10mm; background: white !important; font-family: Arial, sans-serif; }
+                @page { size: A4 portrait; margin: 0; }
+                body { margin: 0; background: white !important; font-family: Arial, sans-serif; }
                 #app-container, .main-wrapper, .modal, .d-print-none, .swal2-container { display: none !important; }
-                #zonaImpresion { display: flex !important; flex-wrap: wrap; gap: 5mm; visibility: visible !important; position: absolute; left: 0; top: 0; width: 100%; }
-                .cartel { page-break-inside: avoid; box-sizing: border-box; overflow: hidden; background: white !important; }
+                #zonaImpresion { 
+                    display: block !important; 
+                    visibility: visible !important; 
+                    position: absolute; 
+                    left: 0; 
+                    top: 0; 
+                    width: 100%; 
+                }
+                .cartel { 
+                    page-break-after: always; /* OBLIGA A CADA A4 A ESTAR EN SU PROPIA PÁGINA */
+                    page-break-inside: avoid; 
+                    box-sizing: border-box; 
+                    overflow: hidden; 
+                    background: white !important;
+                    margin: 0 auto; /* Centra el cartel en la hoja */
+                }
+                /* Excepción para las Cenefas (pueden ir varias por hoja) */
+                .cenefa {
+                    page-break-after: auto;
+                    display: inline-flex;
+                    margin: 5mm;
+                }
                 .bg-print { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                 .truncate-lines { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; }
             }
@@ -308,7 +328,7 @@ function imprimirTodo() {
             
             if (item.formato === "Cenefa_Normal") {
                 html += `
-                    <div class="cartel" style="width: 100mm; height: 40mm; border: 1px solid #ddd; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;">
+                    <div class="cartel cenefa" style="width: 100mm; height: 40mm; border: 1px solid #ddd; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;">
                         <div class="bg-print" style="width: 100%; background: ${colorInstitucional}; color: white; font-size: 8px; font-weight: bold; text-align: center; text-transform: uppercase; padding: 1.5mm 0; letter-spacing: 1px;">Autoservicio 20 de Junio</div>
                         <div style="padding: 1mm 2mm; width: 100%; display: flex; flex-direction: column; align-items: center; height: 100%;">
                             ${txExtra}
@@ -333,7 +353,7 @@ function imprimirTodo() {
                        </div>`;
 
                 html += `
-                    <div class="cartel" style="width: 200mm; height: 40mm; border: 2px solid #333; display: flex; flex-direction: row; border-radius: 4px;">
+                    <div class="cartel cenefa" style="width: 200mm; height: 40mm; border: 2px solid #333; display: flex; flex-direction: row; border-radius: 4px;">
                         <div style="width: 50%; padding: 2mm; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 2px dashed #999; background: white;">
                             ${txExtra}
                             <div style="font-size: 10px; text-transform:uppercase; color: #666; font-weight:bold; background: #f0f0f0; padding: 2px 8px; border-radius: 4px; margin-bottom: 2mm;">PRECIO NORMAL</div>
