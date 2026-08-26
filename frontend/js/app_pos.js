@@ -1937,15 +1937,16 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
     const declarado = d.monto_final_declarado ?? montoDeclaradoManual;
     const diferencia = declarado - esperado;
 
-    let html = `
+let html = `
 <!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
-    @page { margin: 0; size: 80mm auto; } 
-    body { font-family: Arial, sans-serif; font-size: 12px; font-weight: 600; width: 72mm; padding: 2mm 4mm; margin: 0; color: #000; -webkit-font-smoothing: none; }
+    @page { margin: 0; } 
+    body { font-family: Arial, sans-serif; font-size: 12px; font-weight: 600; width: 100%; max-width: 72mm; padding: 2mm; margin: 0 auto; color: #000; -webkit-font-smoothing: none; box-sizing: border-box; }
     .center { text-align: center; } .left { text-align: left; } .bold { font-weight: bold; }
     .divisor { border-top: 1px dashed #000; margin: 5px 0; }
     .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 5px 0; }
     .fila { display: flex; justify-content: space-between; margin-bottom: 3px; }
+    .fila span:last-child { text-align: right; padding-left: 5px; word-break: break-all; }
 </style></head>
 <body>
     <div class="center bold" style="font-size: 16px;">AUTOSERVICIO 20 DE JUNIO</div>
@@ -1964,7 +1965,6 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
     <div class="fila bold" style="font-size: 14px;"><span>TOTAL VENDIDO:</span> <span>$${vTotales.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
 `;
 
-    // LA SEGURIDAD: Solo mostramos la plata de la caja si es un Cierre Z (para vos)
     if (esCierreZ) {
         html += `
     <div class="divisor-doble"></div>
@@ -1975,15 +1975,18 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
     
     <div class="divisor"></div>
     <div class="fila bold"><span>SISTEMA ESPERABA:</span> <span>$${esperado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
-    <div class="fila mt-2" style="color: #444;"><span>CAJERO DECLARÓ:</span> <span>$${declarado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
     
-    <div class="fila bold" style="border-top: 1px solid #000; padding-top:2px;">
+    <div class="fila mt-2 bold" style="border: 1px solid #000; padding: 2px;">
+        <span>CAJERO DECLARÓ:</span> <span>$${declarado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+    </div>
+    
+    <div class="fila bold mt-1">
         <span>${diferencia < 0 ? 'FALTANTE:' : 'SOBRANTE:'}</span> 
         <span>$${Math.abs(diferencia).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
     </div>
 `;
     } else {
-        html += `<div class="center mt-2 small text-muted">Datos de fondo de caja ocultos por seguridad.</div>`;
+        html += `<div class="center mt-2 small">Datos de fondo de caja ocultos por seguridad.</div>`;
     }
 
     html += `
@@ -2197,7 +2200,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
             }
         }
 
-        let html = `
+let html = `
             <!DOCTYPE html>
             <html>
             <head>
@@ -2205,16 +2208,16 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
                 <title>Ticket ${ticket.encabezado.numero_ticket}</title>
                 <style>
                     @page { margin: 0; }
-                    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 600; color: #000; margin: 0; padding: 2mm 4mm; width: 72mm; -webkit-font-smoothing: none; text-rendering: crispEdges; }
+                    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 600; color: #000; margin: 0 auto; padding: 2mm; width: 100%; max-width: 72mm; box-sizing: border-box; -webkit-font-smoothing: none; text-rendering: crispEdges; }
                     .center { text-align: center; } .right { text-align: right; } .left { text-align: left; } .bold { font-weight: bold; }
                     .divisor { border-top: 1px dashed #000; margin: 4px 0; }
                     .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 4px 0; }
-                    table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 5px 0; }
-                    th, td { text-align: left; padding: 2px 0; vertical-align: top; }
+                    table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 5px 0; table-layout: fixed; }
+                    th, td { text-align: left; padding: 2px 1px; vertical-align: top; word-wrap: break-word; }
                 </style>
             </head>
             <body>
-                <div class="center bold" style="font-size: 16px; margin-bottom: 4px; border-bottom: 0.5px solid #ccc;">${config.nombre_negocio.toUpperCase()}</div>
+                <div class="center bold" style="font-size: 16px; margin-bottom: 4px; border-bottom: 0.5px solid #000;">${config.nombre_negocio.toUpperCase()}</div>
                 <div class="center bold" style="font-size: 11px; margin-bottom: 8px; border: 1px solid #000; padding: 2px;">DOCUMENTO NO VÁLIDO COMO FACTURA</div>
                 <div class="center small" style="margin-bottom: 8px;">${config.direccion} | CUIT: ${config.cuit}</div>
                 <div class="divisor-doble"></div>
@@ -2226,7 +2229,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
                 <div class="divisor-doble"></div>
                 
                 <table>
-                    <tr><th style="width: 10%;">CANT</th><th style="width: 50%;">DESCRIPCION</th><th class="right" style="width: 20%;">P.UNIT</th><th class="right" style="width: 20%;">TOTAL</th></tr>
+                    <tr><th style="width: 15%;">CANT</th><th style="width: 45%;">DESC</th><th class="right" style="width: 20%;">P.UNI</th><th class="right" style="width: 20%;">TOT</th></tr>
                     <tr><td colspan="4"><div class="divisor"></div></td></tr>
         `;
 
@@ -2276,7 +2279,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
         html += `
                 <div class="divisor-doble"></div>
                 <div class="center bold" style="margin-top: 10px; font-size: 11px; white-space: pre-wrap;">${config.mensaje_ticket || '¡Gracias por su compra!'}</div>
-                <div class="center" style="font-size: 9px; color: #555; margin-top: 15px; border-top: 0.5px solid #ccc; padding-top: 5px;">SISTEMA DE GESTIÓN ERP - 20 DE JUNIO</div>
+                <div class="center bold" style="font-size: 9px; margin-top: 15px; border-top: 1px dashed #000; padding-top: 5px;">SISTEMA DE GESTIÓN ERP - 20 DE JUNIO</div>
                 <div style="margin-bottom: 25mm;"></div> 
             </body>
             </html>
