@@ -2710,41 +2710,31 @@ document.addEventListener("DOMContentLoaded", () => {
 setInterval(descargarCatalogoParaOffline, 600000);
 
 // =========================================================
-// MOTOR VISUAL: EL LATIDO (PING REAL A PYTHON)
-// =========================================================
 // =========================================================
 // MOTOR VISUAL: EL LATIDO (PING REAL A PYTHON)
 // =========================================================
 let pythonVivo = true;
 
 function actualizarEstadoRedVisual(estaOnline) {
+    // Agarramos los botones para desactivarlos por seguridad si se corta la red
     const btnCajaF10 = document.querySelector('[onclick="modalGestion.show()"]');
     const btnFiados = document.querySelector('[onclick="abrirModalCobroFiado()"]');
     const btnMayorista = document.querySelector('[onclick="abrirCobroPedidoMayorista()"]');
-
-    let badgeEstado = document.getElementById('badgeEstadoRed');
-    if (!badgeEstado) {
-        // En vez del reloj, lo ponemos al lado del botón Caja F10
-        badgeEstado = document.createElement('span');
-        badgeEstado.id = 'badgeEstadoRed';
-        // Le damos padding (px-3 py-2) y alineación vertical para que quede hermoso
-        badgeEstado.className = 'badge ms-3 px-3 py-2 d-flex align-items-center justify-content-center';
-
-        if (btnCajaF10 && btnCajaF10.parentNode) {
-            btnCajaF10.parentNode.insertBefore(badgeEstado, btnCajaF10.nextSibling);
-        }
-    }
+    
+    // Agarramos el nuevo indicador sutil del HTML
+    const indicador = document.getElementById('indicadorRed');
+    if (!indicador) return;
 
     if (estaOnline) {
-        badgeEstado.className = 'badge bg-success ms-3 px-3 py-2 d-flex align-items-center justify-content-center';
-        badgeEstado.innerHTML = '<i class="bi bi-wifi me-2 fs-6"></i> <span class="fs-6">CONECTADO</span>';
+        indicador.className = 'd-flex align-items-center gap-1 text-success fw-bold small me-2';
+        indicador.innerHTML = '<i class="bi bi-circle-fill punto-conexion latido-activo"></i> En línea';
 
         if (btnCajaF10) btnCajaF10.style.pointerEvents = 'auto', btnCajaF10.style.opacity = '1';
         if (btnFiados) btnFiados.style.pointerEvents = 'auto', btnFiados.style.opacity = '1';
         if (btnMayorista) btnMayorista.style.pointerEvents = 'auto', btnMayorista.style.opacity = '1';
     } else {
-        badgeEstado.className = 'badge bg-danger ms-3 px-3 py-2 d-flex align-items-center justify-content-center';
-        badgeEstado.innerHTML = '<i class="bi bi-wifi-off me-2 fs-6"></i> <span class="fs-6">MODO OFFLINE (Solo Efectivo)</span>';
+        indicador.className = 'd-flex align-items-center gap-1 text-danger fw-bold small me-2';
+        indicador.innerHTML = '<i class="bi bi-circle-fill punto-conexion"></i> Desconectado';
 
         if (btnCajaF10) btnCajaF10.style.pointerEvents = 'none', btnCajaF10.style.opacity = '0.5';
         if (btnFiados) btnFiados.style.pointerEvents = 'none', btnFiados.style.opacity = '0.5';
