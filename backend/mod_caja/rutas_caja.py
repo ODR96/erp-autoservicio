@@ -8,126 +8,77 @@ import requests
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
-# --- NUEVA MIGRACIÓN: TABLA DE CAJAS FÍSICAS MÚLTIPLES ---
-# --- NUEVA MIGRACIÓN: TABLA DE CAJAS FÍSICAS MÚLTIPLES ---
 def asegurar_tabla_cajas_fisicas():
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS cajas_fisicas (
-            id INTEGER PRIMARY KEY,
-            nombre TEXT NOT NULL,
-            activa BOOLEAN DEFAULT 1,
-            solo_admin BOOLEAN DEFAULT 0
+            id INTEGER PRIMARY KEY, nombre TEXT NOT NULL, activa BOOLEAN DEFAULT 1, solo_admin BOOLEAN DEFAULT 0
         )
     ''')
-    
-    # --- EL PARCHE: Inyectar columnas si la tabla ya existía de antes ---
     try: cursor.execute("ALTER TABLE cajas_fisicas ADD COLUMN activa BOOLEAN DEFAULT 1")
     except: pass
     try: cursor.execute("ALTER TABLE cajas_fisicas ADD COLUMN solo_admin BOOLEAN DEFAULT 0")
     except: pass
-    # ---------------------------------------------------------------------
-
-    # Insertar cajas por defecto si la tabla está vacía
     cursor.execute("SELECT COUNT(*) FROM cajas_fisicas")
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO cajas_fisicas (id, nombre, activa, solo_admin) VALUES (1, 'Caja 1 (Mostrador Principal)', 1, 0)")
         cursor.execute("INSERT INTO cajas_fisicas (id, nombre, activa, solo_admin) VALUES (99, 'Caja 99 (Oficina Admin)', 1, 1)")
-        
     conexion.commit()
     conexion.close()
 
 asegurar_tabla_cajas_fisicas()
-# ---------------------------------------------------------
-
 
 router = APIRouter()
-
 ZONA_AR = timezone(timedelta(hours=-3))
 
 def disparar_alerta_cierre(turno_id, cajero, ventas, declarado, diferencia):
-    # Por ahora dejamos la URL vacía hasta que conectemos tu n8n o tu API definitiva
-    url_webhook = "AQUI_IRA_LA_URL_DE_TU_AUTOMATIZADOR"
-    
-    # Empaquetamos los datos clave de tu negocio de forma segura
-    payload = {
-        "evento": "CIERRE_Z",
-        "sucursal": "Autoservicio 20 de Junio",
-        "turno": turno_id,
-        "cajero": cajero,
-        "ventas_sistema": ventas,
-        "plata_declarada": declarado,
-        "diferencia": diferencia
-    }
-    
-    try:
-        # El servidor dispara el aviso y sigue de largo
-        if url_webhook != "AQUI_IRA_LA_URL_DE_TU_AUTOMATIZADOR":
-            requests.post(url_webhook, json=payload, timeout=5)
-            print("Alerta de Cierre Z disparada con éxito.")
-    except Exception as e:
-        print(f"Error al disparar la alerta: {e}")
+    pass # ACÁ VA TU N8N LUEGO
 
-# --- 1. LOS GUARDIAS DE LA CAJA ---
 class AperturaCaja(BaseModel):
     caja_id: int = 1
-    usuario_id: int = 1 # Por ahora simulamos que sos vos (ID 1)
+    usuario_id: int = 1 
     monto_inicial: float
 
 class MovimientoCaja(BaseModel):
     usuario_id: int = 1
-    tipo_movimiento: str # "RETIRO" (Sangría) o "INGRESO" (Cambio extra)
+    tipo_movimiento: str 
     monto: float
     observaciones: str
     turno_id: int
 
 class CierreCaja(BaseModel):
     turno_id: int
-    monto_final_declarado: float # Los billetes reales que contaste con la mano
+    monto_final_declarado: float 
     
 @router.get("/cajas_fisicas")
 def listar_cajas_fisicas():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
-    # Solo mandamos al mostrador las cajas que estén "Activas"
     cursor.execute("SELECT id, nombre FROM cajas_fisicas WHERE activa = 1 ORDER BY id ASC")
     cajas = [dict(row) for row in cursor.fetchall()]
     conexion.close()
     return {"cajas": cajas}
 
-# --- 2. ABRIR EL TURNO ---
 @router.post("/abrir", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def abrir_turno(apertura: AperturaCaja):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
-    
     try:
-        # 1. EL BLINDAJE NUEVO: ¿Existe la caja y tengo permiso?
         cursor.execute("SELECT nombre, activa, solo_admin FROM cajas_fisicas WHERE id = ?", (apertura.caja_id,))
         caja_fisica = cursor.fetchone()
-        
-        if not caja_fisica:
-            raise Exception("Esta terminal no está registrada como una caja válida en el sistema.")
-        if not caja_fisica[1]: # activa == False
-            raise Exception("Esta caja está deshabilitada temporalmente por la administración.")
-            
-        # Si la caja tiene el candado "solo_admin = True"
+        if not caja_fisica: raise Exception("Esta terminal no está registrada.")
+        if not caja_fisica[1]: raise Exception("Esta caja está deshabilitada.")
         if caja_fisica[2]: 
             cursor.execute("SELECT rol FROM usuarios WHERE id = ?", (apertura.usuario_id,))
             usuario = cursor.fetchone()
-            if not usuario or usuario[0] not in ['ADMIN', 'ENCARGADO']:
-                raise Exception("ACCESO DENEGADO: Esta terminal es de uso exclusivo para Administración. Inicie sesión en una caja de mostrador.")
+            if not usuario or usuario[0] not in ['ADMIN', 'ENCARGADO']: raise Exception("Caja exclusiva para Administración.")
 
-        # 2. Verificamos que no haya otro turno abierto en esta caja
         cursor.execute("SELECT id FROM turnos_caja WHERE caja_id = ? AND estado_turno = 'ABIERTO'", (apertura.caja_id,))
-        if cursor.fetchone():
-            raise Exception("Ya hay un turno abierto en esta caja. Tenés que cerrarlo primero.")
+        if cursor.fetchone(): raise Exception("Ya hay un turno abierto en esta caja.")
             
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
-        
         cursor.execute('''
             INSERT INTO turnos_caja (caja_id, usuario_id, fecha_hora_apertura, monto_inicial, estado_turno)
             VALUES (?, ?, ?, ?, 'ABIERTO')
@@ -136,34 +87,25 @@ def abrir_turno(apertura: AperturaCaja):
         turno_id = cursor.lastrowid
         conexion.commit()
         return {"mensaje": f"¡Turno de caja #{turno_id} abierto con éxito!", "turno_id": turno_id}
-        
     except Exception as e:
-        if conexion:
-            conexion.close()
-        mensaje_error = str(e)
-        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            return {"error": "No se pudo abrir la caja por un error interno."}
-        return {"error": mensaje_error}
+        if conexion: conexion.close()
+        return {"error": str(e)}
     finally:
-        if conexion:
-            conexion.close()
+        if conexion: conexion.close()
 
-# --- 3. REGISTRAR MOVIMIENTOS (INGRESO/RETIRO) ---
 @router.post("/movimiento", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_movimiento(mov: MovimientoCaja):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
-    
     try:
-        # Verificamos que el turno específico siga abierto
         cursor.execute("SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (mov.turno_id,))
-        if not cursor.fetchone():
-            raise Exception("El turno especificado no está abierto o no existe.")
+        if not cursor.fetchone(): raise Exception("El turno especificado no está abierto.")
             
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
-        tipo_mayuscula = mov.tipo_movimiento.upper()
         
-        # EL BLINDAJE: Agregamos explicitamente la columna turno_id al INSERT
+        # EL SELLO DE SEGURIDAD: Limpiamos espacios y forzamos mayúsculas
+        tipo_mayuscula = mov.tipo_movimiento.strip().upper()
+        
         cursor.execute('''
             INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -171,38 +113,24 @@ def registrar_movimiento(mov: MovimientoCaja):
         
         conexion.commit()
         return {"mensaje": f"¡{tipo_mayuscula} de ${mov.monto} registrado correctamente!"}
-        
     except Exception as e:
-        if conexion:
-            conexion.rollback()
-            
-        mensaje_error = str(e)
-        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR CRÍTICO AL MOVER DINERO: {mensaje_error}")
-            return {"error": "No se pudo registrar el movimiento por un error interno."}
-            
-        return {"error": mensaje_error}
+        if conexion: conexion.rollback()
+        return {"error": str(e)}
     finally:
-        if conexion:
-            conexion.close()
+        if conexion: conexion.close()
 
-# --- 4. CIERRE Z (Arqueo Final Blindado, Corregido y con Sincronización) ---
-# --- 4. CIERRE Z (Arqueo Final Blindado y Relacional) ---
 @router.put("/cerrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
     try:
         cursor.execute("SELECT * FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (cierre.turno_id,))
         turno = cursor.fetchone()
-        if not turno:
-            raise Exception("Ese turno no existe o ya fue cerrado.")
+        if not turno: raise Exception("Ese turno no existe o ya fue cerrado.")
             
         fecha_cierre = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
-        # 1. Ventas por métodos de pago estrictamente atados al TURNO
         cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
         ventas_efectivo = cursor.fetchone()[0] or 0.0
         
@@ -215,14 +143,12 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
         ventas_fiados = cursor.fetchone()[0] or 0.0
         
-        # 2. Movimientos de Caja atados al TURNO
         cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (cierre.turno_id,))
         total_retiros = cursor.fetchone()[0] or 0.0
         
         cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?", (cierre.turno_id,))
         total_ingresos = cursor.fetchone()[0] or 0.0
         
-        # CÁLCULO DE CAJA EXACTO
         monto_esperado_sistema = turno['monto_inicial'] + ventas_efectivo + total_ingresos - total_retiros
         diferencia = cierre.monto_final_declarado - monto_esperado_sistema
         
@@ -233,17 +159,6 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         ''', (fecha_cierre, monto_esperado_sistema, cierre.monto_final_declarado, diferencia, cierre.turno_id))
         
         conexion.commit()
-                
-        # GATILLO DE ALERTA
-        background_tasks.add_task(
-            disparar_alerta_cierre,
-            turno_id=cierre.turno_id,
-            cajero=turno['usuario_id'],
-            ventas=monto_esperado_sistema,
-            declarado=cierre.monto_final_declarado,
-            diferencia=diferencia
-        )
-        
         return {
             "mensaje": "¡Cierre Z realizado con éxito!",
             "resumen": {
@@ -260,31 +175,20 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
             }
         }
     except Exception as e:
-        if conexion:
-            conexion.rollback()
-            
-        mensaje_error = str(e)
-        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR CRÍTICO EN CIERRE Z: {mensaje_error}")
-            return {"error": "Error interno al cerrar caja. Contacte a soporte."}
-            
-        return {"error": mensaje_error}
+        if conexion: conexion.rollback()
+        return {"error": str(e)}
     finally:
-        if conexion:
-            conexion.close()
+        if conexion: conexion.close()
 
-# --- 5. INFORME X (Datos Reales al Momento) ---
 @router.get("/informe_x/{turno_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def sacar_informe_x(turno_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
     try:
         cursor.execute("SELECT monto_inicial FROM turnos_caja WHERE id = ?", (turno_id,))
         turno = cursor.fetchone()
-        if not turno:
-            raise Exception("Turno no encontrado.")
+        if not turno: raise Exception("Turno no encontrado.")
             
         fondo_inicial = turno['monto_inicial']
         
@@ -321,17 +225,10 @@ def sacar_informe_x(turno_id: int):
             }
         }
     except Exception as e:
-        mensaje_error = str(e)
-        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR EN INFORME X: {mensaje_error}")
-            return {"error": "Error interno al generar el informe."}
-            
-        return {"error": mensaje_error}
+        return {"error": str(e)}
     finally:
-        if conexion:
-            conexion.close()
+        if conexion: conexion.close()
     
-# --- 6. MONITOR EN VIVO (Para el panel de Admin) ---
 @router.get("/monitor_vivo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def monitor_cajas_vivo():
     conexion = obtener_conexion()
@@ -346,24 +243,16 @@ def monitor_cajas_vivo():
         ''')
         turnos_abiertos = [dict(t) for t in cursor.fetchall()]
         
-        fecha_corte = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for turno in turnos_abiertos:
             turno_id_actual = turno['turno_id']
-            
-            # Ahora filtramos por turno_id, NO por fecha_apertura
             cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago = 'EFECTIVO' AND turno_id = ?", (turno_id_actual,))
             ventas_efectivo = cursor.fetchone()[0] or 0.0
-            
             cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago LIKE '%Tarjeta%' AND turno_id = ?", (turno_id_actual,))
             ventas_tarjeta = cursor.fetchone()[0] or 0.0
-            
             cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago LIKE '%Billetera%' AND turno_id = ?", (turno_id_actual,))
             ventas_virtual = cursor.fetchone()[0] or 0.0
-            
-            # Ingresos y Retiros atados al turno
             cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (turno_id_actual,))
             retiros = cursor.fetchone()[0] or 0.0
-            
             cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?", (turno_id_actual,))
             ingresos = cursor.fetchone()[0] or 0.0
             
@@ -374,28 +263,17 @@ def monitor_cajas_vivo():
             turno['ingresos'] = ingresos
             turno['total_esperado'] = turno['monto_inicial'] + ventas_efectivo + ingresos - retiros
             
-        conexion.close()
         return {"turnos_vivos": turnos_abiertos}
     except Exception as e:
-        if conexion:
-            conexion.close()
-            
-        mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 No se puede visualizar la caja en vivo: {mensaje_error}")
-            return {"error": "No se puede visualizar la caja. Contacte a soporte."}
-            
-        return {"error": mensaje_error}
-    
-    # --- 8. VERIFICAR ESTADO DE CAJA (Para que el POS tenga memoria) ---
+        if conexion: conexion.close()
+        return {"error": str(e)}
+
 @router.get("/estado", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def estado_caja(caja_id: int = 1):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # Buscamos el último turno registrado de esta caja
         cursor.execute('''
             SELECT id, estado_turno 
             FROM turnos_caja 
@@ -403,26 +281,15 @@ def estado_caja(caja_id: int = 1):
             ORDER BY id DESC LIMIT 1
         ''', (caja_id,))
         turno = cursor.fetchone()
-        conexion.close()
-        
-        # Si hay un turno y dice ABIERTO, le avisamos al frontend
         if turno and turno['estado_turno'] == 'ABIERTO':
             return {"estado": "ABIERTO", "turno_id": turno['id']}
         else:
             return {"estado": "CERRADO"}
     except Exception as e:
-        if conexion:
-            conexion.close()
-            
-        mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 No se puede ver el estado de la caja: {mensaje_error}")
-            return {"error": "Error interno. Contacte a soporte."}
-            
-        return {"error": mensaje_error}
+        return {"error": str(e)}
+    finally:
+        if conexion: conexion.close()
     
-# --- EL GUARDIÁN DEL COBRO MAYORISTA (Ahora acepta mixtos) ---
 class PagoMixtoCaja(BaseModel):
     metodo: str
     monto: float
@@ -435,41 +302,28 @@ class CobroPedido(BaseModel):
     observaciones: Optional[str] = ""
     turno_id: int
 
-# --- RUTA OFICIAL: CONECTAR COBRO CON LOGÍSTICA ---
 @router.post("/cobrar_pedido", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def cobrar_pedido_mayorista(cobro: CobroPedido):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
     try:
-        # 1. Buscamos el turno abierto
-        cursor.execute("SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO' ORDER BY id DESC LIMIT 1")
+        # EL ARREGLO: Ya no buscamos el turno a ciegas, usamos el que mandó el cajero
+        cursor.execute("SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (cobro.turno_id,))
         turno_abierto = cursor.fetchone()
-        
-        if not turno_abierto:
-            raise Exception("No hay ningún turno de caja abierto en este momento. ¡Abra la caja primero!")
+        if not turno_abierto: raise Exception("Este turno de caja no está activo o no existe.")
             
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 2. Armamos la lista de pagos a procesar (sea 1 solo o mixto)
-        pagos_a_procesar = []
-        if cobro.metodo_pago == 'MIXTO' and cobro.pagos_mixtos:
-            pagos_a_procesar = cobro.pagos_mixtos
-        else:
-            pagos_a_procesar = [PagoMixtoCaja(metodo=cobro.metodo_pago, monto=cobro.monto_total)]
+        pagos_a_procesar = cobro.pagos_mixtos if cobro.metodo_pago == 'MIXTO' and cobro.pagos_mixtos else [PagoMixtoCaja(metodo=cobro.metodo_pago, monto=cobro.monto_total)]
 
-        # 3. Guardamos cada pago en la caja o en la cuenta corriente
         for pago in pagos_a_procesar:
             if pago.monto > 0:
                 if pago.metodo != 'CTA_CTE':
-                    detalle_pago = f"Cobro Pedido Mayorista #{cobro.pedido_id} ({pago.metodo})"
                     cursor.execute('''
-                        INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones)
-                        VALUES (?, 1, 'INGRESO', ?, ?)
-                    ''', (fecha_actual, pago.monto, detalle_pago))
+                        INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+                        VALUES (?, 1, 'INGRESO', ?, ?, ?)
+                    ''', (fecha_actual, pago.monto, f"Cobro Pedido Mayorista #{cobro.pedido_id} ({pago.metodo})", cobro.turno_id))
                 else:
-                    # Fiado (Cuenta Corriente)
                     cursor.execute("SELECT cliente_id FROM ventas_cabecera WHERE id = ?", (cobro.pedido_id,))
                     row_pedido = cursor.fetchone()
                     if row_pedido and row_pedido['cliente_id']:
@@ -480,35 +334,24 @@ def cobrar_pedido_mayorista(cobro: CobroPedido):
                             VALUES (?, ?, 'DEUDA', ?, ?, 1)
                         ''', (cliente_id, fecha_actual, pago.monto, f"Pedido Mayorista #{cobro.pedido_id} (Pago Mixto)"))
 
-        # 4. LA CLAVE LOGÍSTICA
         cursor.execute('''
             UPDATE ventas_cabecera 
             SET estado = 'PAGADO_PENDIENTE_ENTREGA', metodo_pago = ? 
             WHERE id = ? AND estado = 'PENDIENTE_PAGO'
         ''', (cobro.metodo_pago, cobro.pedido_id))
         
-        if cursor.rowcount == 0:
-            raise Exception("El pedido no existe, no es válido o ya fue cobrado.")
+        if cursor.rowcount == 0: raise Exception("El pedido no existe o ya fue cobrado.")
             
         conexion.commit()
         return {"mensaje": "¡Cobro registrado exitosamente!"}
-        
     except Exception as e:
-        if conexion:
-            conexion.close()
-            
-        mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 Error al cobrar pedido mayorista: {mensaje_error}")
-            return {"error": "Error interno. Contacte a soporte."}
-            
-        return {"error": mensaje_error}
+        if conexion: conexion.close()
+        return {"error": str(e)}
     finally:
-        conexion.close()
+        if conexion: conexion.close()
         
 class NuevaCaja(BaseModel):
-    id: int # Vos elegís el número (Ej: 3, 4, 99)
+    id: int 
     nombre: str
     solo_admin: bool
 
@@ -518,8 +361,7 @@ def crear_caja_fisica(caja: NuevaCaja):
     cursor = conexion.cursor()
     try:
         cursor.execute("SELECT id FROM cajas_fisicas WHERE id = ?", (caja.id,))
-        if cursor.fetchone():
-            raise Exception(f"Ya existe una terminal con el ID {caja.id}. Elegí otro número.")
+        if cursor.fetchone(): raise Exception(f"Ya existe una terminal con el ID {caja.id}. Elegí otro número.")
             
         cursor.execute('''
             INSERT INTO cajas_fisicas (id, nombre, activa, solo_admin) 
@@ -542,7 +384,7 @@ def toggle_caja_fisica(caja_id: int):
         caja = cursor.fetchone()
         if not caja: raise Exception("La caja no existe.")
         
-        nuevo_estado = 0 if caja[0] == 1 else 1 # Invierte el estado
+        nuevo_estado = 0 if caja[0] == 1 else 1
         cursor.execute("UPDATE cajas_fisicas SET activa = ? WHERE id = ?", (nuevo_estado, caja_id))
         conexion.commit()
         return {"mensaje": "Estado de la terminal actualizado.", "nuevo_estado": nuevo_estado}
@@ -552,7 +394,6 @@ def toggle_caja_fisica(caja_id: int):
     finally:
         if conexion: conexion.close()
 
-# RUTA ESPECIAL: Lista TODAS las cajas para el Admin (incluso las apagadas)
 @router.get("/cajas_fisicas/admin_listado", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def listar_todas_las_cajas():
     conexion = obtener_conexion()
