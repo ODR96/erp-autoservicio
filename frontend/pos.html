@@ -69,7 +69,7 @@
             flex: 1 1 auto;
             padding: 15px;
             overflow-y: auto;
-            padding-bottom: 50px;
+            padding-bottom: 60px;
         }
 
         .panel-container {
@@ -156,20 +156,23 @@
         .cat-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-            gap: 10px;
-            padding: 15px;
+            gap: 8px; /* Espacio más ajustado */
+            padding: 10px;
             flex-grow: 1;
             align-items: start;
+            overflow-y: auto; /* ESTA ES LA LÍNEA MÁGICA: Permite scroll interno */
         }
 
         .btn-cat {
             border: 1px solid var(--border-color);
             border-radius: 8px;
-            padding: 12px 5px;
+            padding: 8px 5px; /* Un poco menos de "aire" adentro del botón */
+            min-height: 60px; /* Altura controlada */
             font-weight: 700;
             display: flex;
             flex-direction: column;
             align-items: center;
+            justify-content: center;
             color: #1e293b !important;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
             transition: transform 0.1s;
@@ -326,35 +329,35 @@
                 </div>
             </div>
 
-            <!-- COLUMNA DERECHA: PANELES DE CONTROL (40% del espacio) -->
-            <div class="col-lg-5 col-xl-4 d-flex flex-column gap-3">
+<!-- COLUMNA DERECHA: PANELES DE CONTROL (40% del espacio) -->
+            <div class="col-lg-5 col-xl-4 d-flex flex-column gap-2">
                 
-                <!-- BOTONES ADMINISTRATIVOS (Agrupados y limpios) -->
+                <!-- BOTONES ADMINISTRATIVOS (Más compactos) -->
                 <div class="d-flex gap-2">
-                    <button class="btn btn-secondary fw-bold flex-fill shadow-sm py-2" onclick="modalGestion.show()">
+                    <button class="btn btn-secondary fw-bold flex-fill shadow-sm" onclick="modalGestion.show()">
                         <i class="bi bi-safe fs-5 d-block"></i> Caja (F10)
                     </button>
-                    <button class="btn btn-warning fw-bold text-dark flex-fill shadow-sm py-2" onclick="abrirModalCobroFiado()">
+                    <button class="btn btn-warning fw-bold text-dark flex-fill shadow-sm" onclick="abrirModalCobroFiado()">
                         <i class="bi bi-journal-check fs-5 d-block"></i> Cobrar Deuda
                     </button>
-                    <button class="btn btn-warning fw-bold text-dark flex-fill shadow-sm py-2" onclick="abrirCobroPedidoMayorista()">
+                    <button class="btn btn-warning fw-bold text-dark flex-fill shadow-sm" onclick="abrirCobroPedidoMayorista()">
                         <i class="bi bi-box-seam fs-5 d-block"></i> Mayorista
                     </button>
                 </div>
 
-                <button class="btn btn-outline-info fw-bold shadow-sm" onclick="abrirModalFaltantes()">
+                <button class="btn btn-outline-info fw-bold shadow-sm py-1" onclick="abrirModalFaltantes()">
                     <i class="bi bi-card-checklist"></i> Anotar Producto Faltante / Pedido
                 </button>
 
-                <!-- CATEGORÍAS RÁPIDAS -->
-                <div class="panel-container flex-grow-1">
-                    <div class="panel-header"><i class="bi bi-grid-3x3-gap"></i> CATEGORÍAS RÁPIDAS</div>
+                <!-- CATEGORÍAS RÁPIDAS (Con Scroll Interno) -->
+                <div class="panel-container flex-grow-1" style="min-height: 0;">
+                    <div class="panel-header py-1"><i class="bi bi-grid-3x3-gap"></i> CATEGORÍAS RÁPIDAS</div>
                     <div class="cat-grid" id="contenedorCategoriasRapidas"></div>
                 </div>
 
                 <!-- GRILLA DE PAGOS (2x2) -->
-                <div class="panel-container">
-                    <div class="panel-header"><i class="bi bi-wallet2"></i> MEDIOS DE PAGO</div>
+                <div class="panel-container flex-shrink-0">
+                    <div class="panel-header py-1"><i class="bi bi-wallet2"></i> MEDIOS DE PAGO</div>
                     <div class="p-2 d-grid gap-2" style="grid-template-columns: 1fr 1fr;">
                         <button class="btn-pago bg-efectivo d-flex align-items-center justify-content-center gap-2" onclick="prepararCobroEfectivo()">
                             <i class="bi bi-cash-stack fs-4"></i> EFECTIVO
