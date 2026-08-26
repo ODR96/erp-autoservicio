@@ -1941,7 +1941,7 @@ let html = `
 <!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
     @page { margin: 0; } 
-    body { font-family: Arial, sans-serif; font-size: 12px; font-weight: 600; width: 76mm; padding: 2mm 4mm; margin: 0; color: #000; -webkit-font-smoothing: none; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 12px; font-weight: 600; width: 76mm; padding: 2mm 6mm 2mm 0mm; margin: 0; color: #000; -webkit-font-smoothing: none; box-sizing: border-box; }
     .center { text-align: center; } .left { text-align: left; } .bold { font-weight: bold; }
     .divisor { border-top: 1px dashed #000; margin: 5px 0; }
     .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 5px 0; }
@@ -2208,7 +2208,7 @@ let html = `
                 <title>Ticket ${ticket.encabezado.numero_ticket}</title>
                 <style>
                     @page { margin: 0; }
-                    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 600; color: #000; margin: 0; padding: 2mm 4mm; width: 76mm; box-sizing: border-box; -webkit-font-smoothing: none; text-rendering: crispEdges; }
+                    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 600; color: #000; margin: 0; padding: 2mm 6mm 2mm 0mm; width: 76mm; box-sizing: border-box; -webkit-font-smoothing: none; text-rendering: crispEdges; }
                     .center { text-align: center; } .right { text-align: right; } .left { text-align: left; } .bold { font-weight: bold; }
                     .divisor { border-top: 1px dashed #000; margin: 4px 0; }
                     .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 4px 0; }

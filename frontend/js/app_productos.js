@@ -217,25 +217,30 @@ document.querySelector('[data-bs-target="#modalNuevoProducto"]').addEventListene
         });
 
 async function cargarCatalogo() {
-    // 1. Agarramos los elementos visuales
     const loader = document.getElementById('loaderServidor');
     const contenedor = document.getElementById('productTabsContent');
     const tbody = document.getElementById('tablaCatalogoBody');
     
-    // 2. Mostramos el esqueleto de carga elegante adentro de la tabla
     if (tbody) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="7" class="text-center py-5">
-                    <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status"></div>
-                    <h5 class="mt-3 text-muted fw-bold">Cargando catálogo desde la nube...</h5>
-                </td>
+        // --- SKELETON LOADER (Efecto Corporativo Moderno) ---
+        let skeletonHtml = '';
+        for (let i = 0; i < 8; i++) {
+            skeletonHtml += `
+            <tr class="placeholder-glow">
+                <td class="align-middle"><span class="placeholder col-8 bg-secondary opacity-25"></span></td>
+                <td class="align-middle"><span class="placeholder col-10 bg-secondary opacity-25"></span></td>
+                <td class="align-middle"><span class="placeholder col-6 bg-secondary opacity-25"></span></td>
+                <td class="text-end align-middle"><span class="placeholder col-8 bg-secondary opacity-25"></span></td>
+                <td class="text-end align-middle"><span class="placeholder col-8 bg-secondary opacity-25"></span></td>
+                <td class="text-center align-middle"><span class="placeholder col-8 bg-secondary opacity-25 rounded-pill" style="height:20px;"></span></td>
+                <td class="text-center align-middle"><span class="placeholder col-8 bg-secondary opacity-25"></span></td>
             </tr>`;
+        }
+        tbody.innerHTML = skeletonHtml;
     }
 
-    // Ocultamos el contenedor general si tenías esa lógica
-    if (loader) loader.style.display = 'block';
-    if (contenedor) contenedor.style.display = 'none';
+    if (loader) loader.style.display = 'none'; // Ya no usamos el spinner viejo
+    if (contenedor) contenedor.style.display = 'block';
 
     try {
         let filtroElemento = document.getElementById('filtroEstado');
@@ -250,35 +255,19 @@ async function cargarCatalogo() {
             url += `?estado=${filtroSelect}`; 
         }
         
-        // 🚀 ACÁ ESTÁ LA MAGIA: USAMOS EL NUEVO apiFetch BLINDADO
         const response = await apiFetch(url);
         const data = await response.json();
         productosGlobales = data.productos || [];
         
         if (typeof filtrarCatalogoFront === 'function') filtrarCatalogoFront(); 
         
-        // PARCHE BLINDAJE
         try { if (typeof llenarSelectEtiquetas === 'function') llenarSelectEtiquetas(); } catch(e){}
         try { if (typeof llenarSelectComponentes === 'function') llenarSelectComponentes(); } catch(e){}
         
-        // 3. ¡ÉXITO! Apagamos el loader y mostramos el sistema
-        if (loader) loader.style.display = 'none';
-        if (contenedor) contenedor.style.display = 'block';
-        
     } catch (error) { 
         console.error("Error crítico cargando catálogo:", error); 
-        
-        // 4. Si falla el servidor o no hay internet, cambiamos el texto
-        if (loader) {
-            loader.innerHTML = `
-                <i class="bi bi-x-circle text-danger display-4 mb-3 d-block"></i>
-                <h5 class="fw-bold text-dark">Error de conexión</h5>
-                <p class="text-muted">No pudimos conectar con la base de datos central.<br>Revisá el internet del local y recargá la página (F5).</p>
-            `;
-        }
-        
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4 fw-bold"><i class="bi bi-wifi-off fs-4 d-block mb-2"></i> Sin conexión al catálogo</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-5 fw-bold"><i class="bi bi-wifi-off display-6 d-block mb-2"></i> Sin conexión al catálogo.<br><small class="text-muted">Revisá la red y recargá (F5)</small></td></tr>`;
         }
     }
 }
@@ -904,7 +893,6 @@ async function guardarProductoCompleto() {
     const diasAlerta = controlVenc === 'SI' ? (parseInt(document.getElementById('inputDiasAlerta').value) || 10) : 0;
     const alertaStock = parseFloat(document.getElementById('inputAlertaStock').value) || 0;
 
-    // Aseguramos que los IDs sean números reales y no "NaN" (que rompen el guardado)
     const provId = parseInt(document.getElementById('selectProveedor').value);
     const catId = parseInt(document.getElementById('selectCategoria').value);
     const nombreLoteIngresado = document.getElementById('inputNumLote').value.trim();
@@ -942,12 +930,48 @@ async function guardarProductoCompleto() {
         const data = await res.json();
         if (data.error) throw new Error(data.error); 
         
-        await Swal.fire('¡Éxito!', 'Guardado correctamente.', 'success'); 
-        sessionStorage.setItem('paginaRetorno', paginaActualProd);
-        cargarCatalogo(); 
-        cargarColaEtiquetas();
-        sessionStorage.setItem('alturaScroll', window.scrollY);
+        // Cerramos el modal y recargamos el catálogo en segundo plano
         bootstrap.Modal.getInstance(document.getElementById('modalNuevoProducto')).hide();
+        sessionStorage.setItem('paginaRetorno', paginaActualProd);
+        sessionStorage.setItem('alturaScroll', window.scrollY);
+        cargarCatalogo(); 
+        
+        // --- EL NUEVO MOTOR DE ENCOLADO AUTOMÁTICO ---
+        // Rescatamos el ID (si era nuevo, Python lo devuelve. Si era edición, usamos el que teníamos)
+        const idGuardado = productoEditandoId || data.producto_id || data.id;
+
+        if (idGuardado) {
+            const confirmEtiqueta = await Swal.fire({
+                title: '¡Producto Guardado!',
+                text: '¿Querés mandar una Cenefa actualizada a la cola de impresión?',
+                icon: 'success',
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-printer"></i> Sí, a la cola',
+                cancelButtonText: 'No hace falta',
+                confirmButtonColor: '#198754',
+                cancelButtonColor: '#6c757d'
+            });
+
+            if (confirmEtiqueta.isConfirmed) {
+                // Le pegamos directo a la API de etiquetas sin pasar por la UI vieja
+                await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        producto_id: idGuardado, 
+                        tipo_cartel: 'Cenefa', 
+                        cantidad_copias: 1, 
+                        texto_personalizado: '',
+                        plantilla: 'Clasica',
+                        color_tema: '#000000'
+                    })
+                });
+                Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Añadido a la cola', showConfirmButton: false, timer: 1500 });
+            }
+        } else {
+            Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Guardado correctamente', showConfirmButton: false, timer: 1500 });
+        }
+
     } catch (e) {
         Swal.fire('Error al guardar', e.message, 'error');
     }
@@ -1232,121 +1256,6 @@ async function cargarListadoCombos() {
     }
 }
 
-// ==========================================
-// BUSCADOR INTELIGENTE PARA CARTELERÍA
-// ==========================================
-let etiquetaSeleccionadaTemporal = null;
-
-function buscarParaEtiqueta(q) {
-    const res = document.getElementById('resultadosEtiqueta');
-    if (q.length < 2) { res.classList.add('d-none'); return; }
-    const filtrados = productosGlobales.filter(p => p.nombre.toLowerCase().includes(q.toLowerCase()) || (p.codigo_barras && p.codigo_barras.includes(q))).slice(0, 10);
-    res.innerHTML = '';
-    filtrados.forEach(p => {
-        res.innerHTML += `<button type="button" class="list-group-item list-group-item-action small" onclick="seleccionarParaEtiqueta(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')"><b>${p.codigo_barras || 'S/C'}</b> - ${p.nombre}</button>`;
-    });
-    res.classList.remove('d-none');
-}
-
-function seleccionarParaEtiqueta(id, nombre) {
-    etiquetaSeleccionadaTemporal = id;
-    document.getElementById('inputBuscarEtiqueta').value = nombre;
-    document.getElementById('resultadosEtiqueta').classList.add('d-none');
-
-    actualizarPreviewCanva();
-}
-
-// --- EL MOTOR DEL PREVIEW EN VIVO ---
-function actualizarPreviewCanva() {
-    const preview = document.getElementById('previewCanva');
-    if(!preview) return;
-
-    const sId = etiquetaSeleccionadaTemporal;
-    if(!sId) {
-        preview.innerHTML = '<div class="text-muted small"><i class="bi bi-search"></i> Buscá un producto para empezar</div>';
-        return;
-    }
-
-    const pG = productosGlobales.find(p => p.id === sId);
-    const form = document.getElementById('selectEtiquetaFormato').value;
-    const txt = document.getElementById('inputEtiquetaTexto').value;
-    const pf = parseFloat(document.getElementById('inputEtiquetaPrecioFalso').value);
-    const plantilla = document.getElementById('selectPlantilla').value;
-    const color = document.getElementById('inputColorTema').value;
-
-    let pMostrarF = (pf ? pf : pG.precio_venta_final).toLocaleString('es-AR', {minimumFractionDigits: 2});
-    let txtHtml = txt ? `<div style="background:${color}; color:white; padding: 2px 10px; border-radius: 5px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 5px;">${txt}</div>` : '';
-
-    let html = '';
-
-    // Miniaturas aproximadas para que te des una idea de cómo va a salir impreso
-    if(form === "Oferta A4") {
-        if(plantilla === "La Bomba") {
-            html = `<div style="border: 4px solid ${color}; width: 80%; padding: 10px; text-align: center; border-radius: 8px; background: #fff;">
-                        ${txtHtml}
-                        <div style="font-weight: 900; color: #333; font-size: 12px; line-height:1;">${pG.nombre}</div>
-                        <div style="font-size: 28px; font-weight: 900; color: ${color}; line-height: 1; margin-top:5px;">$${pMostrarF}</div>
-                    </div>`;
-        } else {
-            // Clásica
-            html = `<div style="border: 2px solid ${color}; width: 80%; padding: 10px; text-align: center; background: #fff;">
-                        <div style="background: ${color}; color: white; margin: -10px -10px 10px -10px; padding: 2px; font-size: 9px; font-weight: bold;">Autoservicio 20 de Junio</div>
-                        ${txtHtml}
-                        <div style="font-size: 12px; font-weight: bold;">${pG.nombre}</div>
-                        <div style="font-size: 24px; font-weight: 900;">$${pMostrarF}</div>
-                    </div>`;
-        }
-    } else {
-        // Cenefa Preview
-        html = `<div style="border: 1px dashed #999; width: 90%; height: 50px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#fff; position: relative; border-left: 5px solid ${color};">
-                    <div style="font-size:9px; font-weight:bold; color:#333;">${pG.nombre}</div>
-                    <div style="font-size:18px; font-weight:900; color:#333;">$${pMostrarF}</div>
-                </div>`;
-    }
-
-    preview.innerHTML = html;
-}
-
-// --- ACTUALIZAR LA FUNCIÓN DE GUARDADO PARA MANDAR LOS DISEÑOS ---
-async function agregarEtiquetaManual() {
-    const sId = etiquetaSeleccionadaTemporal;
-    const form = document.getElementById('selectEtiquetaFormato').value;
-    const cant = parseInt(document.getElementById('inputEtiquetaCant').value);
-    const txt = document.getElementById('inputEtiquetaTexto').value;
-    const pf = parseFloat(document.getElementById('inputEtiquetaPrecioFalso').value) || null;
-    
-    // Capturamos los datos del Canva
-    const plantilla = document.getElementById('selectPlantilla').value; 
-    const color = document.getElementById('inputColorTema').value; 
-
-    if (!sId || cant <= 0) return Swal.fire('Error', 'Busque y seleccione un producto primero.', 'warning');
-
-    try {
-        await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar`, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ 
-                producto_id: sId, 
-                tipo_cartel: form, 
-                cantidad_copias: cant, 
-                texto_personalizado: txt,
-                plantilla: plantilla,     // Se lo mandamos a Python
-                color_tema: color         // Se lo mandamos a Python
-            }) 
-        });
-
-        document.getElementById('inputEtiquetaTexto').value = "";
-        document.getElementById('inputEtiquetaPrecioFalso').value = "";
-        document.getElementById('inputBuscarEtiqueta').value = "";
-        etiquetaSeleccionadaTemporal = null;
-        actualizarPreviewCanva(); // Vaciamos el preview
-
-        await cargarColaEtiquetas();
-    } catch (e) {
-        console.error("Error al encolar etiqueta", e);
-    }
-}
-
 function limpiarFiltrosCatalogo() {
     // Vaciamos todos los campos visuales
     if(document.getElementById('inputBuscarCatalogo')) document.getElementById('inputBuscarCatalogo').value = '';
@@ -1523,14 +1432,17 @@ document.addEventListener('keydown', async (e) => {
         if (bufferEscaneo.length > 2) { 
             try {
                 Swal.fire({ title: 'Buscando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+                
+                // EL ARREGLO: Nombre correcto de variable y lectura de array
                 const resp = await apiFetch(`${obtenerBaseUrl()}/productos/buscar?termino=${bufferEscaneo}`);
-                const prod = await res.json();
+                const dataBusqueda = await resp.json();
 
-                if (prod.error) {
-                    Swal.fire('No encontrado', 'El código escaneado no existe.', 'warning');
+                if (dataBusqueda.error || !dataBusqueda.productos || dataBusqueda.productos.length === 0) {
+                    Swal.fire('No encontrado', 'El código escaneado no existe o el producto está inactivo.', 'warning');
                 } else {
                     Swal.close();
-                    abrirEditarProducto(prod.id, 'precios'); // Abre la ventanita mágica automáticamente
+                    // Abrimos el primer producto que coincida con el código
+                    abrirEditarProducto(dataBusqueda.productos[0].id, 'precios'); 
                 }
             } catch (err) {
                 Swal.fire('Error', 'Problema al buscar con la pistola.', 'error');
@@ -1547,6 +1459,5 @@ document.addEventListener("DOMContentLoaded", () => {
     cargarCategoriasGlobales();
     cargarProveedoresGlobales();
     cargarCatalogo();
-    cargarColaEtiquetas();
     cargarBotonesPOS();
 });
