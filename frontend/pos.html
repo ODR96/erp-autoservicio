@@ -11,17 +11,11 @@
 
     <style>
         :root {
-            /* Paleta Azul Petróleo / Marino */
             --bg-main: #0B1320;
-            /* Fondo general súper oscuro */
             --panel-bg: #142032;
-            /* Paneles un poco más claros para separar */
             --header-blue: #070B14;
-            /* Cabeceras casi negras */
             --border-color: #1F304A;
-            /* Bordes sutiles */
             --text-main: #E2E8F0;
-            /* Texto gris clarito (no blanco puro para no encandilar) */
             --text-muted: #94A3B8;
         }
 
@@ -47,10 +41,9 @@
             border-bottom: 1px solid var(--border-color);
         }
 
-        /* Buscador integrado oscuro */
         .search-container {
             flex-grow: 1;
-            max-width: 500px;
+            max-width: 700px;
             margin: 0 20px;
         }
 
@@ -101,7 +94,6 @@
             border-radius: 8px 8px 0 0;
         }
 
-        /* Estilos del Ticket */
         .ticket-info-bar {
             background-color: #0D1627;
             border-bottom: 1px solid var(--border-color);
@@ -110,7 +102,6 @@
             justify-content: space-between;
             font-size: 0.9rem;
             color: #cbd5e1;
-            /* Color más claro */
             align-items: center;
         }
 
@@ -124,9 +115,7 @@
             transition: 0.2s;
         }
 
-        .cliente-link:hover {
-            background-color: rgba(56, 189, 248, 0.1);
-        }
+        .cliente-link:hover { background-color: rgba(56, 189, 248, 0.1); }
 
         .ticket-headers {
             display: grid;
@@ -137,7 +126,6 @@
             text-align: center;
             font-size: 0.9rem;
             color: #cbd5e1;
-            /* Color más claro */
         }
 
         .ticket-body {
@@ -165,10 +153,9 @@
             border-radius: 0 0 8px 8px;
         }
 
-        /* Categorías y Numpad */
         .cat-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
             gap: 10px;
             padding: 15px;
             flex-grow: 1;
@@ -180,119 +167,37 @@
             border-radius: 8px;
             padding: 12px 5px;
             font-weight: 700;
-            /* Letra más gordita */
             display: flex;
             flex-direction: column;
             align-items: center;
             color: #1e293b !important;
-            /* Texto gris muy oscuro/casi negro en vez de blanco */
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
             transition: transform 0.1s;
         }
 
-        .btn-cat:active {
-            transform: scale(0.96);
-        }
+        .btn-cat:active { transform: scale(0.96); }
 
-        .numpad-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            padding: 12px;
-        }
-
-        .btn-num {
-            background-color: #1C2B42;
-            border: 1px solid #2A3D5A;
-            border-radius: 8px;
-            font-size: 1.5rem;
-            font-weight: bold;
-            height: 65px;
-            color: #F8FAFC;
-            box-shadow: 0 3px 0 #070B14;
-            transition: 0.1s;
-        }
-
-        .btn-num:active {
-            transform: translateY(3px);
-            box-shadow: none;
-        }
-
-        /* Botones de acción del numpad */
-        .btn-action-blue {
-            background-color: #0284c7;
-            border-color: #0369a1;
-        }
-
-        .btn-action-yellow {
-            background-color: #d97706;
-            border-color: #b45309;
-        }
-
-        .btn-action-red {
-            background-color: #dc2626;
-            border-color: #991b1b;
-        }
-
-        /* Pagos */
         .btn-pago {
-            min-height: 55px;
+            min-height: 65px;
             border-radius: 8px;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             font-weight: bold;
             color: white;
             border: none;
             width: 100%;
             box-shadow: 0 4px 0 rgba(0, 0, 0, 0.4);
             text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+            transition: 0.1s;
         }
 
-        .btn-pago:active {
-            transform: translateY(4px);
-            box-shadow: none;
-        }
+        .btn-pago:active { transform: translateY(4px); box-shadow: none; }
+        .bg-efectivo { background-color: #10b981; }
+        .bg-tarjeta { background-color: #eab308; color: #1e293b; text-shadow: none; }
+        .bg-virtual { background-color: #3b82f6; }
+        .bg-fiado { background-color: #d97706; }
 
-        .bg-efectivo {
-            background-color: #10b981;
-        }
-
-        /* Verde más brillante para contraste oscuro */
-        .bg-tarjeta {
-            background-color: #eab308;
-            color: #1e293b;
-            text-shadow: none;
-        }
-
-        .bg-virtual {
-            background-color: #3b82f6;
-        }
-
-        .bg-fiado { 
-            background-color: #d97706; /* Un naranja más oscuro y menos chillón */
-        }
-
-        /* Botones espera/recuperar */
-        .btn-espera {
-            background-color: #475569;
-            color: white;
-            border: none;
-            font-weight: bold;
-            border-radius: 8px;
-            padding: 10px;
-            width: 100%;
-            box-shadow: 0 2px 0 #1e293b;
-        }
-
-        .btn-recuperar {
-            background-color: #0891b2;
-            color: white;
-            border: none;
-            font-weight: bold;
-            border-radius: 8px;
-            padding: 10px;
-            width: 100%;
-            box-shadow: 0 2px 0 #164e63;
-        }
+        .btn-espera { background-color: #475569; color: white; border: none; font-weight: bold; border-radius: 8px; padding: 10px; width: 100%; box-shadow: 0 2px 0 #1e293b; }
+        .btn-recuperar { background-color: #0891b2; color: white; border: none; font-weight: bold; border-radius: 8px; padding: 10px; width: 100%; box-shadow: 0 2px 0 #164e63; }
 
         .footer-bar {
             background-color: var(--header-blue);
@@ -308,87 +213,50 @@
             border-top: 3px solid #f59e0b;
         }
 
-        .footer-bar span {
-            cursor: pointer;
-            padding: 2px 8px;
-            border-radius: 4px;
-            transition: 0.2s;
-        }
-
-        .footer-bar span:hover {
-            background-color: rgba(255, 255, 255, 0.05);
-            color: white;
-        }
-
-        .fila-busqueda:hover {
-            background-color: var(--border-color);
-            cursor: pointer;
-        }
-
-        /* Agrandamos los montos del ticket para máxima visibilidad */
-        #visorTotal {
-            font-size: 2.8rem;
-            text-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
-        }
+        .footer-bar span { cursor: pointer; padding: 2px 8px; border-radius: 4px; transition: 0.2s; }
+        .footer-bar span:hover { background-color: rgba(255, 255, 255, 0.05); color: white; }
+        #visorTotal { font-size: 2.8rem; text-shadow: 0 0 10px rgba(16, 185, 129, 0.3); }
     </style>
 </head>
 
-<!-- Le decimos a Bootstrap que ponga todos los modales e inputs en modo oscuro -->
-
 <body data-bs-theme="dark">
+    <!-- TECHO LIMPIO Y DESPEJADO -->
     <div class="top-navbar shadow-sm d-print-none">
-        <div class="d-flex align-items-center gap-3">
-            <a href="admin_productos.html" id="btnVolverAdmin" class="btn btn-outline-light border-0"
-                title="Volver al Panel">
-                <i class="bi bi-arrow-left fs-3 text-white"></i>
+        <div class="d-flex align-items-center gap-2">
+            <a href="admin_productos.html" id="btnVolverAdmin" class="btn btn-outline-light border-0" title="Volver">
+                <i class="bi bi-arrow-left fs-4 text-white"></i>
             </a>
-            <!-- Icono genérico de tienda -->
-            <i class="bi bi-shop fs-2 text-warning"></i>
-            <div class="lh-1">
-                <!-- MARCA BLANCA: Estos IDs se van a llenar solos con JavaScript -->
-                <div class="fw-bold fs-5 text-warning" id="uiNombreNegocio">Cargando...</div>
-                <div class="small text-light" id="uiSucursal">Punto de Venta</div>
+            <i class="bi bi-shop fs-3 text-warning"></i>
+            <div class="lh-1 d-none d-md-block ms-1">
+                <div class="fw-bold fs-6 text-warning" id="uiNombreNegocio">Cargando...</div>
+                <div class="small text-light" style="font-size: 0.75rem;" id="uiSucursal">Punto de Venta</div>
             </div>
         </div>
 
         <div class="search-container">
-            <!-- Resto del buscador queda igual... -->
-            <div class="input-group input-group-lg">
-                <span class="input-group-text bg-white search-icon-box text-muted"><i class="bi bi-upc-scan"></i></span>
-                <input type="text" class="form-control search-bar" placeholder="[F2] Lector o texto..." id="inputScan"
-                    autocomplete="off" autofocus>
+            <div class="input-group input-group-lg shadow-sm">
+                <span class="input-group-text bg-white search-icon-box text-muted border-0"><i class="bi bi-upc-scan"></i></span>
+                <input type="text" class="form-control search-bar" placeholder="[F2] Lector de barras o nombre..." id="inputScan" autocomplete="off" autofocus>
             </div>
         </div>
 
-        <div class="d-flex align-items-center gap-3">
-            <div class="d-flex align-items-center gap-3">
-                <button class="btn btn-warning fw-bold d-flex align-items-center gap-2"
-                    onclick="abrirModalCobroFiado()">
-                    <i class="bi bi-journal-check"></i> Cobrar Cta. Cte.
-                </button>
-                <button class="btn btn-warning fw-bold shadow-sm px-4" onclick="abrirCobroPedidoMayorista()">
-                    <i class="bi bi-box-seam"></i> Pedido Mayorista
-                </button>
-                <button class="btn btn-secondary fw-bold d-flex align-items-center gap-2 me-3"
-                    onclick="modalGestion.show()">
-                    <i class="bi bi-safe"></i> Caja (F10)
-                </button>
-                <div class="text-end lh-1">
-                    <strong class="fs-4" id="reloj">00:00</strong><br>
-                    <small class="text-light" id="fecha">--/--/----</small>
-                </div>
-                <div class="d-flex align-items-center gap-2 border-start border-secondary ps-3" style="cursor: pointer;"
-                    onclick="cerrarSesionCajero()" title="Cerrar Sesión / Cambiar Usuario">
-                    <i class="bi bi-person-circle fs-2 text-light"></i>
-                    <div class="lh-1"><strong class="fs-6 text-warning" id="nombreCajeroLogueado">Cargando...</strong>
-                    </div>
-                </div>
+        <div class="d-flex align-items-center gap-4">
+            <div class="text-end lh-1 d-none d-lg-block">
+                <strong class="fs-4" id="reloj">00:00</strong><br>
+                <small class="text-light" id="fecha">--/--/----</small>
+            </div>
+            <div class="d-flex align-items-center gap-2 border-start border-secondary ps-3" style="cursor: pointer;" onclick="cerrarSesionCajero()" title="Cambiar Usuario">
+                <i class="bi bi-person-circle fs-2 text-light"></i>
+                <div class="lh-1 d-none d-xl-block"><strong class="fs-6 text-warning" id="nombreCajeroLogueado">Cargando...</strong></div>
             </div>
         </div>
     </div>
+
     <div class="main-content">
         <div class="row h-100 g-3">
-            <div class="col-lg-5">
+            
+            <!-- COLUMNA IZQUIERDA: EL TICKET (60% del espacio) -->
+            <div class="col-lg-7 col-xl-8">
                 <div class="panel-container">
                     <div class="panel-header">
                         <span><i class="bi bi-receipt"></i> VENTA ACTUAL</span>
@@ -399,11 +267,8 @@
                         <span><strong>Turno:</strong> T-001 | <strong>Ticket:</strong> #000145</span>
                         <div>
                             <strong>Cliente:</strong>
-                            <span class="cliente-link" id="nombreClienteTicket"
-                                onclick="abrirSeleccionCliente()">Consumidor Final <i class="bi bi-search"></i></span>
-                            <button class="btn btn-sm btn-outline-primary ms-2 py-0 px-1"
-                                onclick="modalNuevoCliente.show()" title="Alta rápida de cliente"><i
-                                    class="bi bi-person-plus-fill"></i></button>
+                            <span class="cliente-link" id="nombreClienteTicket" onclick="abrirSeleccionCliente()">Consumidor Final <i class="bi bi-search"></i></span>
+                            <button class="btn btn-sm btn-outline-primary ms-2 py-0 px-1" onclick="modalNuevoCliente.show()" title="Alta rápida"><i class="bi bi-person-plus-fill"></i></button>
                         </div>
                     </div>
 
@@ -423,10 +288,8 @@
                         </div>
                         <div class="d-flex justify-content-between align-items-center mb-2 pb-2 border-bottom">
                             <div class="btn-group">
-                                <button class="btn btn-sm btn-outline-success fw-bold"
-                                    onclick="aplicarModificador('descuento')">- % Dto</button>
-                                <button class="btn btn-sm btn-outline-danger fw-bold"
-                                    onclick="aplicarModificador('recargo')">+ % Recargo</button>
+                                <button class="btn btn-sm btn-outline-success fw-bold" onclick="aplicarModificador('descuento')">- % Dto</button>
+                                <button class="btn btn-sm btn-outline-danger fw-bold" onclick="aplicarModificador('recargo')">+ % Recargo</button>
                             </div>
                             <span class="fs-6 fw-bold text-danger d-none" id="visorModificador"></span>
                         </div>
@@ -434,89 +297,66 @@
                             <span class="display-6 fw-bold text-success">TOTAL:</span>
                             <span class="display-6 fw-bold text-success" id="visorTotal">$ 0.00</span>
                         </div>
-                        <button class="btn btn-pago bg-fiado mb-2" style="height: 50px; font-size: 1rem;"
-                            onclick="mandarACtaCte()"><i class="bi bi-pencil-square"></i> MANDAR A CTA.
-                            CTE.</button>
+                        <button class="btn btn-pago bg-fiado mb-2" style="height: 50px; font-size: 1rem;" onclick="mandarACtaCte()">
+                            <i class="bi bi-pencil-square"></i> MANDAR A CTA. CTE. (SALIDA)
+                        </button>
                         <div class="row g-2">
-                            <div class="col-6"><button class="btn-espera mb-0" onclick="ponerEnEspera()"><i
-                                        class="bi bi-pause-circle"></i> ESPERA (F9)</button></div>
-                            <div class="col-6"><button class="btn-recuperar mb-0" onclick="recuperarVenta()"><i
-                                        class="bi bi-arrow-counterclockwise"></i> RECUPERAR (F8)</button></div>
+                            <div class="col-6"><button class="btn-espera mb-0" onclick="ponerEnEspera()"><i class="bi bi-pause-circle"></i> ESPERA (F9)</button></div>
+                            <div class="col-6"><button class="btn-recuperar mb-0" onclick="recuperarVenta()"><i class="bi bi-arrow-counterclockwise"></i> RECUPERAR (F8)</button></div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="col-lg-7 d-flex flex-column gap-3">
-                <div class="panel-container">
-                    <div class="panel-header d-flex justify-content-between align-items-center">
-                        <span><i class="bi bi-box-seam"></i> CATEGORÍAS RÁPIDAS</span>
-                    </div>
-                    <div class="cat-grid" id="contenedorCategoriasRapidas">
-                    </div>
+            <!-- COLUMNA DERECHA: PANELES DE CONTROL (40% del espacio) -->
+            <div class="col-lg-5 col-xl-4 d-flex flex-column gap-3">
+                
+                <!-- BOTONES ADMINISTRATIVOS (Agrupados y limpios) -->
+                <div class="d-flex gap-2">
+                    <button class="btn btn-secondary fw-bold flex-fill shadow-sm py-2" onclick="modalGestion.show()">
+                        <i class="bi bi-safe fs-5 d-block"></i> Caja (F10)
+                    </button>
+                    <button class="btn btn-warning fw-bold text-dark flex-fill shadow-sm py-2" onclick="abrirModalCobroFiado()">
+                        <i class="bi bi-journal-check fs-5 d-block"></i> Cobrar Deuda
+                    </button>
+                    <button class="btn btn-warning fw-bold text-dark flex-fill shadow-sm py-2" onclick="abrirCobroPedidoMayorista()">
+                        <i class="bi bi-box-seam fs-5 d-block"></i> Mayorista
+                    </button>
                 </div>
 
-                <div class="row g-3 flex-grow-1">
-                    <div class="col-md-7">
-                        <div class="panel-container h-100">
-                            <div class="panel-header"><i class="bi bi-grid-3x3-gap"></i> TECLADO</div>
-                            <div class="numpad-grid h-100">
-                                <button class="btn-num" onclick="pressNumpad('7')">7</button>
-                                <button class="btn-num" onclick="pressNumpad('8')">8</button>
-                                <button class="btn-num" onclick="pressNumpad('9')">9</button>
-                                <button class="btn-num btn-action-blue" onclick="setModo('CANT')">CANT</button>
-                                <button class="btn-num" onclick="pressNumpad('4')">4</button>
-                                <button class="btn-num" onclick="pressNumpad('5')">5</button>
-                                <button class="btn-num" onclick="pressNumpad('6')">6</button>
-                                <button class="btn-num btn-action-blue" onclick="setModo('PRECIO')">PRECIO</button>
-                                <button class="btn-num" onclick="pressNumpad('1')">1</button>
-                                <button class="btn-num" onclick="pressNumpad('2')">2</button>
-                                <button class="btn-num" onclick="pressNumpad('3')">3</button>
-                                <button class="btn-num btn-action-yellow" onclick="borrarUltimo()"><i
-                                        class="bi bi-backspace"></i></button>
-                                <button class="btn-num" onclick="pressNumpad('0')">0</button>
-                                <button class="btn-num" onclick="pressNumpad('00')">00</button>
-                                <button class="btn-num" onclick="pressNumpad('.')">.</button>
-                                <button class="btn-num btn-action-red" onclick="anularVentaConAviso()"><i
-                                        class="bi bi-x-circle"></i></button>
-                            </div>
-                        </div>
-                    </div>
+                <button class="btn btn-outline-info fw-bold shadow-sm" onclick="abrirModalFaltantes()">
+                    <i class="bi bi-card-checklist"></i> Anotar Producto Faltante / Pedido
+                </button>
 
-                    <div class="col-md-5">
-                        <div class="panel-container h-100">
-                            <div class="panel-header"><i class="bi bi-wallet2"></i> PAGOS</div>
-                            <div class="p-2 d-flex flex-column gap-2 flex-grow-1"> <button
-                                    class="btn-pago flex-fill bg-efectivo d-flex align-items-center justify-content-center gap-2"
-                                    onclick="prepararCobroEfectivo()">
-                                    <i class="bi bi-cash-stack fs-4"></i> EFECTIVO (F12)
-                                </button>
+                <!-- CATEGORÍAS RÁPIDAS -->
+                <div class="panel-container flex-grow-1">
+                    <div class="panel-header"><i class="bi bi-grid-3x3-gap"></i> CATEGORÍAS RÁPIDAS</div>
+                    <div class="cat-grid" id="contenedorCategoriasRapidas"></div>
+                </div>
 
-                                <button
-                                    class="btn-pago flex-fill text-white d-flex align-items-center justify-content-center gap-2"
-                                    style="background-color: #455a64;" onclick="abrirPagoMixto()">
-                                    <i class="bi bi-pie-chart-fill text-info fs-4"></i> PAGO MÚLTIPLE
-                                </button>
-
-                                <button
-                                    class="btn-pago flex-fill bg-tarjeta d-flex align-items-center justify-content-center gap-2"
-                                    onclick="cerrarVentaBasica('Tarjeta / POS')">
-                                    <i class="bi bi-credit-card fs-4"></i> TARJETA / POS
-                                </button>
-
-                                <button
-                                    class="btn-pago flex-fill bg-virtual d-flex align-items-center justify-content-center gap-2"
-                                    onclick="cerrarVentaBasica('Billetera Virtual / QR')">
-                                    <i class="bi bi-qr-code-scan fs-4"></i> BILLETERA / QR
-                                </button>
-                            </div>
-                        </div>
+                <!-- GRILLA DE PAGOS (2x2) -->
+                <div class="panel-container">
+                    <div class="panel-header"><i class="bi bi-wallet2"></i> MEDIOS DE PAGO</div>
+                    <div class="p-2 d-grid gap-2" style="grid-template-columns: 1fr 1fr;">
+                        <button class="btn-pago bg-efectivo d-flex align-items-center justify-content-center gap-2" onclick="prepararCobroEfectivo()">
+                            <i class="bi bi-cash-stack fs-4"></i> EFECTIVO
+                        </button>
+                        <button class="btn-pago bg-virtual d-flex align-items-center justify-content-center gap-2" onclick="cerrarVentaBasica('Billetera Virtual / QR')">
+                            <i class="bi bi-qr-code-scan fs-4"></i> QR / TRANSF.
+                        </button>
+                        <button class="btn-pago bg-tarjeta d-flex align-items-center justify-content-center gap-2" onclick="cerrarVentaBasica('Tarjeta / POS')">
+                            <i class="bi bi-credit-card fs-4"></i> TARJETA
+                        </button>
+                        <button class="btn-pago text-white d-flex align-items-center justify-content-center gap-2" style="background-color: #455a64;" onclick="abrirPagoMixto()">
+                            <i class="bi bi-pie-chart-fill text-info fs-4"></i> DIVIDIDO
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- ATAJOS DE TECLADO INFERIORES -->
     <div class="footer-bar">
         <span onclick="document.getElementById('inputScan').focus()"><b>F2:</b> Buscar</span>
         <span onclick="abrirBuscadorAvanzado()"><b>F3:</b> Avanzada</span>
@@ -525,7 +365,29 @@
         <span onclick="recuperarVenta()"><b>F8:</b> Recuperar</span>
         <span onclick="ponerEnEspera()"><b>F9:</b> Espera</span>
         <span onclick="modalGestion.show()" class="text-warning"><b>F10:</b> Gestión</span>
-        <span onclick="prepararCobroEfectivo()"><b>F12:</b> Cobrar</span>
+        <span onclick="prepararCobroEfectivo()"><b>F12:</b> Cobrar Efectivo</span>
+    </div>
+
+    <!-- MODAL: ANOTAR FALTANTES -->
+    <div class="modal fade" id="modalFaltantes" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-info shadow-lg">
+                <div class="modal-header bg-info text-dark">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-card-checklist"></i> Anotar Producto Faltante</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <label class="form-label fw-bold small">¿Qué producto pidieron y no hay?</label>
+                    <input type="text" id="inputFaltanteNombre" class="form-control mb-3 border-info" placeholder="Ej: Levadura Calsa, Hielo..." onkeypress="if(event.key === 'Enter') guardarFaltante()">
+                    <label class="form-label fw-bold small">Observaciones (Opcional)</label>
+                    <input type="text" id="inputFaltanteObs" class="form-control" placeholder="Ej: Piden mucho la marca de medio kilo" onkeypress="if(event.key === 'Enter') guardarFaltante()">
+                </div>
+                <div class="modal-footer border-0">
+                    <button class="btn btn-secondary fw-bold" data-bs-dismiss="modal">Cancelar</button>
+                    <button class="btn btn-info fw-bold shadow-sm" onclick="guardarFaltante()"><i class="bi bi-save"></i> Guardar en Lista</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="modal fade" id="modalApertura" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">

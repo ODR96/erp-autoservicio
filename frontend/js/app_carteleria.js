@@ -266,23 +266,39 @@ async function borrarItemCola(idx) {
 }
 
 function dibujarCola() {
-    const tbody = document.querySelector('#tablaCola tbody'); tbody.innerHTML = '';
-    if (colaImpresion.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="text-muted py-5">No hay carteles en cola.</td></tr>'; return; }
+    const tbody = document.querySelector('#tablaCola tbody'); 
+    tbody.innerHTML = '';
+    
+    if (colaImpresion.length === 0) { 
+        tbody.innerHTML = '<tr><td colspan="5" class="text-muted py-5">No hay carteles en cola.</td></tr>'; 
+        return; 
+    }
+    
     colaImpresion.forEach((c, idx) => {
         let badge = c.formato.includes("Normal") ? "bg-secondary" : (c.formato.includes("Doble") ? "bg-primary" : "bg-success");
         let txtDB = c.id_db ? '<i class="bi bi-robot text-primary" title="Automático"></i>' : '';
         let fotito = c.fotoManual ? '<i class="bi bi-image text-info ms-1"></i>' : '';
         let pMostrar = c.precio_falso ? c.precio_falso : c.precio;
-        let badgeFalso = c.precio_falso ? '<span class="badge bg-warning text-dark ms-2"><i class="bi bi-pencil"></i> Pisado</span>' : '';F
-        tbody.innerHTML += `<tr><td class="text-start ps-3 fw-bold">${txtDB} ${c.nombre} ${fotito}</td><td class="text-success fw-bold">$${parseFloat(pMostrar).toFixed(2)} ${badgeFalso}</td>$${parseFloat(c.precio).toFixed(2)}</td><td><span class="badge ${badge}">${c.formato.replace('_', ' ')}</span></td><td class="fw-bold">${c.copias}</td><td><button class="btn btn-sm text-danger border-0" onclick="borrarItemCola(${idx})"><i class="bi bi-trash"></i></button></td></tr>`;
+        let badgeFalso = c.precio_falso ? '<span class="badge bg-warning text-dark ms-2"><i class="bi bi-pencil"></i> Pisado</span>' : '';
+        
+        // EL ARREGLO: Limpiamos la "F" suelta y arreglamos el HTML roto de las columnas
+        tbody.innerHTML += `
+        <tr>
+            <td class="text-start ps-3 fw-bold">${txtDB} ${c.nombre} ${fotito}</td>
+            <td class="text-success fw-bold">$${parseFloat(pMostrar).toFixed(2)} ${badgeFalso}</td>
+            <td><span class="badge ${badge}">${c.formato.replace('_', ' ')}</span></td>
+            <td class="fw-bold">${c.copias}</td>
+            <td><button class="btn btn-sm text-danger border-0" onclick="borrarItemCola(${idx})"><i class="bi bi-trash"></i></button></td>
+        </tr>`;
     });
 }
 
-function imprimirTodo() {
+function imprimirTodo(filtroSeleccionado) {
     if (colaImpresion.length === 0) return Swal.fire('Aviso', 'La cola está vacía.', 'warning');
-    const zona = document.getElementById('zonaImpresion'); const logo = localStorage.getItem('logo_empresa_b64');
+    const zona = document.getElementById('zonaImpresion'); 
+    const logo = localStorage.getItem('logo_empresa_b64');
 
-    // FILTRADO INTELIGENTE
+    // FILTRADO INTELIGENTE (Ahora sí recibe el parámetro del botón)
     let listaAImprimir = colaImpresion;
     if (filtroSeleccionado === 'Cenefas') {
         listaAImprimir = colaImpresion.filter(i => i.formato.includes("Cenefa"));
@@ -298,47 +314,26 @@ function imprimirTodo() {
                 @page { size: A4 portrait; margin: 0; }
                 body { margin: 0; background: white !important; font-family: Arial, sans-serif; }
                 #app-container, .main-wrapper, .modal, .d-print-none, .swal2-container { display: none !important; }
-                #zonaImpresion { 
-                    display: block !important; 
-                    visibility: visible !important; 
-                    position: absolute; 
-                    left: 0; 
-                    top: 0; 
-                    width: 100%; 
-                }
-                .cartel { 
-                    page-break-after: always; /* OBLIGA A CADA A4 A ESTAR EN SU PROPIA PÁGINA */
-                    page-break-inside: avoid; 
-                    box-sizing: border-box; 
-                    overflow: hidden; 
-                    background: white !important;
-                    margin: 0 auto; /* Centra el cartel en la hoja */
-                }
-                /* Excepción para las Cenefas (pueden ir varias por hoja) */
-                .cenefa {
-                    page-break-after: auto;
-                    display: inline-flex;
-                    margin: 5mm;
-                }
+                #zonaImpresion { display: block !important; visibility: visible !important; position: absolute; left: 0; top: 0; width: 100%; }
+                .cartel { page-break-after: always; page-break-inside: avoid; box-sizing: border-box; overflow: hidden; background: white !important; margin: 0 auto; }
+                .cenefa { page-break-after: auto; display: inline-flex; margin: 5mm; }
                 .bg-print { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                 .truncate-lines { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; }
             }
         </style>
     `;
 
-    colaImpresion.forEach((item, idx) => {
+    listaAImprimir.forEach((item, idx) => {
         let pF = parseFloat(item.precio).toLocaleString('es-AR', {minimumFractionDigits: 2});
         let txExtra = item.textoExtra ? `<div class="bg-print" style="background:#dc3545; color:white; font-size:10px; font-weight:bold; text-align:center; text-transform:uppercase; padding:2px 5px; border-radius:3px; margin-bottom:2px;">${item.textoExtra}</div>` : '';
         
-        // MATEMÁTICA DE UXB PARA IMPRESIÓN (Solo Cenefas)
         let uxb = item.uxb || 1;
         let precioBultoNum = item.cantMayo ? (item.precioMayo * uxb) : (item.precio * uxb);
         let htmlUxB_print = (uxb > 1 && item.formato === "Cenefa_Doble") ? `<div class="bg-print" style="background:white; color:${colorInstitucional}; font-size:10px; font-weight:bold; padding:2px 8px; border-radius:4px; margin-top:2px;">UxB: ${uxb} | Caja: $${precioBultoNum.toLocaleString('es-AR', {minimumFractionDigits:2})}</div>` : '';
 
-        let bultoHTML = item.txtBulto ? `<div style="font-size:9px; color:red; font-weight:bold; margin-bottom:2px; text-align:center;">${item.txtBulto}</div>` : '';
+        let bultoHTML = item.txtBulto ? `<div style="font-size:12px; color:red; font-weight:bold; margin-bottom:2px; text-align:center;">${item.txtBulto}</div>` : '';
 
         for (let i = 0; i < item.copias; i++) {
-            
             if (item.formato === "Cenefa_Normal") {
                 html += `
                     <div class="cartel cenefa" style="width: 100mm; height: 40mm; border: 1px solid #ddd; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;">
@@ -383,20 +378,31 @@ function imprimirTodo() {
                     ? `<img src="${logo}" style="max-height: 40mm; object-fit: contain;">` 
                     : `<div style="font-size:30px; font-weight:900; color:${colorInstitucional}; text-transform:uppercase; letter-spacing: 2px;">Autoservicio 20 de Junio</div>`;
 
-                let fontSizePrecio = pF.length > 8 ? '100px' : (pF.length > 6 ? '120px' : '150px');
-                let imagenManualHTML = (item.esLibre && item.fotoManual) ? `<img src="${item.fotoManual}" style="max-height: 80mm; max-width:100%; object-fit: contain; margin-bottom: 5mm; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.1);">` : '';
+                // LA LÓGICA DINÁMICA PARA RELLENAR ESPACIO
+                let tieneFoto = (item.esLibre && item.fotoManual);
+                let imagenManualHTML = tieneFoto ? `<img src="${item.fotoManual}" style="max-height: 80mm; max-width:100%; object-fit: contain; margin-bottom: 5mm; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.1);">` : '';
+                
+                let justificacion = tieneFoto ? 'center' : 'space-evenly';
+                let fontSizeNombre = tieneFoto ? '45px' : '75px';
+                
+                let fontSizePrecioBase = pF.length > 8 ? 100 : (pF.length > 6 ? 120 : 150);
+                let fontSizePrecio = tieneFoto ? `${fontSizePrecioBase}px` : `${fontSizePrecioBase + 50}px`;
 
                 html += `
                     <div class="cartel" style="width: 195mm; height: 280mm; border: 6px solid ${colorInstitucional}; border-radius: 20px; display: flex; flex-direction: column; align-items: center; padding: 0; text-align:center; position:relative; box-shadow: 0 0 20px rgba(0,0,0,0.1);">
                         <div class="bg-print" style="width: 100%; padding: 10mm; border-bottom: 2px solid ${colorInstitucional}; display:flex; justify-content:center; align-items:center; background-color: #f8f9fa;">
                             ${logoHTML}
                         </div>
-                        <div style="padding: 10mm; flex-grow: 1; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%;">
+                        <div style="padding: 10mm; flex-grow: 1; display:flex; flex-direction:column; align-items:center; justify-content:${justificacion}; width:100%;">
                             ${txExtra ? `<div class="bg-print" style="background:#dc3545; color:white; font-size:35px; font-weight:900; padding:5mm 20mm; border-radius:15px; margin-bottom:10mm; text-transform:uppercase; letter-spacing:2px; box-shadow: 5px 5px 0px rgba(0,0,0,0.2);">${item.textoExtra}</div>` : ''}
+                            
                             ${imagenManualHTML}
-                            <div style="font-size: 45px; font-weight: 900; color: #333; line-height: 1.1; margin-bottom: 5mm;">${item.nombre}</div>
+                            
+                            <div style="font-size: ${fontSizeNombre}; font-weight: 900; color: #333; line-height: 1.1;">${item.nombre}</div>
                             ${bultoHTML}
-                            <div style="font-size: ${fontSizePrecio}; font-weight: 900; color: #198754; line-height: 0.9; margin-top:auto; text-shadow: 4px 4px 0px rgba(0,0,0,0.1);">$${pF}</div>
+                            
+                            <div style="font-size: ${fontSizePrecio}; font-weight: 900; color: #198754; line-height: 0.9; text-shadow: 4px 4px 0px rgba(0,0,0,0.1); margin-top: ${tieneFoto ? 'auto' : '0'};">$${pF}</div>
+                            
                             ${item.cantMayo ? `<div class="bg-print" style="margin-top:10mm; background:${colorInstitucional}; color:white; padding: 8mm; border-radius:15px; width:90%;"><div style="font-size:25px; font-weight:bold;">OFERTA MAYORISTA LLEVANDO ${item.cantMayo} UNIDADES</div><div style="font-size:60px; font-weight:900; margin-top:2mm;">$${item.precioMayo} c/u</div></div>` : ''}
                         </div>
                     </div>
@@ -421,7 +427,6 @@ function imprimirTodo() {
     });
 
     Swal.fire({ title: 'Generando Vista Previa...', icon: 'info', timer: 800, showConfirmButton: false }).then(() => {
-        // Al usar window.print() el sistema abre la ventana nativa de impresión
         window.print(); 
         zona.classList.add('d-none'); zona.innerHTML = ''; vaciarCola(); 
     });

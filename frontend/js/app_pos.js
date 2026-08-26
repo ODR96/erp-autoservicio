@@ -2752,6 +2752,58 @@ function actualizarEstadoRedVisual(estaOnline) {
     }
 }
 
+// ==========================================
+// MÓDULO: REGISTRO DE FALTANTES / PEDIDOS
+// ==========================================
+const modalFaltantes = new bootstrap.Modal(document.getElementById('modalFaltantes'));
+
+function abrirModalFaltantes() {
+    document.getElementById('inputFaltanteNombre').value = '';
+    document.getElementById('inputFaltanteObs').value = '';
+    modalFaltantes.show();
+    setTimeout(() => document.getElementById('inputFaltanteNombre').focus(), 500);
+}
+
+async function guardarFaltante() {
+    const nombre = document.getElementById('inputFaltanteNombre').value.trim();
+    const obs = document.getElementById('inputFaltanteObs').value.trim();
+
+    if (!nombre) return Swal.fire('Atención', 'Tenés que escribir el nombre del producto que falta.', 'warning');
+
+    Swal.fire({ title: 'Anotando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+    try {
+        // Le pegamos al backend para que lo guarde en la base de datos de compras
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/faltantes/anotar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                producto_solicitado: nombre,
+                observaciones: obs,
+                usuario_id: empleadoLogueado ? empleadoLogueado.id : 1
+            })
+        });
+
+        if (!res.ok) throw new Error("No se pudo anotar el faltante.");
+
+        modalFaltantes.hide();
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Anotado para pedir', showConfirmButton: false, timer: 1500 });
+        
+        // Devolvemos el foco al lector láser para no interrumpir el flujo de la caja
+        setTimeout(() => document.getElementById('inputScan').focus(), 500);
+
+    } catch (e) {
+        // Plan B: Si se corta internet, lo anotamos en la libreta del navegador (Offline)
+        let faltantesOffline = JSON.parse(localStorage.getItem('faltantes_offline')) || [];
+        faltantesOffline.push({ nombre, obs, fecha: new Date().toISOString() });
+        localStorage.setItem('faltantes_offline', JSON.stringify(faltantesOffline));
+        
+        modalFaltantes.hide();
+        Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Guardado offline', showConfirmButton: false, timer: 1500 });
+        setTimeout(() => document.getElementById('inputScan').focus(), 500);
+    }
+}
+
 // El Latido: Toca la puerta de Python cada 3 segundos
 setInterval(async () => {
     try {
