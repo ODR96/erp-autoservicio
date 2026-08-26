@@ -68,8 +68,12 @@
         .main-content {
             flex: 1 1 auto;
             padding: 15px;
+            padding-bottom: 65px;
+            /* Esquiva el footer sin romper nada */
+            display: flex;
+            /* MAGIA 1: Convierte el fondo en flex */
+            flex-direction: column;
             overflow-y: auto;
-            padding-bottom: 60px;
         }
 
         .panel-container {
@@ -115,7 +119,9 @@
             transition: 0.2s;
         }
 
-        .cliente-link:hover { background-color: rgba(56, 189, 248, 0.1); }
+        .cliente-link:hover {
+            background-color: rgba(56, 189, 248, 0.1);
+        }
 
         .ticket-headers {
             display: grid;
@@ -156,18 +162,22 @@
         .cat-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-            gap: 8px; /* Espacio más ajustado */
+            gap: 8px;
             padding: 10px;
             flex-grow: 1;
             align-items: start;
-            overflow-y: auto; /* ESTA ES LA LÍNEA MÁGICA: Permite scroll interno */
+            overflow-y: auto;
+            min-height: 0;
+            /* MAGIA 2: Permite que la grilla active su propio scroll interno */
         }
 
         .btn-cat {
             border: 1px solid var(--border-color);
             border-radius: 8px;
-            padding: 8px 5px; /* Un poco menos de "aire" adentro del botón */
-            min-height: 60px; /* Altura controlada */
+            padding: 8px 5px;
+            /* Un poco menos de "aire" adentro del botón */
+            min-height: 60px;
+            /* Altura controlada */
             font-weight: 700;
             display: flex;
             flex-direction: column;
@@ -178,7 +188,9 @@
             transition: transform 0.1s;
         }
 
-        .btn-cat:active { transform: scale(0.96); }
+        .btn-cat:active {
+            transform: scale(0.96);
+        }
 
         .btn-pago {
             min-height: 65px;
@@ -194,25 +206,74 @@
         }
 
         @keyframes latido {
-            0% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(0.8); }
-            100% { opacity: 1; transform: scale(1); }
+            0% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.4;
+                transform: scale(0.8);
+            }
+
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
         }
+
         .punto-conexion {
             font-size: 0.6rem;
         }
+
         .latido-activo {
             animation: latido 2s infinite;
         }
 
-        .btn-pago:active { transform: translateY(4px); box-shadow: none; }
-        .bg-efectivo { background-color: #10b981; }
-        .bg-tarjeta { background-color: #eab308; color: #1e293b; text-shadow: none; }
-        .bg-virtual { background-color: #3b82f6; }
-        .bg-fiado { background-color: #d97706; }
+        .btn-pago:active {
+            transform: translateY(4px);
+            box-shadow: none;
+        }
 
-        .btn-espera { background-color: #475569; color: white; border: none; font-weight: bold; border-radius: 8px; padding: 10px; width: 100%; box-shadow: 0 2px 0 #1e293b; }
-        .btn-recuperar { background-color: #0891b2; color: white; border: none; font-weight: bold; border-radius: 8px; padding: 10px; width: 100%; box-shadow: 0 2px 0 #164e63; }
+        .bg-efectivo {
+            background-color: #10b981;
+        }
+
+        .bg-tarjeta {
+            background-color: #eab308;
+            color: #1e293b;
+            text-shadow: none;
+        }
+
+        .bg-virtual {
+            background-color: #3b82f6;
+        }
+
+        .bg-fiado {
+            background-color: #d97706;
+        }
+
+        .btn-espera {
+            background-color: #475569;
+            color: white;
+            border: none;
+            font-weight: bold;
+            border-radius: 8px;
+            padding: 10px;
+            width: 100%;
+            box-shadow: 0 2px 0 #1e293b;
+        }
+
+        .btn-recuperar {
+            background-color: #0891b2;
+            color: white;
+            border: none;
+            font-weight: bold;
+            border-radius: 8px;
+            padding: 10px;
+            width: 100%;
+            box-shadow: 0 2px 0 #164e63;
+        }
 
         .footer-bar {
             background-color: var(--header-blue);
@@ -228,9 +289,22 @@
             border-top: 3px solid #f59e0b;
         }
 
-        .footer-bar span { cursor: pointer; padding: 2px 8px; border-radius: 4px; transition: 0.2s; }
-        .footer-bar span:hover { background-color: rgba(255, 255, 255, 0.05); color: white; }
-        #visorTotal { font-size: 2.8rem; text-shadow: 0 0 10px rgba(16, 185, 129, 0.3); }
+        .footer-bar span {
+            cursor: pointer;
+            padding: 2px 8px;
+            border-radius: 4px;
+            transition: 0.2s;
+        }
+
+        .footer-bar span:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: white;
+        }
+
+        #visorTotal {
+            font-size: 2.8rem;
+            text-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+        }
     </style>
 </head>
 
@@ -250,13 +324,15 @@
 
         <div class="search-container">
             <div class="input-group input-group-lg shadow-sm">
-                <span class="input-group-text bg-white search-icon-box text-muted border-0"><i class="bi bi-upc-scan"></i></span>
-                <input type="text" class="form-control search-bar" placeholder="[F2] Lector de barras o nombre..." id="inputScan" autocomplete="off" autofocus>
+                <span class="input-group-text bg-white search-icon-box text-muted border-0"><i
+                        class="bi bi-upc-scan"></i></span>
+                <input type="text" class="form-control search-bar" placeholder="[F2] Lector de barras o nombre..."
+                    id="inputScan" autocomplete="off" autofocus>
             </div>
         </div>
 
         <div class="d-flex align-items-center gap-3">
-            
+
             <!-- EL NUEVO INDICADOR DE RED SUTIL -->
             <div id="indicadorRed" class="d-flex align-items-center gap-1 text-muted fw-bold small me-2">
                 <i class="bi bi-circle-fill punto-conexion"></i> Cargando...
@@ -266,16 +342,18 @@
                 <strong class="fs-4" id="reloj">00:00</strong><br>
                 <small class="text-light" id="fecha">--/--/----</small>
             </div>
-            <div class="d-flex align-items-center gap-2 border-start border-secondary ps-3" style="cursor: pointer;" onclick="cerrarSesionCajero()" title="Cambiar Usuario">
+            <div class="d-flex align-items-center gap-2 border-start border-secondary ps-3" style="cursor: pointer;"
+                onclick="cerrarSesionCajero()" title="Cambiar Usuario">
                 <i class="bi bi-person-circle fs-2 text-light"></i>
-                <div class="lh-1 d-none d-xl-block"><strong class="fs-6 text-warning" id="nombreCajeroLogueado">Cargando...</strong></div>
+                <div class="lh-1 d-none d-xl-block"><strong class="fs-6 text-warning"
+                        id="nombreCajeroLogueado">Cargando...</strong></div>
             </div>
         </div>
     </div>
 
     <div class="main-content">
-        <div class="row h-100 g-3">
-            
+        <div class="row g-3 flex-grow-1">
+
             <!-- COLUMNA IZQUIERDA: EL TICKET (60% del espacio) -->
             <div class="col-lg-7 col-xl-8">
                 <div class="panel-container">
@@ -288,8 +366,11 @@
                         <span><strong>Turno:</strong> T-001 | <strong>Ticket:</strong> #000145</span>
                         <div>
                             <strong>Cliente:</strong>
-                            <span class="cliente-link" id="nombreClienteTicket" onclick="abrirSeleccionCliente()">Consumidor Final <i class="bi bi-search"></i></span>
-                            <button class="btn btn-sm btn-outline-primary ms-2 py-0 px-1" onclick="modalNuevoCliente.show()" title="Alta rápida"><i class="bi bi-person-plus-fill"></i></button>
+                            <span class="cliente-link" id="nombreClienteTicket"
+                                onclick="abrirSeleccionCliente()">Consumidor Final <i class="bi bi-search"></i></span>
+                            <button class="btn btn-sm btn-outline-primary ms-2 py-0 px-1"
+                                onclick="modalNuevoCliente.show()" title="Alta rápida"><i
+                                    class="bi bi-person-plus-fill"></i></button>
                         </div>
                     </div>
 
@@ -309,8 +390,10 @@
                         </div>
                         <div class="d-flex justify-content-between align-items-center mb-2 pb-2 border-bottom">
                             <div class="btn-group">
-                                <button class="btn btn-sm btn-outline-success fw-bold" onclick="aplicarModificador('descuento')">- % Dto</button>
-                                <button class="btn btn-sm btn-outline-danger fw-bold" onclick="aplicarModificador('recargo')">+ % Recargo</button>
+                                <button class="btn btn-sm btn-outline-success fw-bold"
+                                    onclick="aplicarModificador('descuento')">- % Dto</button>
+                                <button class="btn btn-sm btn-outline-danger fw-bold"
+                                    onclick="aplicarModificador('recargo')">+ % Recargo</button>
                             </div>
                             <span class="fs-6 fw-bold text-danger d-none" id="visorModificador"></span>
                         </div>
@@ -318,29 +401,34 @@
                             <span class="display-6 fw-bold text-success">TOTAL:</span>
                             <span class="display-6 fw-bold text-success" id="visorTotal">$ 0.00</span>
                         </div>
-                        <button class="btn btn-pago bg-fiado mb-2" style="height: 50px; font-size: 1rem;" onclick="mandarACtaCte()">
+                        <button class="btn btn-pago bg-fiado mb-2" style="height: 50px; font-size: 1rem;"
+                            onclick="mandarACtaCte()">
                             <i class="bi bi-pencil-square"></i> MANDAR A CTA. CTE. (SALIDA)
                         </button>
                         <div class="row g-2">
-                            <div class="col-6"><button class="btn-espera mb-0" onclick="ponerEnEspera()"><i class="bi bi-pause-circle"></i> ESPERA (F9)</button></div>
-                            <div class="col-6"><button class="btn-recuperar mb-0" onclick="recuperarVenta()"><i class="bi bi-arrow-counterclockwise"></i> RECUPERAR (F8)</button></div>
+                            <div class="col-6"><button class="btn-espera mb-0" onclick="ponerEnEspera()"><i
+                                        class="bi bi-pause-circle"></i> ESPERA (F9)</button></div>
+                            <div class="col-6"><button class="btn-recuperar mb-0" onclick="recuperarVenta()"><i
+                                        class="bi bi-arrow-counterclockwise"></i> RECUPERAR (F8)</button></div>
                         </div>
                     </div>
                 </div>
             </div>
 
-<!-- COLUMNA DERECHA: PANELES DE CONTROL (40% del espacio) -->
+            <!-- COLUMNA DERECHA: PANELES DE CONTROL (40% del espacio) -->
             <div class="col-lg-5 col-xl-4 d-flex flex-column gap-2">
-                
+
                 <!-- BOTONES ADMINISTRATIVOS (Más compactos) -->
                 <div class="d-flex gap-2">
                     <button class="btn btn-secondary fw-bold flex-fill shadow-sm" onclick="modalGestion.show()">
                         <i class="bi bi-safe fs-5 d-block"></i> Caja (F10)
                     </button>
-                    <button class="btn btn-warning fw-bold text-dark flex-fill shadow-sm" onclick="abrirModalCobroFiado()">
+                    <button class="btn btn-warning fw-bold text-dark flex-fill shadow-sm"
+                        onclick="abrirModalCobroFiado()">
                         <i class="bi bi-journal-check fs-5 d-block"></i> Cobrar Deuda
                     </button>
-                    <button class="btn btn-warning fw-bold text-dark flex-fill shadow-sm" onclick="abrirCobroPedidoMayorista()">
+                    <button class="btn btn-warning fw-bold text-dark flex-fill shadow-sm"
+                        onclick="abrirCobroPedidoMayorista()">
                         <i class="bi bi-box-seam fs-5 d-block"></i> Mayorista
                     </button>
                 </div>
@@ -350,7 +438,7 @@
                 </button>
 
                 <!-- CATEGORÍAS RÁPIDAS (Con Scroll Interno) -->
-                <div class="panel-container flex-grow-1" style="min-height: 0;">
+                <div class="panel-container flex-grow-1">
                     <div class="panel-header py-1"><i class="bi bi-grid-3x3-gap"></i> CATEGORÍAS RÁPIDAS</div>
                     <div class="cat-grid" id="contenedorCategoriasRapidas"></div>
                 </div>
@@ -359,16 +447,20 @@
                 <div class="panel-container flex-shrink-0">
                     <div class="panel-header py-1"><i class="bi bi-wallet2"></i> MEDIOS DE PAGO</div>
                     <div class="p-2 d-grid gap-2" style="grid-template-columns: 1fr 1fr;">
-                        <button class="btn-pago bg-efectivo d-flex align-items-center justify-content-center gap-2" onclick="prepararCobroEfectivo()">
-                            <i class="bi bi-cash-stack fs-4"></i> EFECTIVO
+                        <button class="btn-pago bg-efectivo d-flex align-items-center justify-content-center gap-2"
+                            onclick="prepararCobroEfectivo()">
+                            <i class="bi bi-cash-stack fs-4"></i> EFECTIVO (F12)
                         </button>
-                        <button class="btn-pago bg-virtual d-flex align-items-center justify-content-center gap-2" onclick="cerrarVentaBasica('Billetera Virtual / QR')">
+                        <button class="btn-pago bg-virtual d-flex align-items-center justify-content-center gap-2"
+                            onclick="cerrarVentaBasica('Billetera Virtual / QR')">
                             <i class="bi bi-qr-code-scan fs-4"></i> QR / TRANSF.
                         </button>
-                        <button class="btn-pago bg-tarjeta d-flex align-items-center justify-content-center gap-2" onclick="cerrarVentaBasica('Tarjeta / POS')">
+                        <button class="btn-pago bg-tarjeta d-flex align-items-center justify-content-center gap-2"
+                            onclick="cerrarVentaBasica('Tarjeta / POS')">
                             <i class="bi bi-credit-card fs-4"></i> TARJETA
                         </button>
-                        <button class="btn-pago text-white d-flex align-items-center justify-content-center gap-2" style="background-color: #455a64;" onclick="abrirPagoMixto()">
+                        <button class="btn-pago text-white d-flex align-items-center justify-content-center gap-2"
+                            style="background-color: #455a64;" onclick="abrirPagoMixto()">
                             <i class="bi bi-pie-chart-fill text-info fs-4"></i> DIVIDIDO
                         </button>
                     </div>
@@ -399,13 +491,18 @@
                 </div>
                 <div class="modal-body p-4">
                     <label class="form-label fw-bold small">¿Qué producto pidieron y no hay?</label>
-                    <input type="text" id="inputFaltanteNombre" class="form-control mb-3 border-info" placeholder="Ej: Levadura Calsa, Hielo..." onkeypress="if(event.key === 'Enter') guardarFaltante()">
+                    <input type="text" id="inputFaltanteNombre" class="form-control mb-3 border-info"
+                        placeholder="Ej: Levadura Calsa, Hielo..."
+                        onkeypress="if(event.key === 'Enter') guardarFaltante()">
                     <label class="form-label fw-bold small">Observaciones (Opcional)</label>
-                    <input type="text" id="inputFaltanteObs" class="form-control" placeholder="Ej: Piden mucho la marca de medio kilo" onkeypress="if(event.key === 'Enter') guardarFaltante()">
+                    <input type="text" id="inputFaltanteObs" class="form-control"
+                        placeholder="Ej: Piden mucho la marca de medio kilo"
+                        onkeypress="if(event.key === 'Enter') guardarFaltante()">
                 </div>
                 <div class="modal-footer border-0">
                     <button class="btn btn-secondary fw-bold" data-bs-dismiss="modal">Cancelar</button>
-                    <button class="btn btn-info fw-bold shadow-sm" onclick="guardarFaltante()"><i class="bi bi-save"></i> Guardar en Lista</button>
+                    <button class="btn btn-info fw-bold shadow-sm" onclick="guardarFaltante()"><i
+                            class="bi bi-save"></i> Guardar en Lista</button>
                 </div>
             </div>
         </div>
