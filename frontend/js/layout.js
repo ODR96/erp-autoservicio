@@ -1,7 +1,7 @@
 // ========================================================
 // CONFIGURACIÓN GLOBAL
 // ========================================================
-const APP_VERSION = "v1.0.17"; // Modificá este número antes de cada compilación
+const APP_VERSION = "v1.0.18"; // Modificá este número antes de cada compilación
 
 function obtenerBaseUrl() {
     const dominio = window.location.hostname;
@@ -13,7 +13,6 @@ function obtenerBaseUrl() {
 
 // ========================================================
 // VERIFICACIÓN VISUAL DE PERMISOS (Protección UX)
-// Nota: La seguridad real debe estar respaldada por los Tokens en Python.
 // ========================================================
 (function verificarPermisosGlobales() {
     const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
@@ -93,7 +92,6 @@ function inyectarLayout() {
             <div><span class="text-muted fw-bold d-none d-md-inline">Módulo de Inventario (Autoservicio)</span></div>
             
             <div class="d-flex align-items-center gap-3">
-                ${botonSyncHTML}
                 <div id="cajaDolar" class="d-none d-md-flex align-items-center gap-2 px-3 py-1 bg-light border rounded-pill text-success fw-bold small">
                     <span class="spinner-border spinner-border-sm text-success" role="status"></span>
                 </div>
