@@ -210,8 +210,9 @@ async function agregarACola() {
     const formato = document.getElementById('selectFormato').value;
     const copias = parseInt(document.getElementById('inputCopias').value);
     const textoExtra = document.getElementById('inputTextoExtra').value;
-
-    let item = { id: Date.now(), formato, copias, textoExtra, esLibre, uxb: 1 };
+    const pf = parseFloat(document.getElementById('inputPrecioFalso').value) || null;
+    
+    let item = { id: Date.now(), formato, copias, textoExtra, esLibre, uxb: 1, precio_falso: pf };
 
     if (esLibre) {
         item.nombre = document.getElementById('libreTitulo').value || "Cartel Manual";
@@ -271,13 +272,25 @@ function dibujarCola() {
         let badge = c.formato.includes("Normal") ? "bg-secondary" : (c.formato.includes("Doble") ? "bg-primary" : "bg-success");
         let txtDB = c.id_db ? '<i class="bi bi-robot text-primary" title="Automático"></i>' : '';
         let fotito = c.fotoManual ? '<i class="bi bi-image text-info ms-1"></i>' : '';
-        tbody.innerHTML += `<tr><td class="text-start ps-3 fw-bold">${txtDB} ${c.nombre} ${fotito}</td><td class="text-success fw-bold">$${parseFloat(c.precio).toFixed(2)}</td><td><span class="badge ${badge}">${c.formato.replace('_', ' ')}</span></td><td class="fw-bold">${c.copias}</td><td><button class="btn btn-sm text-danger border-0" onclick="borrarItemCola(${idx})"><i class="bi bi-trash"></i></button></td></tr>`;
+        let pMostrar = c.precio_falso ? c.precio_falso : c.precio;
+        let badgeFalso = c.precio_falso ? '<span class="badge bg-warning text-dark ms-2"><i class="bi bi-pencil"></i> Pisado</span>' : '';F
+        tbody.innerHTML += `<tr><td class="text-start ps-3 fw-bold">${txtDB} ${c.nombre} ${fotito}</td><td class="text-success fw-bold">$${parseFloat(pMostrar).toFixed(2)} ${badgeFalso}</td>$${parseFloat(c.precio).toFixed(2)}</td><td><span class="badge ${badge}">${c.formato.replace('_', ' ')}</span></td><td class="fw-bold">${c.copias}</td><td><button class="btn btn-sm text-danger border-0" onclick="borrarItemCola(${idx})"><i class="bi bi-trash"></i></button></td></tr>`;
     });
 }
 
 function imprimirTodo() {
     if (colaImpresion.length === 0) return Swal.fire('Aviso', 'La cola está vacía.', 'warning');
     const zona = document.getElementById('zonaImpresion'); const logo = localStorage.getItem('logo_empresa_b64');
+
+    // FILTRADO INTELIGENTE
+    let listaAImprimir = colaImpresion;
+    if (filtroSeleccionado === 'Cenefas') {
+        listaAImprimir = colaImpresion.filter(i => i.formato.includes("Cenefa"));
+    } else if (filtroSeleccionado === 'A4') {
+        listaAImprimir = colaImpresion.filter(i => i.formato === "Cartel_A4");
+    }
+
+    if (listaAImprimir.length === 0) return Swal.fire('Aviso', `No hay carteles del tipo ${filtroSeleccionado} en la cola.`, 'info');
     
     let html = `
         <style>

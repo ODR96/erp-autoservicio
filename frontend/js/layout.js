@@ -1,7 +1,7 @@
 // ========================================================
 // CONFIGURACIÓN GLOBAL
 // ========================================================
-const APP_VERSION = "v1.0.16"; // Modificá este número antes de cada compilación
+const APP_VERSION = "v1.0.17"; // Modificá este número antes de cada compilación
 
 function obtenerBaseUrl() {
     const dominio = window.location.hostname;
@@ -84,13 +84,6 @@ function inyectarLayout() {
         </div>
     `;
 
-    const botonSyncHTML = esAdmin ? `
-        <button id="btnSyncNube" onclick="forzarSincronizacion()" class="btn btn-outline-primary btn-sm rounded-pill px-3 d-flex align-items-center gap-2 fw-bold shadow-sm" title="Subir datos a la Nube">
-            <i class="bi bi-cloud-arrow-up-fill fs-6"></i> 
-            <span class="d-none d-md-inline">Sincronizar</span>
-        </button>
-    ` : '';
-
     const navbarHTML = `
         <div class="top-navbar d-print-none">
             <button class="btn-hamburguesa d-md-none me-3" onclick="toggleMenu()" title="Abrir Menú">
@@ -160,33 +153,6 @@ async function cargarDolar() {
     }
 }
 
-async function forzarSincronizacion() {
-    const btn = document.getElementById('btnSyncNube');
-    const htmlOriginal = btn.innerHTML;
-
-    try {
-        btn.disabled = true;
-        btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Sincronizando...`;
-
-        const baseUrl = obtenerBaseUrl();
-        const respuesta = await fetch(`${baseUrl}/sync/forzar`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-
-        if (!respuesta.ok) throw new Error("Error en el servidor");
-
-        btn.classList.replace('btn-outline-primary', 'btn-success');
-        btn.innerHTML = `<i class="bi bi-check-circle-fill"></i> ¡Listo!`;
-        setTimeout(() => window.location.reload(), 1500);
-
-    } catch (error) {
-        btn.classList.replace('btn-outline-primary', 'btn-danger');
-        btn.innerHTML = `<i class="bi bi-x-circle-fill"></i> Error`;
-        setTimeout(() => {
-            btn.classList.replace('btn-danger', 'btn-outline-primary');
-            btn.innerHTML = htmlOriginal;
-            btn.disabled = false;
-        }, 3000);
-    }
-}
 
 function cerrarSesionGlobal() {
     localStorage.clear();

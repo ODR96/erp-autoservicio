@@ -1,29 +1,17 @@
-const originalFetch = window.fetch;
-window.fetch = async function () {
-    let [recurso, config] = arguments;
-    if (!config) config = {};
+async function apiFetch(recurso, config = {}) {
     if (!config.headers) config.headers = {};
-
-    const vaAMiServidor = recurso.toString().includes(obtenerBaseUrl());
-
-    if (vaAMiServidor) {
-        const tokenSeguridad = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        if (tokenSeguridad) {
-            config.headers['Authorization'] = `Bearer ${tokenSeguridad}`;
-        }
-    }
-
-    const respuesta = await originalFetch(recurso, config);
-
-    if (vaAMiServidor && respuesta.status === 401) {
+    const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
+    if (token) config.headers['Authorization'] = `Bearer ${token}`;
+    
+    const respuesta = await fetch(recurso, config);
+    if (respuesta.status === 401) {
         console.warn("Sesión expirada o sin permisos (401)");
         localStorage.clear();
-        window.location.href = 'index.html';
+        window.location.href = 'index.html'; 
         throw new Error("Acceso denegado (401)");
     }
-
     return respuesta;
-};
+}
 
 function normalizarTexto(texto) {
     if (!texto) return "";
@@ -93,7 +81,7 @@ async function solicitarAutorizacion(mensaje) {
     try {
         Swal.fire({ title: 'Verificando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
-        const res = await fetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
+        const res = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin_secreto: pin, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
@@ -118,7 +106,7 @@ async function procesarLoginPOS() {
     Swal.fire({ title: 'Verificando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/usuarios/login`, {
+        const res = await apiFetch(`${obtenerBaseUrl()}/usuarios/login`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ codigo_credencial: cred, pin_secreto: pin })
         });
@@ -182,7 +170,7 @@ async function iniciarInterfazPOS() {
     if (!terminal_id) {
         try {
             // 1. Vamos a buscar las cajas activas a tu servidor Python
-            const resCajas = await fetch(`${obtenerBaseUrl()}/caja/cajas_fisicas`);
+            const resCajas = await apiFetch(`${obtenerBaseUrl()}/caja/cajas_fisicas`);
             const dataCajas = await resCajas.json();
 
             // 2. Transformamos la respuesta en un diccionario para SweetAlert
@@ -240,7 +228,7 @@ async function iniciarInterfazPOS() {
     };
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/caja/estado?caja_id=${terminal_id}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/caja/estado?caja_id=${terminal_id}`);
         const data = await res.json();
 
         if (data.estado === 'ABIERTO') {
@@ -291,7 +279,7 @@ async function abrirHistorialTurno() {
     modalGestion.hide();
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/ventas/historial/${turnoActualId}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/ventas/historial/${turnoActualId}`);
         const data = await res.json();
 
         if (data.error) throw new Error(data.error);
@@ -344,7 +332,7 @@ async function abrirHistorialTurno() {
 async function verDetalleTicketGlobal(ventaId) {
     Swal.fire({ title: 'Cargando detalle...', didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
@@ -400,7 +388,7 @@ async function confirmarAnulacion(ventaId, ticket) {
     if (confirm.isConfirmed) {
         try {
             // LLamada a tu backend para anular (CON TOKEN Y USUARIO)
-            const res = await fetch(`${obtenerBaseUrl()}/ventas/anular/${ventaId}`, {
+            const res = await apiFetch(`${obtenerBaseUrl()}/ventas/anular/${ventaId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -456,7 +444,7 @@ async function iniciarTurno() {
 
     try {
         const payload = { caja_id: terminal_id, usuario_id: empleadoLogueado.id, monto_inicial: monto };
-        const response = await fetch(`${obtenerBaseUrl()}/caja/abrir`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const response = await apiFetch(`${obtenerBaseUrl()}/caja/abrir`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await response.json();
         if (data.error) throw new Error(data.error);
 
@@ -563,7 +551,7 @@ async function buscarProducto(q) {
     try {
         if (!navigator.onLine) throw new Error("OFFLINE");
 
-        const response = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
+        const response = await apiFetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
         if (!response.ok) throw new Error("Error servidor");
 
         const data = await response.json();
@@ -571,7 +559,7 @@ async function buscarProducto(q) {
 
     } catch (error) {
         // GUARDAVIDAS NIVEL 2: Búsqueda Offline
-        if (error.message === "OFFLINE" || error.message === "Failed to fetch" || error.message.includes("NetworkError")) {
+        if (error.message === "OFFLINE" || error.message === "Failed to apiFetch" || error.message.includes("NetworkError")) {
 
             let catalogoOffline = JSON.parse(localStorage.getItem('catalogo_productos_offline')) || [];
             if (catalogoOffline.length === 0) return Swal.fire('Sin Internet', 'Sin conexión y el catálogo offline está vacío.', 'error');
@@ -895,7 +883,7 @@ async function verResumenDetalladoFiado() {
 
     try {
         // Le pegamos directo a nuestro nuevo misil en Python
-        const res = await fetch(`${obtenerBaseUrl()}/clientes/resumen_pendientes/${clienteFiadoActual.id}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/clientes/resumen_pendientes/${clienteFiadoActual.id}`);
         const data = await res.json();
 
         if (data.error) throw new Error(data.error);
@@ -1059,7 +1047,7 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
             throw new Error("OFFLINE");
         }
 
-        const response = await fetch(`${obtenerBaseUrl()}/ventas/cobrar`, {
+        const response = await apiFetch(`${obtenerBaseUrl()}/ventas/cobrar`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadVenta)
         });
 
@@ -1070,7 +1058,7 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
         return data;
 
     } catch (error) {
-        if (error.message === "OFFLINE" || error.message === "Failed to fetch" || error.message.includes("NetworkError")) {
+        if (error.message === "OFFLINE" || error.message === "Failed to apiFetch" || error.message.includes("NetworkError")) {
 
             Swal.close(); // Cerramos el "Procesando..."
 
@@ -1122,7 +1110,7 @@ async function sincronizarVentasOffline() {
         let venta = ventasPendientes[i];
         try {
             // Intentamos mandar la venta al servidor
-            const response = await fetch(`${obtenerBaseUrl()}/ventas/cobrar`, {
+            const response = await apiFetch(`${obtenerBaseUrl()}/ventas/cobrar`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(venta)
             });
 
@@ -1242,7 +1230,7 @@ async function abrirModalCobroFiado() {
     modalDeuda.show();
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/clientes/listado`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/clientes/listado`);
         const data = await res.json();
         clientesGlobalesPOS = data.clientes || data; // Soporta ambos formatos
         setTimeout(() => document.getElementById("inputBuscarFiado").focus(), 500);
@@ -1274,7 +1262,7 @@ let limiteMostrarHistorial = 15;
 async function cargarHistorialTabla(clienteId) {
     const tbody = document.getElementById("tablaDetalleFiado");
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/clientes/historial/${clienteId}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/clientes/historial/${clienteId}`);
         const data = await res.json();
         tbody.innerHTML = "";
 
@@ -1342,7 +1330,7 @@ function mostrarMasHistorial() {
 async function verDetalleTicketFiado(ventaId) {
     Swal.fire({ title: 'Cargando detalle...', didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
         const data = await res.json();
 
         if (data.error) throw new Error(data.error);
@@ -1460,7 +1448,7 @@ async function registrarPagoFiado() {
     Swal.fire({ title: 'Acreditando pago...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/clientes/pagar_deuda/${clienteFiadoActual.id}`, {
+        const res = await apiFetch(`${obtenerBaseUrl()}/clientes/pagar_deuda/${clienteFiadoActual.id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 monto_pago: pago,
@@ -1494,7 +1482,7 @@ async function abrirSeleccionCliente() {
     modalSeleccionCliente.show();
     document.getElementById('listaClientesAsignacion').innerHTML = '<div class="text-center p-3 text-muted">Cargando clientes...</div>';
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/clientes/listado`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/clientes/listado`);
         const data = await res.json();
         clientesGlobalesPOS = data.clientes || data;
         filtrarClientesAsignacion();
@@ -1599,7 +1587,7 @@ async function guardarNuevoCliente() {
     // VERIFICACIÓN CON EL BACKEND EN VEZ DE 1234
     Swal.fire({ title: 'Autorizando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     try {
-        const resAuth = await fetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
+        const resAuth = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin_secreto: pin, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
         });
@@ -1610,7 +1598,7 @@ async function guardarNuevoCliente() {
 
     Swal.fire({ title: 'Guardando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/clientes/registrar`, {
+        const res = await apiFetch(`${obtenerBaseUrl()}/clientes/registrar`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nombre_completo: nombre, cuit: dni, telefono_whatsapp: "", limite_credito: limite })
         });
@@ -1726,7 +1714,7 @@ async function registrarMovimientoCaja(tipo) {
             if (tipo === 'retiro') {
                 if (!pinEl || !pinEl.value) { Swal.showValidationMessage('Ingrese su PIN secreto'); return false; }
                 try {
-                    const resAuth = await fetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
+                    const resAuth = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ pin_secreto: pinEl.value, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
                     });
@@ -1753,7 +1741,7 @@ async function registrarMovimientoCaja(tipo) {
                 usuario_id: empleadoLogueado.id // Para que sepamos qué cajero la tocó
             };
 
-            const response = await fetch(`${obtenerBaseUrl()}/caja/movimiento`, {
+            const response = await apiFetch(`${obtenerBaseUrl()}/caja/movimiento`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
@@ -1808,14 +1796,14 @@ async function filtrarAvanzado(event) {
 
         try {
             if (!navigator.onLine) throw new Error("OFFLINE");
-            const response = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
+            const response = await apiFetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
             if (!response.ok) throw new Error("Fallo");
 
             const data = await response.json();
             resultados = data.productos;
         } catch (error) {
             // GUARDAVIDAS F3 OFFLINE
-            if (error.message === "OFFLINE" || error.message === "Failed to fetch" || error.message.includes("NetworkError")) {
+            if (error.message === "OFFLINE" || error.message === "Failed to apiFetch" || error.message.includes("NetworkError")) {
                 let catalogoOffline = JSON.parse(localStorage.getItem('catalogo_productos_offline')) || [];
                 let palabras = query.split(" ");
 
@@ -1891,12 +1879,12 @@ async function agregarDesdeF3(id_producto) {
     try {
         if (!navigator.onLine) throw new Error("OFFLINE");
 
-        const res = await fetch(`${obtenerBaseUrl()}/productos/codigo/${id_producto}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/codigo/${id_producto}`);
         const prod = await res.json();
         if (!prod.error) agregarAlCarrito(prod);
 
     } catch (e) {
-        if (e.message === "OFFLINE" || e.message === "Failed to fetch" || e.message.includes("NetworkError")) {
+        if (e.message === "OFFLINE" || e.message === "Failed to apiFetch" || e.message.includes("NetworkError")) {
             let catalogo = JSON.parse(localStorage.getItem('catalogo_productos_offline')) || [];
             let prod = catalogo.find(p => p.id.toString() === id_producto.toString());
             if (prod) agregarAlCarrito(prod);
@@ -2028,7 +2016,7 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
 async function ejecutarArqueoX() {
     if (!turnoActualId) return Swal.fire('Error', 'No hay turno abierto.', 'error');
     modalGestion.hide();
-    const res = await fetch(`${obtenerBaseUrl()}/caja/informe_x/${turnoActualId}`);
+    const res = await apiFetch(`${obtenerBaseUrl()}/caja/informe_x/${turnoActualId}`);
     const data = await res.json();
     if (data.error) return Swal.fire('Error', data.error, 'error');
 
@@ -2060,7 +2048,7 @@ async function cierreZ() {
     if (montoDeclarado !== undefined) {
         Swal.fire({ title: 'Cerrando caja...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
         try {
-            const res = await fetch(`${obtenerBaseUrl()}/caja/cerrar`, {
+            const res = await apiFetch(`${obtenerBaseUrl()}/caja/cerrar`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ turno_id: turnoActualId, monto_final_declarado: montoDeclarado })
@@ -2121,7 +2109,7 @@ async function forzarCierreRemoto(turnoId) {
     if (confirm.isConfirmed) {
         Swal.fire({ title: 'Cerrando caja remotamente...', didOpen: () => Swal.showLoading() });
         try {
-            const res = await fetch(`${obtenerBaseUrl()}/caja/cerrar`, {
+            const res = await apiFetch(`${obtenerBaseUrl()}/caja/cerrar`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -2184,7 +2172,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
             };
         } else {
             // Modo Normal (Online): Le preguntamos a Python
-            const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
+            const res = await apiFetch(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
             ticket = await res.json();
             if (ticket.error) return Swal.fire('Error', ticket.error, 'error');
         }
@@ -2418,7 +2406,7 @@ function imprimirRemitoFiado(cliente, total, articulos) {
 // ===== CARGAR CATEGORÍAS RÁPIDAS DESDE PYTHON =====
 async function cargarCategoriasRapidas() {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/productos/categorias_pos`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/categorias_pos`);
         const data = await res.json();
 
         if (data.error) throw new Error(data.error);
@@ -2538,7 +2526,7 @@ async function abrirCobroPedidoMayorista() {
 
     try {
         Swal.fire({ title: 'Buscando en depósito...', didOpen: () => Swal.showLoading() });
-        const res = await fetch(`${obtenerBaseUrl()}/deposito/pendiente/${pedidoId}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/deposito/pendiente/${pedidoId}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
@@ -2638,7 +2626,7 @@ async function abrirCobroPedidoMayorista() {
         // PROCEDEMOS A GUARDAR EN LA BASE DE DATOS
         Swal.fire({ title: 'Guardando en caja...', didOpen: () => Swal.showLoading() });
 
-        const resCobro = await fetch(`${obtenerBaseUrl()}/caja/cobrar_pedido`, {
+        const resCobro = await apiFetch(`${obtenerBaseUrl()}/caja/cobrar_pedido`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2696,7 +2684,7 @@ document.addEventListener('keypress', (e) => {
 async function descargarCatalogoParaOffline() {
     try {
         // Le pedimos al backend la lista completa de productos activos
-        const response = await fetch(`${obtenerBaseUrl()}/productos/listar?estado=1`);
+        const response = await apiFetch(`${obtenerBaseUrl()}/productos/listar?estado=1`);
 
         if (response.ok) {
             const data = await response.json();
@@ -2765,7 +2753,7 @@ function actualizarEstadoRedVisual(estaOnline) {
 setInterval(async () => {
     try {
         // Le hacemos un llamado cortito a la raíz del servidor
-        const res = await fetch(`${obtenerBaseUrl()}/`, { method: 'GET', cache: 'no-store' });
+        const res = await apiFetch(`${obtenerBaseUrl()}/`, { method: 'GET', cache: 'no-store' });
         if (res.ok) {
             if (!pythonVivo) {
                 pythonVivo = true;

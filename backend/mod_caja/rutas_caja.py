@@ -155,38 +155,39 @@ def registrar_movimiento(mov: MovimientoCaja):
     cursor = conexion.cursor()
     
     try:
-        # Verificamos que haya una caja abierta para poder sacar o meter plata
-        cursor.execute("SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO'")
+        # Verificamos que el turno específico siga abierto
+        cursor.execute("SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (mov.turno_id,))
         if not cursor.fetchone():
-            raise Exception("No podés registrar movimientos de plata si la caja está cerrada.")
+            raise Exception("El turno especificado no está abierto o no existe.")
             
-        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # PARCHE CLAVE: Forzamos a que siempre se guarde en MAYÚSCULAS
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         tipo_mayuscula = mov.tipo_movimiento.upper()
         
+        # EL BLINDAJE: Agregamos explicitamente la columna turno_id al INSERT
         cursor.execute('''
-            INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (fecha_actual, mov.usuario_id, tipo_mayuscula, mov.monto, mov.observaciones))
+            INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (fecha_actual, mov.usuario_id, tipo_mayuscula, mov.monto, mov.observaciones, mov.turno_id))
         
         conexion.commit()
-        conexion.close()
         return {"mensaje": f"¡{tipo_mayuscula} de ${mov.monto} registrado correctamente!"}
         
     except Exception as e:
         if conexion:
-            conexion.close()
+            conexion.rollback()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 No se pudo registrar el movimiento: {mensaje_error}")
-            return {"error": "No se pudo registrar el movimiento."}
+            print(f"🚨 ERROR CRÍTICO AL MOVER DINERO: {mensaje_error}")
+            return {"error": "No se pudo registrar el movimiento por un error interno."}
             
         return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
 # --- 4. CIERRE Z (Arqueo Final Blindado, Corregido y con Sincronización) ---
+# --- 4. CIERRE Z (Arqueo Final Blindado y Relacional) ---
 @router.put("/cerrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
@@ -200,31 +201,28 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
             raise Exception("Ese turno no existe o ya fue cerrado.")
             
         fecha_cierre = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
-        fecha_apertura = turno['fecha_hora_apertura']
         
-        # 1. Ventas en Efectivo
+        # 1. Ventas por métodos de pago estrictamente atados al TURNO
         cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
         ventas_efectivo = cursor.fetchone()[0] or 0.0
         
-        # 2. Otros Medios (Tarjeta y Billetera)
         cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%TARJETA%' AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
         ventas_tarjeta = cursor.fetchone()[0] or 0.0
         
         cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%BILLETERA%' AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
         ventas_virtual = cursor.fetchone()[0] or 0.0    
         
-        # EL PARCHE DEL FIADO: Buscamos ambos nombres
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado = 'COMPLETADA'", (fecha_apertura,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
         ventas_fiados = cursor.fetchone()[0] or 0.0
         
-        # 3. Movimientos de Caja
-        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (fecha_apertura,))
+        # 2. Movimientos de Caja atados al TURNO
+        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (cierre.turno_id,))
         total_retiros = cursor.fetchone()[0] or 0.0
         
-        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?", (fecha_apertura,))
+        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?", (cierre.turno_id,))
         total_ingresos = cursor.fetchone()[0] or 0.0
         
-        # CÁLCULO DE CAJA: Solo el efectivo físico que debe haber en el cajón
+        # CÁLCULO DE CAJA EXACTO
         monto_esperado_sistema = turno['monto_inicial'] + ventas_efectivo + total_ingresos - total_retiros
         diferencia = cierre.monto_final_declarado - monto_esperado_sistema
         
@@ -235,19 +233,19 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         ''', (fecha_cierre, monto_esperado_sistema, cierre.monto_final_declarado, diferencia, cierre.turno_id))
         
         conexion.commit()
-        conexion.close()
                 
-        # ---> GATILLO 4: ALERTA DE WHATSAPP AL DUEÑO <---
+        # GATILLO DE ALERTA
         background_tasks.add_task(
             disparar_alerta_cierre,
             turno_id=cierre.turno_id,
-            ventas_efectivo=ventas_efectivo,
+            cajero=turno['usuario_id'],
+            ventas=monto_esperado_sistema,
             declarado=cierre.monto_final_declarado,
             diferencia=diferencia
         )
         
         return {
-            "mensaje": "¡Cierre Z realizado con éxito! Sincronizando datos con la nube...",
+            "mensaje": "¡Cierre Z realizado con éxito!",
             "resumen": {
                 "fondo_inicial": turno['monto_inicial'],
                 "ventas_en_efectivo": ventas_efectivo,
@@ -263,15 +261,17 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         }
     except Exception as e:
         if conexion:
-            conexion.close()
+            conexion.rollback()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 No se pudo cerrar el turno: {mensaje_error}")
+            print(f"🚨 ERROR CRÍTICO EN CIERRE Z: {mensaje_error}")
             return {"error": "Error interno al cerrar caja. Contacte a soporte."}
             
         return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
 # --- 5. INFORME X (Datos Reales al Momento) ---
 @router.get("/informe_x/{turno_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
@@ -281,34 +281,36 @@ def sacar_informe_x(turno_id: int):
     cursor = conexion.cursor()
     
     try:
-        cursor.execute("SELECT * FROM turnos_caja WHERE id = ?", (turno_id,))
+        cursor.execute("SELECT monto_inicial FROM turnos_caja WHERE id = ?", (turno_id,))
         turno = cursor.fetchone()
-        fecha_apertura = turno['fecha_hora_apertura']
+        if not turno:
+            raise Exception("Turno no encontrado.")
+            
+        fondo_inicial = turno['monto_inicial']
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND fecha_hora >= ? AND estado = 'COMPLETADA'", (fecha_apertura,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado = 'COMPLETADA'", (turno_id,))
         v_efectivo = cursor.fetchone()[0] or 0.0
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%TARJETA%' AND fecha_hora >= ? AND estado = 'COMPLETADA'", (fecha_apertura,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%TARJETA%' AND turno_id = ? AND estado = 'COMPLETADA'", (turno_id,))
         v_tarjeta = cursor.fetchone()[0] or 0.0
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%BILLETERA%' AND fecha_hora >= ? AND estado = 'COMPLETADA'", (fecha_apertura,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%BILLETERA%' AND turno_id = ? AND estado = 'COMPLETADA'", (turno_id,))
         v_virtual = cursor.fetchone()[0] or 0.0
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND fecha_hora >= ? AND estado = 'COMPLETADA'", (fecha_apertura,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado = 'COMPLETADA'", (turno_id,))
         v_fiados = cursor.fetchone()[0] or 0.0
         
-        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND fecha_hora >= ?", (fecha_apertura,))
+        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (turno_id,))
         retiros = cursor.fetchone()[0] or 0.0
         
-        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND fecha_hora >= ?", (fecha_apertura,))
+        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?", (turno_id,))
         ingresos = cursor.fetchone()[0] or 0.0
         
-        esperado = turno['monto_inicial'] + v_efectivo + ingresos - retiros
-        conexion.close()
+        esperado = fondo_inicial + v_efectivo + ingresos - retiros
         
         return {
             "resumen_parcial": {
-                "fondo_inicial": turno['monto_inicial'],
+                "fondo_inicial": fondo_inicial,
                 "ventas_en_efectivo": v_efectivo,
                 "ventas_tarjeta": v_tarjeta,
                 "ventas_virtual": v_virtual,
@@ -319,16 +321,15 @@ def sacar_informe_x(turno_id: int):
             }
         }
     except Exception as e:
-        if conexion:
-            conexion.close()
-            
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 No se generar el informe X: {mensaje_error}")
-            return {"error": "Error interno: No se genero el informe. Contacte a soporte."}
+            print(f"🚨 ERROR EN INFORME X: {mensaje_error}")
+            return {"error": "Error interno al generar el informe."}
             
         return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
     
 # --- 6. MONITOR EN VIVO (Para el panel de Admin) ---
 @router.get("/monitor_vivo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])

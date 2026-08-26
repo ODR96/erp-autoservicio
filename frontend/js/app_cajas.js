@@ -1,38 +1,18 @@
 // frontend/js/app_cajas.js
-// --- EL INTERCEPTOR DE SEGURIDAD ---
-// --- INTERCEPTOR DE SEGURIDAD GLOBAL ---
-// --- INTERCEPTOR DE SEGURIDAD GLOBAL ---
-const originalFetch = window.fetch;
-window.fetch = async function() {
-    let [recurso, config] = arguments;
-    if (!config) config = {};
+async function apiFetch(recurso, config = {}) {
     if (!config.headers) config.headers = {};
+    const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
+    if (token) config.headers['Authorization'] = `Bearer ${token}`;
     
-    // 1. Verificamos si la petición va a TU servidor
-    const vaAMiServidor = recurso.toString().includes(obtenerBaseUrl());
-    
-    // 2. SOLO si va a tu servidor, le pegamos el token secreto
-    if (vaAMiServidor) {
-        const tokenSeguridad = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        if (tokenSeguridad) {
-            config.headers['Authorization'] = `Bearer ${tokenSeguridad}`;
-        }
-    }
-    
-    const respuesta = await originalFetch(recurso, config);
-    
-    // 3. El blindaje: Si es nuestro servidor y nos rechaza (401)
-    if (vaAMiServidor && respuesta.status === 401) {
+    const respuesta = await fetch(recurso, config);
+    if (respuesta.status === 401) {
         console.warn("Sesión expirada o sin permisos (401)");
         localStorage.clear();
-        window.location.href = 'index.html'; // Pateamos al usuario al login
+        window.location.href = 'index.html'; 
         throw new Error("Acceso denegado (401)");
     }
-    
     return respuesta;
-};
-// ---------------------------------------
-// ---------------------------------------
+}
 
 function cambiarPestana(id, evento) {
     document.querySelectorAll('#cajaTabs .nav-link').forEach(el => el.classList.remove('active'));
@@ -51,7 +31,7 @@ async function cargarMonitor() {
     const contenedor = document.getElementById('contenedorMonitorVivo');
 
     try {
-        const response = await fetch(`${obtenerBaseUrl()}/caja/monitor_vivo`);
+        const response = await apiFetch(`${obtenerBaseUrl()}/caja/monitor_vivo`);
         const data = await response.json();
 
         if (data.error) throw new Error(data.error);
@@ -139,7 +119,7 @@ async function forzarCierreRemoto(turnoId) {
     if (confirm.isConfirmed) {
         Swal.fire({ title: 'Cerrando caja remotamente...', didOpen: () => Swal.showLoading() });
         try {
-            const res = await fetch(`${obtenerBaseUrl()}/caja/cerrar`, {
+            const res = await apiFetch(`${obtenerBaseUrl()}/caja/cerrar`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -172,7 +152,7 @@ async function buscarVentasPorFecha() {
     desglose.classList.add('d-none');
     
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/ventas/por_fecha?fecha=${fecha}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/ventas/por_fecha?fecha=${fecha}`);
         const data = await res.json();
         
         if (!res.ok) {
@@ -259,7 +239,7 @@ function filtrarTablaHistorica() {
 async function verDetalleTicketHistorico(ventaId) {
     Swal.fire({ title: 'Cargando detalle...', didOpen: () => Swal.showLoading() });
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}`);
         const data = await res.json();
 
         if (data.error) throw new Error(data.error);
@@ -300,7 +280,7 @@ async function imprimirTicketHistorico(ticketId) {
     try {
         Swal.fire({ title: 'Preparando impresión...', timer: 1000, showConfirmButton: false, didOpen: () => Swal.showLoading() });
 
-        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/ventas/ticket/${ticketId}`);
         const ticket = await res.json();
 
         // Buscamos los datos de tu negocio en la memoria o ponemos genéricos
@@ -377,7 +357,7 @@ async function imprimirTicketHistorico(ticketId) {
 async function cargarEmpleados() {
     const tbody = document.getElementById('tablaEmpleadosBody');
     try {
-        const response = await fetch(`${obtenerBaseUrl()}/usuarios/listar`);
+        const response = await apiFetch(`${obtenerBaseUrl()}/usuarios/listar`);
         const data = await response.json();
 
         if (data.error) throw new Error(data.error);
@@ -460,7 +440,7 @@ async function guardarEmpleado() {
             metodo = 'PUT';
         }
 
-        const res = await fetch(url, {
+        const res = await apiFetch(url, {
             method: metodo,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nombre_completo: nombre, rol: rol, codigo_barras_credencial: credencial, pin_secreto: pin })
@@ -491,7 +471,7 @@ async function darDeBajaEmpleado(id, nombre) {
 
     if (confirm.isConfirmed) {
         try {
-            await fetch(`${obtenerBaseUrl()}/usuarios/baja/${id}`, { method: 'DELETE' });
+            await apiFetch(`${obtenerBaseUrl()}/usuarios/baja/${id}`, { method: 'DELETE' });
             Swal.fire('Bloqueado', 'Empleado dado de baja.', 'success');
             cargarEmpleados();
         } catch (e) {
@@ -513,7 +493,7 @@ async function reactivarEmpleado(id, nombre) {
 
     if (confirm.isConfirmed) {
         try {
-            await fetch(`${obtenerBaseUrl()}/usuarios/alta/${id}`, { method: 'PUT' });
+            await apiFetch(`${obtenerBaseUrl()}/usuarios/alta/${id}`, { method: 'PUT' });
             Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Usuario reactivado', showConfirmButton: false, timer: 1500 });
             cargarEmpleados();
         } catch (e) {
@@ -571,7 +551,7 @@ function imprimirCredencial(nombre, rol, codigo) {
 async function cargarCajasFisicas() {
     const tbody = document.getElementById('tablaTerminalesBody');
     try {
-        const response = await fetch(`${obtenerBaseUrl()}/caja/cajas_fisicas/admin_listado`);
+        const response = await apiFetch(`${obtenerBaseUrl()}/caja/cajas_fisicas/admin_listado`);
         const data = await response.json();
 
         if (data.error) throw new Error(data.error);
@@ -607,7 +587,7 @@ async function guardarTerminal() {
     if (!id || !nombre) return Swal.fire('Atención', 'Completá el número y el nombre de la terminal.', 'warning');
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/caja/cajas_fisicas/crear`, {
+        const res = await apiFetch(`${obtenerBaseUrl()}/caja/cajas_fisicas/crear`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: parseInt(id), nombre: nombre, solo_admin: solo_admin })
@@ -626,7 +606,7 @@ async function guardarTerminal() {
 
 async function toggleTerminal(id) {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/caja/cajas_fisicas/toggle/${id}`, { method: 'PUT' });
+        const res = await apiFetch(`${obtenerBaseUrl()}/caja/cajas_fisicas/toggle/${id}`, { method: 'PUT' });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         cargarCajasFisicas();

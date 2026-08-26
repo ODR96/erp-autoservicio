@@ -1,36 +1,18 @@
-// --- INTERCEPTOR DE SEGURIDAD GLOBAL ---
-// --- INTERCEPTOR DE SEGURIDAD GLOBAL ---
-const originalFetch = window.fetch;
-window.fetch = async function() {
-    let [recurso, config] = arguments;
-    if (!config) config = {};
+// --- ENVOLTORIO CORPORATIVO PARA PETICIONES (REEMPLAZA AL apiFetch GLOBAL) ---
+async function apiFetch(recurso, config = {}) {
     if (!config.headers) config.headers = {};
+    const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
+    if (token) config.headers['Authorization'] = `Bearer ${token}`;
     
-    // 1. Verificamos si la petición va a TU servidor
-    const vaAMiServidor = recurso.toString().includes(obtenerBaseUrl());
-    
-    // 2. SOLO si va a tu servidor, le pegamos el token secreto
-    if (vaAMiServidor) {
-        const tokenSeguridad = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        if (tokenSeguridad) {
-            config.headers['Authorization'] = `Bearer ${tokenSeguridad}`;
-        }
-    }
-    
-    const respuesta = await originalFetch(recurso, config);
-    
-    // 3. El blindaje: Si es nuestro servidor y nos rechaza (401)
-    if (vaAMiServidor && respuesta.status === 401) {
+    const respuesta = await fetch(recurso, config);
+    if (respuesta.status === 401) {
         console.warn("Sesión expirada o sin permisos (401)");
         localStorage.clear();
-        window.location.href = 'index.html'; // Pateamos al usuario al login
+        window.location.href = 'index.html'; 
         throw new Error("Acceso denegado (401)");
     }
-    
     return respuesta;
-};
-// ---------------------------------------
-// ---------------------------------------
+}
 
 let productosGlobales = [];
 let categoriasGlobales = []; // <-- NUEVO
@@ -43,7 +25,7 @@ let colaEtiquetasActual = [];
 // ==========================================
 async function cargarCategoriasGlobales() {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/productos/categorias`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/categorias`);
         const data = await res.json();
         categoriasGlobales = data.categorias || [];
 
@@ -80,7 +62,7 @@ async function cargarCategoriasGlobales() {
 
 async function cargarProveedoresGlobales() {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/proveedores/listado`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/proveedores/listado`);
         const data = await res.json();
         const proveedoresReales = Array.isArray(data) ? data : (data.proveedores || []);
 
@@ -132,7 +114,7 @@ async function crearCategoriaUI() {
     const nombre = document.getElementById('nuevaCatNombre').value.trim();
     if (!nombre) return;
     try {
-        await fetch(`${obtenerBaseUrl()}/productos/categorias/crear`, { 
+        await apiFetch(`${obtenerBaseUrl()}/productos/categorias/crear`, { 
             method: 'POST', headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ nombre: nombre }) 
         });
@@ -144,7 +126,7 @@ async function crearCategoriaUI() {
 async function borrarCategoria(id, nombre) {
     if(!(await Swal.fire({title: `¿Borrar rubro ${nombre}?`, icon: 'warning', showCancelButton: true})).isConfirmed) return;
     try {
-        await fetch(`${obtenerBaseUrl()}/productos/categorias/eliminar/${id}`, { method: 'DELETE' });
+        await apiFetch(`${obtenerBaseUrl()}/productos/categorias/eliminar/${id}`, { method: 'DELETE' });
         await cargarCategoriasGlobales();
         gestionarCategoriasUI();
     } catch (e) { Swal.fire('Error', 'No se pudo borrar.', 'error'); }
@@ -235,11 +217,23 @@ document.querySelector('[data-bs-target="#modalNuevoProducto"]').addEventListene
         });
 
 async function cargarCatalogo() {
-    // 1. Agarramos el loader y el contenedor real de tus tablas
+    // 1. Agarramos los elementos visuales
     const loader = document.getElementById('loaderServidor');
     const contenedor = document.getElementById('productTabsContent');
+    const tbody = document.getElementById('tablaCatalogoBody');
     
-    // 2. Mostramos el loader y ocultamos el contenido
+    // 2. Mostramos el esqueleto de carga elegante adentro de la tabla
+    if (tbody) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-5">
+                    <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status"></div>
+                    <h5 class="mt-3 text-muted fw-bold">Cargando catálogo desde la nube...</h5>
+                </td>
+            </tr>`;
+    }
+
+    // Ocultamos el contenedor general si tenías esa lógica
     if (loader) loader.style.display = 'block';
     if (contenedor) contenedor.style.display = 'none';
 
@@ -256,7 +250,8 @@ async function cargarCatalogo() {
             url += `?estado=${filtroSelect}`; 
         }
         
-        const response = await fetch(url);
+        // 🚀 ACÁ ESTÁ LA MAGIA: USAMOS EL NUEVO apiFetch BLINDADO
+        const response = await apiFetch(url);
         const data = await response.json();
         productosGlobales = data.productos || [];
         
@@ -272,13 +267,18 @@ async function cargarCatalogo() {
         
     } catch (error) { 
         console.error("Error crítico cargando catálogo:", error); 
-        // 4. Si Render tarda de más o falla, cambiamos el texto
+        
+        // 4. Si falla el servidor o no hay internet, cambiamos el texto
         if (loader) {
             loader.innerHTML = `
                 <i class="bi bi-x-circle text-danger display-4 mb-3 d-block"></i>
-                <h5 class="fw-bold text-dark">Servidor inactivo</h5>
-                <p class="text-muted">Parece que el servidor de Render está dormido profundamente.<br>Recargá la página (F5) para insistir.</p>
+                <h5 class="fw-bold text-dark">Error de conexión</h5>
+                <p class="text-muted">No pudimos conectar con la base de datos central.<br>Revisá el internet del local y recargá la página (F5).</p>
             `;
+        }
+        
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4 fw-bold"><i class="bi bi-wifi-off fs-4 d-block mb-2"></i> Sin conexión al catálogo</td></tr>`;
         }
     }
 }
@@ -385,7 +385,7 @@ async function abrirModalExportar() {
 // ========================================================
 async function generarCodigoInterno() {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/productos/generar_codigo_interno`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/generar_codigo_interno`);
         const data = await res.json();
         if (data.codigo) { document.getElementById('inputCodigo').value = data.codigo; }
         else { Swal.fire('Error', 'Fallo al buscar código en la base.', 'warning'); }
@@ -538,217 +538,6 @@ function cambiarPaginaProd(nuevaPagina) {
 }
 
 // ==========================================
-// CARTELERÍA Y ETIQUETAS
-// ==========================================
-function llenarSelectEtiquetas() {
-
-    try {
-    const select = document.getElementById('selectEtiquetaProducto');
-
-    if (!selectEtiquetas) return;
-    
-    select.innerHTML = '<option value="">-- Seleccionar producto --</option>';
-    productosGlobales.forEach(p => { select.innerHTML += `<option value="${p.id}">${p.nombre} ($${p.precio_venta_final.toFixed(2)})</option>`; });
-    } catch (error) {
-        console.warn("Se ignoró un error visual en cartelería:", error);
-    }
-}
-function toggleOpcionesA4() {
-    // Dejamos el panel extra SIEMPRE visible para poder escribir "Bulto x 6" en las cenefas
-    document.getElementById('panelExtraA4').classList.remove('d-none');
-    
-    // Ocultamos solo la caja del "Precio Falso" si es una cenefa normal
-    let inputFalso = document.getElementById('inputEtiquetaPrecioFalso');
-    if (inputFalso && inputFalso.parentElement) {
-        if (document.getElementById('selectEtiquetaFormato').value === "Oferta A4") { 
-            inputFalso.parentElement.classList.remove('d-none'); 
-        } else { 
-            inputFalso.parentElement.classList.add('d-none'); 
-            inputFalso.value = ""; 
-        }
-    }
-}
-
-
-async function cargarColaEtiquetas() { try { const data = await (await fetch(`${obtenerBaseUrl()}/productos/etiquetas/listar`)).json(); colaEtiquetasActual = data.cola || []; dibujarColaEtiquetas(); } catch (e) { } }
-
-async function encolarMasivoCarteleria() {
-    const ft = document.getElementById('etiquetaMasivaFiltro').value; const fId = parseInt(ft.split('_')[1]) || 0; const txt = document.getElementById('etiquetaMasivaPalabra').value.toLowerCase().trim();
-    let fils = productosGlobales; if (ft.startsWith('cat')) fils = fils.filter(p => p.categoria_id === fId); if (txt) fils = fils.filter(p => p.nombre.toLowerCase().includes(txt));
-    if (fils.length === 0) return Swal.fire('Sin resultados', '', 'info');
-    Swal.fire({ title: 'Encolando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-    try { for (let p of fils) { await fetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ producto_id: p.id, tipo_cartel: 'Cenefa', cantidad_copias: 1 }) }); } Swal.fire('¡Éxito!', `Encoladas.`, 'success'); cargarColaEtiquetas(); } catch (e) { }
-}
-async function vaciarColaEtiquetas() { try { await fetch(`${obtenerBaseUrl()}/productos/etiquetas/vaciar`, { method: 'DELETE' }); cargarColaEtiquetas(); } catch (e) { } }
-async function eliminarDeColaFront(id) { try { await fetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${id}`, { method: 'DELETE' }); cargarColaEtiquetas(); } catch (e) { } }
-function cargarFotoTemporal(event, idx) { const r = new FileReader(); r.onload = e => { colaEtiquetasActual[idx].foto_temporal = e.target.result; dibujarColaEtiquetas(); }; r.readAsDataURL(event.target.files[0]); }
-
-function dibujarColaEtiquetas() {
-    const tbody = document.querySelector('#tablaColaEtiquetas tbody'); tbody.innerHTML = '';
-    if (colaEtiquetasActual.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-muted py-5">Cola vacía.</td></tr>'; return; }
-    colaEtiquetasActual.forEach((item, idx) => {
-        let p = item.precio_falso ? item.precio_falso : item.precio_venta_final;
-        let b = item.formato === "Cenefa" ? "bg-secondary" : "bg-danger";
-        let bp = item.precio_falso ? `<span class="badge bg-warning text-dark ms-2"><i class="bi bi-pencil"></i></span>` : '';
-        let f = '';
-        if (item.formato === "Oferta A4") {
-            let tx = item.texto_personalizado ? `<div class="small mt-1 text-primary">${item.texto_personalizado}</div>` : '';
-            let sub = item.foto_temporal ? `<span class="badge bg-success"><i class="bi bi-check"></i> Foto</span> <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="colaEtiquetasActual[${idx}].foto_temporal=null; dibujarColaEtiquetas();"><i class="bi bi-trash"></i></button>` : `<label class="btn btn-sm btn-outline-primary py-0 mb-0" style="cursor:pointer;"><i class="bi bi-camera"></i> Foto <input type="file" class="d-none" accept="image/*" onchange="cargarFotoTemporal(event, ${idx})"></label>`;
-            let pie = `<input type="text" class="form-control form-control-sm mt-1 text-center" style="font-size:0.75rem;" placeholder="Pie (Ej: Válido 24hs)" value="${item.leyenda_inferior || ''}" onchange="colaEtiquetasActual[${idx}].leyenda_inferior = this.value">`;
-            f = sub + tx + pie;
-        } else { f = '<span class="text-muted small">N/A</span>'; }
-        tbody.innerHTML += `<tr><td class="text-start ps-3 fw-bold">${item.nombre}</td><td class="fw-bold text-success fs-5">$${p.toLocaleString('es-AR', { minimumFractionDigits: 2 })} ${bp}</td><td><span class="badge ${b}">${item.formato}</span></td><td class="text-center">${f}</td><td class="fw-bold fs-5">${item.cantidad}</td><td><button class="btn btn-sm text-danger border-0" onclick="eliminarDeColaFront(${item.cola_id})"><i class="bi bi-x-circle-fill"></i></button></td></tr>`;
-    });
-}
-function lanzarImpresion(filtro) {
-    let hay = colaEtiquetasActual.some(i => (filtro === "Solo Cenefas" && i.formato === "Cenefa") || (filtro === "Solo A4" && i.formato === "Oferta A4"));
-    if (!hay) return Swal.fire('Aviso', `No hay etiquetas '${filtro}'.`, 'info');
-    
-    prepararHojaImpresion(filtro);
-    
-    // MAGIA ELECTRON: Quitamos el "d-none" justo antes de mandar la orden de imprimir
-    const cajaImpresion = document.getElementById('hojaImpresionLimpia');
-    cajaImpresion.classList.remove('d-none');
-
-    Swal.fire({ title: 'Generando PDF', text: `Preparando ${filtro}...`, icon: 'info', timer: 800, showConfirmButton: false }).then(() => { 
-        window.print(); 
-        
-        // Volvemos a ocultar y limpiamos
-        cajaImpresion.classList.add('d-none');
-        cajaImpresion.innerHTML = ''; 
-    });
-}
-
-function prepararHojaImpresion(filtro) {
-    const hoja = document.getElementById('hojaImpresionLimpia');
-    hoja.innerHTML = ''; 
-
-    let items = colaEtiquetasActual.filter(i => filtro === "Solo Cenefas" ? i.formato === "Cenefa" : i.formato === "Oferta A4");
-    const columnas = parseInt(document.getElementById('selectColumnasCenefa').value) || 2;
-
-    // EL BLINDAJE DE IMPRESIÓN: Le ordenamos a Electron/Chrome que respete el formato A4
-    let estiloA4 = `
-        <style>
-            @media print {
-                @page { size: A4 portrait; margin: 10mm; }
-                body { background: white !important; margin: 0; padding: 0; }
-                #app-container, .main-wrapper, .modal, .swal2-container { display: none !important; }
-                #hojaImpresionLimpia { display: block !important; visibility: visible !important; position: absolute; left: 0; top: 0; width: 100%; }
-                .print-cenefa { page-break-inside: avoid; }
-                .print-cartelMediano { page-break-inside: avoid; }
-            }
-        </style>
-    `;
-
-    let contenedorHTML = estiloA4 + `<div class="print-container" style="${filtro === 'Solo Cenefas' ? 
-        `display: grid !important; grid-template-columns: repeat(${columnas}, 1fr) !important; gap: 4mm !important; width: 100% !important; max-width: 190mm !important; margin: 0 auto !important; padding-top: 5mm !important;` 
-        : 'display: block !important;'}">`;
-
-    items.forEach((item, idxItem) => {
-        let pMostrar = item.precio_falso ? item.precio_falso : item.precio_venta_final;
-        let pMostrarF = pMostrar.toLocaleString('es-AR', {minimumFractionDigits: 2});
-        let pRealF = item.precio_venta_final.toLocaleString('es-AR', {minimumFractionDigits: 2});
-
-        let pG = productosGlobales.find(p => p.id === item.producto_id) || {}; 
-        let tU = pG.unidad_medida && pG.unidad_medida !== "Unidad" ? ` x ${pG.unidad_medida}` : '';
-        
-        let colorTema = item.color_tema || '#1a365d';
-        let tipoPlantilla = item.plantilla || 'Clasica';
-
-        for(let i=0; i < item.cantidad; i++) {
-            
-            let textoCaja = (pG.unidades_por_bulto && pG.unidades_por_bulto > 1) ? `Bulto x ${pG.unidades_por_bulto} un.` : item.texto_personalizado;
-            let txtBulto = textoCaja ? `<div style="font-size:8px; font-weight:bold; color:${colorTema}; border: 1px solid ${colorTema}; background:#fff; border-radius:3px; padding:2px 5px; display:inline-block; margin-bottom:3px; text-transform:uppercase;">${textoCaja}</div>` : '';                
-
-            if(item.formato === "Cenefa") {
-                let fontSizePrecio = (columnas === 2) ? '34px' : '26px';
-                if (pMostrarF.length >= 7) fontSizePrecio = (columnas === 2) ? '28px' : '20px';
-
-                contenedorHTML += `
-                    <div class="print-cenefa" style="width: 100% !important; height: 38mm !important; border: 1px solid #ddd; box-sizing: border-box !important; page-break-inside: avoid !important; background: white !important; font-family: Arial, sans-serif; position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 3px; border-top: 4px solid ${colorTema};">
-                        <div style="width: 100%; font-size:10px; font-weight:bold; text-align:center; color:#333; padding-bottom: 1px; white-space:nowrap; overflow:hidden;">
-                            ${item.nombre}${tU}
-                        </div>
-                        <div style="margin-top: 2px;">${txtBulto}</div>
-                        <div style="font-size:${fontSizePrecio}; font-weight:900; line-height:1; letter-spacing:-0.5px; color:#333; margin-top: auto; margin-bottom: auto;">
-                            $${pMostrarF}
-                        </div>
-                        <div style="width: 80%; height: 16px; display:flex; justify-content:center; overflow:hidden; margin-bottom: 1px;">
-                            <svg id="barcode-${idxItem}-${i}" style="height:100%; width:100%; margin:0;"></svg>
-                        </div>
-                    </div>
-                `;
-            } else if (item.formato === "Oferta A4") {
-                
-                let tx = item.texto_personalizado ? `<div style="font-size:20px; font-weight:900; color:white; background:${colorTema}; padding: 5px 20px; border-radius: 10px; text-transform:uppercase; margin-bottom:15px; display:inline-block;">${item.texto_personalizado}</div>` : '';
-                let lPie = item.leyenda_inferior ? `<div style="font-size:12px; color:#555; margin-top:10px;">* ${item.leyenda_inferior}</div>` : '';
-                
-                let htmlInterno = '';
-
-                if (tipoPlantilla === "La Bomba") {
-                    let precioViejo = item.precio_falso ? `<div style="font-size:25px; font-weight:bold; color:#888; text-decoration:line-through; margin-bottom:-10px;">Antes: $${pRealF}</div>` : '';
-                    htmlInterno = `
-                        <div class="print-cartelMediano" style="width: 135mm !important; height: 95mm !important; border: 8px solid ${colorTema}; border-radius: 15px; display: inline-flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; padding: 15px !important; box-sizing: border-box !important; background: white !important; margin: 5mm; float: left; page-break-inside: avoid; position: relative;">
-                            ${tx}
-                            <h2 style="font-size:28px; font-weight:900; color:#333; margin-bottom:10px; line-height:1.1;">${item.nombre}${tU}</h2>
-                            ${txtBulto ? `<div style="margin-bottom:15px; transform: scale(1.5);">${txtBulto}</div>` : ''}
-                            ${precioViejo}
-                            <div style="font-size:85px; font-weight:900; color:${colorTema}; line-height:0.9;">$${pMostrarF}</div>
-                            ${lPie}
-                        </div>
-                    `;
-                } else if (tipoPlantilla === "Mayorista" && pG.cant_promo) {
-                    let pMayoristaF = pG.precio_promo.toLocaleString('es-AR', {minimumFractionDigits: 2});
-                    htmlInterno = `
-                        <div class="print-cartelMediano" style="width: 135mm !important; height: 95mm !important; border: 4px solid #333; display: inline-flex !important; flex-direction: column !important; justify-content: space-between !important; align-items: center !important; text-align: center !important; box-sizing: border-box !important; background: white !important; margin: 5mm; float: left; page-break-inside: avoid; overflow:hidden;">
-                            <div style="width:100%; background:#333; color:white; padding:10px; font-size:22px; font-weight:900;">${item.nombre}${tU}</div>
-                            
-                            <div style="display:flex; width:100%; height:100%;">
-                                <div style="width:50%; border-right: 2px dashed #999; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:10px;">
-                                    <div style="font-size:14px; color:#666; text-transform:uppercase;">Precio Minorista</div>
-                                    <div style="font-size:45px; font-weight:bold; color:#333; line-height:1;">$${pMostrarF}</div>
-                                </div>
-                                <div style="width:50%; background:${colorTema}; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:10px; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
-                                    <div style="font-size:16px; text-transform:uppercase; color:rgba(255,255,255,0.8);">Precio Mayorista</div>
-                                    <div style="font-size:50px; font-weight:900; line-height:1; margin:5px 0;">$${pMayoristaF}</div>
-                                    <div style="background:white; color:${colorTema}; padding:5px 10px; border-radius:5px; font-weight:bold; font-size:14px;">Llevando ${pG.cant_promo} o más</div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    htmlInterno = `
-                        <div class="print-cartelMediano" style="width: 135mm !important; height: 95mm !important; border: 3px solid ${colorTema}; display: inline-flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; text-align: center !important; padding: 0 !important; box-sizing: border-box !important; background: white !important; margin: 5mm; float: left; page-break-inside: avoid; overflow:hidden;">
-                            <div style="width:100%; background:${colorTema}; color:white; text-align:center; padding:5px; font-weight:bold; font-size:14px; text-transform:uppercase; letter-spacing:2px; -webkit-print-color-adjust: exact; print-color-adjust: exact;">Autoservicio 20 de Junio</div>
-                            <div style="padding:15px; width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-                                ${tx}
-                                <h2 style="font-size:24px; font-weight:900; color:#333; margin-bottom:15px;">${item.nombre}${tU}</h2>
-                                ${txtBulto ? `<div style="margin-bottom:10px;">${txtBulto}</div>` : ''}
-                                <div style="font-size:75px; font-weight:900; color:#198754; line-height:0.9;">$${pMostrarF}</div>
-                                ${lPie}
-                            </div>
-                        </div>
-                    `;
-                }
-
-                contenedorHTML += htmlInterno;
-            }
-        }
-    });
-
-    contenedorHTML += `</div>`;
-    hoja.innerHTML = contenedorHTML;
-
-    items.forEach((item, idxItem) => { 
-        if(item.formato === "Cenefa" && item.codigo_barras) { 
-            for(let i=0; i < item.cantidad; i++) { 
-                try { JsBarcode(`#barcode-${idxItem}-${i}`, item.codigo_barras, { format: "CODE128", width: 1.2, height: 30, displayValue: false, margin: 0 }); } catch (e) {} 
-            } 
-        } 
-    });
-}
-
-// ==========================================
 // 3. ABM Y CÁLCULOS
 // ==========================================
 function calcularPrecioAutomatico() {
@@ -780,7 +569,7 @@ async function agregarLoteRapido() {
     const c = parseFloat(document.getElementById('inputCostoLote').value) || 0;
     
     try { 
-        await fetch(`${obtenerBaseUrl()}/lotes/ingresar`, { 
+        await apiFetch(`${obtenerBaseUrl()}/lotes/ingresar`, { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ producto_id: productoEditandoId, numero_lote_proveedor: lote, fecha_vencimiento: v, cantidad_inicial: cant, costo_real_ingreso: c }) 
@@ -920,7 +709,7 @@ async function confirmarAjusteMasivo() {
     const tAjuste = document.getElementById('masivaTipoPorcentaje').checked ? 'porcentaje' : (document.getElementById('masivaTipoSumar').checked ? 'sumar' : 'fijo');
     
     try { 
-        await fetch(`${obtenerBaseUrl()}/productos/actualizacion_masiva`, { 
+        await apiFetch(`${obtenerBaseUrl()}/productos/actualizacion_masiva`, { 
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ 
                 valor: valorNum, 
@@ -943,7 +732,7 @@ cambiarPestanaAbm(pestana);
     document.querySelectorAll('#modalNuevoProducto input').forEach(i => i.value = '');
 
     try {
-        const response = await fetch(`${obtenerBaseUrl()}/productos/ver/${id}`);
+        const response = await apiFetch(`${obtenerBaseUrl()}/productos/ver/${id}`);
         const p = await response.json(); 
         if (p.error) throw new Error(p.error);
 
@@ -1071,7 +860,7 @@ const rolActual = localStorage.getItem('usuario_rol');
         componentesComboActual = p.componentes_combo || [];
         dibujarTablaComponentes();
 try {
-            const resHist = await fetch(`${obtenerBaseUrl()}/productos/movimientos/${id}`);
+            const resHist = await apiFetch(`${obtenerBaseUrl()}/productos/movimientos/${id}`);
             const dataHist = await resHist.json();
             
             const tbHist = document.getElementById('tablaHistorialProd');
@@ -1145,9 +934,9 @@ async function guardarProductoCompleto() {
     try {
         let res;
         if (productoEditandoId === null) {
-            res = await fetch(`${obtenerBaseUrl()}/productos/crear`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+            res = await apiFetch(`${obtenerBaseUrl()}/productos/crear`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
         } else { 
-            res = await fetch(`${obtenerBaseUrl()}/productos/actualizar/${productoEditandoId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }); 
+            res = await apiFetch(`${obtenerBaseUrl()}/productos/actualizar/${productoEditandoId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }); 
         }
         
         const data = await res.json();
@@ -1164,15 +953,15 @@ async function guardarProductoCompleto() {
     }
 }
 
-async function desactivarProducto(id, n) { if ((await Swal.fire({ title: '¿Ocultar?', icon: 'warning', showCancelButton: true })).isConfirmed) { await fetch(`${obtenerBaseUrl()}/productos/eliminar/${id}`, { method: 'DELETE' }); sessionStorage.setItem('paginaRetorno', paginaActualProd); cargarCatalogo(); cargarListadoCombos(); } }
-async function restaurarProducto(id, n) { if ((await Swal.fire({ title: '¿Restaurar?', icon: 'question', showCancelButton: true })).isConfirmed) { await fetch(`${obtenerBaseUrl()}/productos/restaurar/${id}`, { method: 'PUT' }); cargarCatalogo(); cargarListadoCombos(); } }
+async function desactivarProducto(id, n) { if ((await Swal.fire({ title: '¿Ocultar?', icon: 'warning', showCancelButton: true })).isConfirmed) { await apiFetch(`${obtenerBaseUrl()}/productos/eliminar/${id}`, { method: 'DELETE' }); sessionStorage.setItem('paginaRetorno', paginaActualProd); cargarCatalogo(); cargarListadoCombos(); } }
+async function restaurarProducto(id, n) { if ((await Swal.fire({ title: '¿Restaurar?', icon: 'question', showCancelButton: true })).isConfirmed) { await apiFetch(`${obtenerBaseUrl()}/productos/restaurar/${id}`, { method: 'PUT' }); cargarCatalogo(); cargarListadoCombos(); } }
 
 // ==========================================
 // SISTEMA DE MERMAS (RECUPERADO)
 // ==========================================
 async function abrirModalMerma(id, nombre) {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/productos/ver/${id}`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/ver/${id}`);
         const prod = await res.json();
 
         document.getElementById('mermaNombreProducto').innerText = nombre;
@@ -1210,7 +999,7 @@ async function confirmarMerma() {
     const usuarioId = localStorage.getItem('usuario_id') || 1;
 
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/lotes/baja_manual`, {
+        const res = await apiFetch(`${obtenerBaseUrl()}/lotes/baja_manual`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ lote_id: loteId, cantidad_a_bajar: cantidad, motivo: motivoCompleto, usuario_id: parseInt(usuarioId) })
@@ -1244,7 +1033,7 @@ async function forzarDescargaRapida(evento) {
     try {
         Swal.fire({ title: 'Descargando...', text: 'Buscando cambios en la nube', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
         
-        const res = await fetch(`${obtenerBaseUrl()}/sync/actualizar-rapido`, { method: 'POST' }); 
+        const res = await apiFetch(`${obtenerBaseUrl()}/sync/actualizar-rapido`, { method: 'POST' }); 
         if (!res.ok) throw new Error("Fallo en la descarga");
         
         await cargarCategoriasGlobales();
@@ -1265,7 +1054,7 @@ async function forzarDescargaRapida(evento) {
 // --- CARGAR BOTONES POS ---
 async function cargarBotonesPOS() {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/productos/categorias_pos`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/categorias_pos`);
         const data = await res.json();
         const tbody = document.getElementById('tablaCategoriasPOS');
         tbody.innerHTML = '';
@@ -1300,7 +1089,7 @@ async function guardarBotonPOS(id, iconoActual) {
     const color = document.getElementById(`colorPOS_${id}`).value;
 
     try {
-        await fetch(`${obtenerBaseUrl()}/productos/categorias_pos/${id}`, {
+        await apiFetch(`${obtenerBaseUrl()}/productos/categorias_pos/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nombre: nombre, palabra_clave: clave, icono: iconoActual, color_fondo: color })
@@ -1410,7 +1199,7 @@ function dibujarTablaComponentes() {
 // --- CARGAR PESTAÑA CENTRAL DE COMBOS ---
 async function cargarListadoCombos() {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/productos/listar_combos`);
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/listar_combos`);
         const data = await res.json();
         const tbody = document.getElementById('tablaListadoCombos');
         tbody.innerHTML = '';
@@ -1533,7 +1322,7 @@ async function agregarEtiquetaManual() {
     if (!sId || cant <= 0) return Swal.fire('Error', 'Busque y seleccione un producto primero.', 'warning');
 
     try {
-        await fetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar`, { 
+        await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar`, { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ 
@@ -1619,7 +1408,7 @@ async function corregirLoteUI(id, lote, vence, stock, costo) {
     if (formValues) {
         try {
             // ARREGLO: La ruta correcta es /productos/lotes/actualizar
-            const res = await fetch(`${obtenerBaseUrl()}/productos/lotes/actualizar/${id}`, {
+            const res = await apiFetch(`${obtenerBaseUrl()}/productos/lotes/actualizar/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formValues)
@@ -1648,7 +1437,7 @@ async function eliminarLoteUI(id) {
     if (confirm.isConfirmed) {
         try {
             // ARREGLO: La ruta correcta es /productos/lotes/eliminar
-            const res = await fetch(`${obtenerBaseUrl()}/productos/lotes/eliminar/${id}`, { method: 'DELETE' });
+            const res = await apiFetch(`${obtenerBaseUrl()}/productos/lotes/eliminar/${id}`, { method: 'DELETE' });
             const data = await res.json();
             
             // DETECTOR DE MENTIRAS
@@ -1734,7 +1523,7 @@ document.addEventListener('keydown', async (e) => {
         if (bufferEscaneo.length > 2) { 
             try {
                 Swal.fire({ title: 'Buscando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                const resp = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${bufferEscaneo}`);
+                const resp = await apiFetch(`${obtenerBaseUrl()}/productos/buscar?termino=${bufferEscaneo}`);
                 const prod = await res.json();
 
                 if (prod.error) {
