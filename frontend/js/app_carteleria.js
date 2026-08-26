@@ -394,7 +394,7 @@ function imprimirTodo(filtroSeleccionado) {
                             ${logoHTML}
                         </div>
                         <div style="padding: 10mm; flex-grow: 1; display:flex; flex-direction:column; align-items:center; justify-content:${justificacion}; width:100%;">
-                            ${txExtra ? `<div class="bg-print" style="background:#dc3545; color:white; font-size:35px; font-weight:900; padding:5mm 20mm; border-radius:15px; margin-bottom:10mm; text-transform:uppercase; letter-spacing:2px; box-shadow: 5px 5px 0px rgba(0,0,0,0.2);">${item.textoExtra}</div>` : ''}
+                            ${txExtra ? `<div class="bg-print" style="background:#3586dc; color:white; font-size:35px; font-weight:900; padding:5mm 20mm; border-radius:15px; margin-bottom:10mm; text-transform:uppercase; letter-spacing:2px; box-shadow: 5px 5px 0px rgba(0,0,0,0.2);">${item.textoExtra}</div>` : ''}
                             
                             ${imagenManualHTML}
                             
