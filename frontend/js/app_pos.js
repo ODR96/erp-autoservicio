@@ -2,12 +2,12 @@ async function apiFetch(recurso, config = {}) {
     if (!config.headers) config.headers = {};
     const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
     if (token) config.headers['Authorization'] = `Bearer ${token}`;
-    
+
     const respuesta = await fetch(recurso, config);
     if (respuesta.status === 401) {
         console.warn("Sesión expirada o sin permisos (401)");
         localStorage.clear();
-        window.location.href = 'index.html'; 
+        window.location.href = 'index.html';
         throw new Error("Acceso denegado (401)");
     }
     return respuesta;
@@ -55,11 +55,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // Leemos el usuario real (Si no está, sacamos el del localStorage global)
     const idUsuario = localStorage.getItem('usuario_id') || 1;
     let empleadoGuardado = JSON.parse(localStorage.getItem('empleado_pos'));
-    
+
     if (empleadoGuardado) {
         empleadoLogueado = empleadoGuardado; // Mantiene los datos exactos del cajero
     } else {
-        empleadoLogueado = { nombre: nombre, rol: rol, id: parseInt(idUsuario) }; 
+        empleadoLogueado = { nombre: nombre, rol: rol, id: parseInt(idUsuario) };
     }
     iniciarInterfazPOS();
 });
@@ -262,7 +262,7 @@ function actualizarInfoCabecera(turnoId) {
         const infoBar = document.querySelector(".ticket-info-bar span");
         if (infoBar) {
             const displayTurno = turnoId ? `#${turnoId}` : "---";
-            const numCaja = terminal_id ? terminal_id : "?"; 
+            const numCaja = terminal_id ? terminal_id : "?";
             infoBar.innerHTML = `<strong>Caja:</strong> ${numCaja} | <strong>Turno:</strong> ${displayTurno} | <strong>Cajero:</strong> ${empleadoLogueado.nombre}`;
         }
     }, 100);
@@ -780,6 +780,9 @@ function actualizarTabla() {
 
     const tbody = document.getElementById("listaTicket");
     tbody.innerHTML = ""; subtotalVenta = 0;
+    // Adentro de tu función que actualiza los totales:
+    let cantidadTotalArticulos = carrito.reduce((acumulador, item) => acumulador + parseFloat(item.cantidad), 0);
+    document.getElementById('visorCantidadArticulos').innerText = `(${cantidadTotalArticulos} Artículos)`;
 
     carrito.forEach((p, i) => {
         let precioF = p.precio_venta_final;
@@ -1743,7 +1746,7 @@ async function registrarMovimientoCaja(tipo) {
 
             const response = await apiFetch(`${obtenerBaseUrl()}/caja/movimiento`, {
                 method: 'POST',
-                headers: { 
+                headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}` // Usamos la llave maestra
                 },
@@ -1937,7 +1940,7 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
     const declarado = d.monto_final_declarado ?? montoDeclaradoManual;
     const diferencia = declarado - esperado;
 
-let html = `
+    let html = `
 <!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
     @page { margin: 0; } 
@@ -2006,9 +2009,9 @@ let html = `
         iframe.style.display = 'none';
         iframe.srcdoc = html;
         document.body.appendChild(iframe);
-        iframe.onload = () => { 
-            iframe.contentWindow.print(); 
-            setTimeout(() => { document.body.removeChild(iframe); }, 1000); 
+        iframe.onload = () => {
+            iframe.contentWindow.print();
+            setTimeout(() => { document.body.removeChild(iframe); }, 1000);
         };
     }
 }
@@ -2081,14 +2084,14 @@ async function cierreZ() {
 
             // Rescatamos el número de terminal antes de la explosión
             let terminalGuardada = localStorage.getItem('caja_fisica_id');
-            
+
             localStorage.clear(); // Detona la sesión
-            
+
             // Volvemos a guardar la terminal para que no pierda la memoria
             if (terminalGuardada) {
                 localStorage.setItem('caja_fisica_id', terminalGuardada);
             }
-            
+
             window.location.href = "index.html";
 
         } catch (e) {
@@ -2138,7 +2141,9 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
     try {
         // 1. Configuracion siempre desde la mochila (es más rápido y no requiere internet)
         const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio", direccion: "", cuit: "00-00000000-0", mensaje_ticket: "¡Gracias por su compra!" };
-
+        // Adentro de tu función que actualiza los totales:
+        let cantidadTotalArticulos = carrito.reduce((acumulador, item) => acumulador + parseFloat(item.cantidad), 0);
+        document.getElementById('visorCantidadArticulos').innerText = `(${cantidadTotalArticulos} Artículos)`;
         let ticket;
 
         // 2. ¿Es un ticket normal o un ticket del bote salvavidas (Offline)?
@@ -2200,7 +2205,7 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
             }
         }
 
-let html = `
+        let html = `
             <!DOCTYPE html>
             <html>
             <head>
@@ -2248,7 +2253,7 @@ let html = `
         html += `
                     <tr><td colspan="4"><div class="divisor"></div></td></tr>
                 </table>
-                <div style="display: flex; justify-content: space-between;"><span>SUBTOTAL:</span><span>$ ${(ticket.totales.subtotal_articulos).toFixed(2)}</span></div>
+                <div style="display: flex; justify-content: space-between;"><span>SUBTOTAL (${cantidadTotalArticulos} art.):</span><span>$ ${(ticket.totales.subtotal_articulos).toFixed(2)}</span></div>
         `;
 
         let ahorro = 0;
@@ -2720,7 +2725,7 @@ function actualizarEstadoRedVisual(estaOnline) {
     const btnCajaF10 = document.querySelector('[onclick="modalGestion.show()"]');
     const btnFiados = document.querySelector('[onclick="abrirModalCobroFiado()"]');
     const btnMayorista = document.querySelector('[onclick="abrirCobroPedidoMayorista()"]');
-    
+
     // Agarramos el nuevo indicador sutil del HTML
     const indicador = document.getElementById('indicadorRed');
     if (!indicador) return;
@@ -2778,7 +2783,7 @@ async function guardarFaltante() {
 
         modalFaltantes.hide();
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Anotado para pedir', showConfirmButton: false, timer: 1500 });
-        
+
         // Devolvemos el foco al lector láser para no interrumpir el flujo de la caja
         setTimeout(() => document.getElementById('inputScan').focus(), 500);
 
@@ -2787,7 +2792,7 @@ async function guardarFaltante() {
         let faltantesOffline = JSON.parse(localStorage.getItem('faltantes_offline')) || [];
         faltantesOffline.push({ nombre, obs, fecha: new Date().toISOString() });
         localStorage.setItem('faltantes_offline', JSON.stringify(faltantesOffline));
-        
+
         modalFaltantes.hide();
         Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Guardado offline', showConfirmButton: false, timer: 1500 });
         setTimeout(() => document.getElementById('inputScan').focus(), 500);
