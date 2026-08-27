@@ -31,7 +31,7 @@ async function cargarDashboardCompleto() {
 // 1. FINANZAS (Rutas corregidas sin /reportes)
 async function cargarMeticasFinancieras() {
     try {
-        const res = await apiFetchSeguro('/ganancia_neta'); 
+        const res = await apiFetchSeguro('/reportes/ganancia_neta'); 
         const data = await res.json();
         if (!data.error) {
             const rf = data.resumen_financiero;
@@ -50,7 +50,7 @@ async function cargarMeticasFinancieras() {
 // 2. OPERATIVIDAD DEL DÍA
 async function cargarOperatividadDia() {
     try {
-        const res = await apiFetchSeguro('/dashboard/datos');
+        const res = await apiFetchSeguro('/reportes/dashboard/datos');
         const data = await res.json();
         if (!data.error) {
             document.getElementById('dash-tickets-hoy').innerText = data.hoy.tickets;
@@ -96,7 +96,7 @@ function renderizarGrafico(datos) {
 async function verDetalleHora(hora) {
     Swal.fire({ title: 'Buscando ventas...', didOpen: () => Swal.showLoading() });
     try {
-        const res = await apiFetchSeguro(`/detalle_ventas_hora?hora=${hora}`);
+        const res = await apiFetchSeguro(`/reportes/detalle_ventas_hora?hora=${hora}`);
         const data = await res.json();
         
         let html = `<div class="table-responsive"><table class="table table-dark table-sm text-start align-middle"><thead><tr><th style="width:50%">Producto</th><th class="text-center">Cant.</th><th class="text-end">Monto</th></tr></thead><tbody>`;
@@ -119,7 +119,7 @@ async function cargarRankingVentas() {
     lista.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-4">Filtrando...</td></tr>';
     
     try {
-        const res = await apiFetchSeguro(`/ranking_ventas?periodo=${periodo}`);
+        const res = await apiFetchSeguro(`/reportes/ranking_ventas?periodo=${periodo}`);
         const data = await res.json();
         lista.innerHTML = '';
         
@@ -141,7 +141,7 @@ async function cargarRankingVentas() {
 // 4. ALERTAS (CRÍTICO Y VENCIMIENTOS)
 async function cargarAlertasYVencimientos() {
     try {
-        const res = await apiFetchSeguro('/alertas');
+        const res = await apiFetchSeguro('/reportes/alertas');
         const data = await res.json();
         
         const listaStock = document.getElementById('lista-stock');
@@ -189,7 +189,7 @@ async function cargarAlertasYVencimientos() {
 async function cargarBajaRotacion() {
     const lista = document.getElementById('lista-estancados');
     try {
-        const res = await apiFetchSeguro('/baja_rotacion');
+        const res = await apiFetchSeguro('/reportes/baja_rotacion');
         const data = await res.json();
         lista.innerHTML = '';
         
@@ -219,7 +219,7 @@ async function lanzarOfertaModal(id, nombre, motivo) {
     
     try {
         // Buscamos el producto en TUS rutas de productos
-        const resProd = await apiFetchSeguro(`/productos/ver/${id}`);
+        const resProd = await apiFetchSeguro(`/reportes/productos/ver/${id}`);
         const prod = await resProd.json();
         
         if (prod.error) throw new Error("No se pudo leer el costo");
@@ -254,7 +254,7 @@ async function lanzarOfertaModal(id, nombre, motivo) {
 
         if (descuento) {
             Swal.fire({ title: 'Actualizando precios...', didOpen: () => Swal.showLoading() });
-            const res = await apiFetchSeguro('/lanzar_oferta', {
+            const res = await apiFetchSeguro('/reportes/lanzar_oferta', {
                 method: 'POST',
                 body: JSON.stringify({ producto_id: id, porcentaje_descuento: parseFloat(descuento), motivo: motivo })
             });
