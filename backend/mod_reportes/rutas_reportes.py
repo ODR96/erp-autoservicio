@@ -8,20 +8,20 @@ from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 router = APIRouter()
 
+# 1. ACTUALIZAMOS EL MODELO PARA SABER QUIÉN PIDE
 class ProductoFaltante(BaseModel):
     descripcion: str
     cantidad: float = 1.0
     notas: str = ""
+    usuario_nombre: str = "Desconocido" # <-- NUEVO: Atrapamos al responsable
 
 # --- 1. ALERTAS DEL DASHBOARD (Para ver a la mañana) ---
-@router.get("/alertas")
+@router.get("/alertas", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def obtener_alertas_dashboard():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-
     try:
-# A. Stock Crítico: Excluye los combos para evitar falsos positivos
         cursor.execute('''
             SELECT p.nombre, p.stock_minimo_alerta, 
                    IFNULL((SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo'), 0) as stock_actual
@@ -32,9 +32,9 @@ def obtener_alertas_dashboard():
         ''')
         alertas_stock = [dict(row) for row in cursor.fetchall()]
 
-        # B. Vencimientos Próximos: Usa tu columna real 'dias_alerta_vencimiento' y excluye combos
+        # EL ARREGLO: Agregamos p.id as producto_id
         cursor.execute('''
-            SELECT p.nombre, l.numero_lote_proveedor, l.fecha_vencimiento, l.cantidad_disponible 
+            SELECT p.id as producto_id, p.nombre, l.numero_lote_proveedor, l.fecha_vencimiento, l.cantidad_disponible 
             FROM lotes_stock l
             JOIN productos p ON l.producto_id = p.id
             WHERE l.cantidad_disponible > 0 
@@ -44,25 +44,9 @@ def obtener_alertas_dashboard():
             ORDER BY l.fecha_vencimiento ASC
         ''')
         alertas_vencimiento = [dict(row) for row in cursor.fetchall()]
-
+        return {"alertas_stock_critico": alertas_stock, "alertas_vencimientos": alertas_vencimiento}
+    finally:
         conexion.close()
-        return {
-            "alertas_stock_critico": alertas_stock,
-            "alertas_vencimientos": alertas_vencimiento
-        }
-    except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
 
 
 # --- 2. LA VERDAD DE LA MILANESA: GANANCIA NETA REAL ---
@@ -134,18 +118,55 @@ def calcular_ganancia_neta(mes: str = None):
             # 2. Si es un error de negocio tuyo, lo mostramos normal
             return {"error": mensaje_error}
     
-@router.post("/registrar_faltante")
+@router.post("/registrar_faltante", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_pedido_no_encontrado(p: ProductoFaltante):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
-    cursor.execute("INSERT INTO productos_solicitados_faltantes (descripcion_producto, cantidad_pedida, notas) VALUES (?, ?, ?)", 
-                   (p.descripcion, p.cantidad, p.notas))
+    
+    # 2. CREAMOS LA COLUMNA SI NO EXISTE (Migración automática silenciosa)
+    try:
+        cursor.execute("ALTER TABLE productos_solicitados_faltantes ADD COLUMN usuario_anoto TEXT DEFAULT 'Desconocido'")
+    except:
+        pass # Si ya existe la columna, ignora el error
+
+    # 3. GUARDAMOS CON EL DATO DEL EMPLEADO
+    cursor.execute('''
+        INSERT INTO productos_solicitados_faltantes (descripcion_producto, cantidad_pedida, notas, usuario_anoto) 
+        VALUES (?, ?, ?, ?)
+    ''', (p.descripcion, p.cantidad, p.notas, p.usuario_nombre))
+    
     conexion.commit()
     conexion.close()
-    return {"mensaje": "Anotado. Esto te va a ayudar a decidir la próxima compra a proveedores."}
+    return {"mensaje": "Anotado."}
+
+@router.get("/faltantes_pendientes", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def obtener_faltantes_pendientes():
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        # Ahora traemos también quién lo anotó
+        cursor.execute("SELECT rowid, descripcion_producto, cantidad_pedida, notas, usuario_anoto FROM productos_solicitados_faltantes ORDER BY rowid DESC")
+        faltantes = [dict(row) for row in cursor.fetchall()]
+        return {"faltantes": faltantes}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conexion.close()
+
+@router.delete("/resolver_faltante/{faltante_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def borrar_faltante_resuelto(faltante_id: int):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        cursor.execute("DELETE FROM productos_solicitados_faltantes WHERE rowid = ?", (faltante_id,))
+        conexion.commit()
+        return {"mensaje": "Resuelto"}
+    finally:
+        conexion.close()
 
 # --- 2. RANKING DE PRODUCTOS (Top Ventas) ---
-@router.get("/ranking_ventas")
+@router.get("/ranking_ventas", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -175,32 +196,37 @@ def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
     return [dict(r) for r in ranking]
 
 # --- 3. BAJA ROTACIÓN (Los "Clavos" que no se mueven) ---
-@router.get("/baja_rotacion")
+@router.get("/baja_rotacion", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def productos_sin_salida():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
-    # Buscamos productos que TIENEN stock, pero NO figuran en ventas en los últimos 30 días
-    query = '''
-        SELECT p.nombre, 
-               (SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo') as stock_estancado
-        FROM productos p
-        WHERE stock_estancado > 0
-        AND p.id NOT IN (
-            SELECT vd.producto_id
-            FROM ventas_detalle vd
-            JOIN ventas_cabecera vc ON vd.venta_id = vc.id
-            WHERE date(vc.fecha_hora) >= date('now', '-30 days')
-        )
-    '''
-    cursor.execute(query)
-    estancados = cursor.fetchall()
-    conexion.close()
-    return [dict(e) for e in estancados]
+    try:
+        # EL ARREGLO: Calcula dias_clavado y filtra los ingresados hoy
+        query = '''
+            SELECT p.id as producto_id, p.nombre, 
+                   SUM(l.cantidad_disponible) as stock_estancado,
+                   CAST(julianday('now') - julianday(MIN(l.fecha_ingreso)) AS INTEGER) as dias_clavado
+            FROM productos p
+            JOIN lotes_stock l ON p.id = l.producto_id
+            WHERE l.cantidad_disponible > 0 AND l.estado_lote = 'Activo'
+            AND l.fecha_ingreso <= date('now', '-30 days')
+            AND p.id NOT IN (
+                SELECT vd.producto_id
+                FROM ventas_detalle vd
+                JOIN ventas_cabecera vc ON vd.venta_id = vc.id
+                WHERE date(vc.fecha_hora) >= date('now', '-30 days')
+            )
+            GROUP BY p.id
+        '''
+        cursor.execute(query)
+        estancados = [dict(e) for e in cursor.fetchall()]
+        return estancados
+    finally:
+        conexion.close()
 
 # --- 4. VENTAS POR MÉTODO DE PAGO (¿Efectivo o Tarjeta?) ---
-@router.get("/ventas_por_pago")
+@router.get("/ventas_por_pago", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def ventas_por_metodo():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -222,7 +248,7 @@ class LanzarOferta(BaseModel):
     porcentaje_descuento: float # Ej: 20 para un 20% OFF
     motivo: str # "Vencimiento Cercano" o "Baja Rotación"
 
-@router.post("/lanzar_oferta")
+@router.post("/lanzar_oferta", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def crear_oferta_urgente(oferta: LanzarOferta):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -266,3 +292,27 @@ def crear_oferta_urgente(oferta: LanzarOferta):
                 
             # 2. Si es un error de negocio tuyo, lo mostramos normal
             return {"error": mensaje_error}
+        
+        
+@router.get("/detalle_ventas_hora", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def detalle_ventas_por_hora(hora: str):
+    hora_corta = hora.split(":")[0]
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        query = '''
+            SELECT p.nombre, SUM(vd.cantidad) as cantidad, SUM(vd.subtotal) as recaudado
+            FROM ventas_detalle vd
+            JOIN ventas_cabecera vc ON vd.venta_id = vc.id
+            JOIN productos p ON vd.producto_id = p.id
+            WHERE date(vc.fecha_hora) = date('now')
+            AND strftime('%H', vc.fecha_hora) = ?
+            GROUP BY p.id
+            ORDER BY cantidad DESC
+        '''
+        cursor.execute(query, (hora_corta,))
+        detalle = [dict(row) for row in cursor.fetchall()]
+        return {"hora": hora, "detalle": detalle}
+    finally:
+        conexion.close()

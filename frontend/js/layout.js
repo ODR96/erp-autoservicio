@@ -1,7 +1,7 @@
 // ========================================================
 // CONFIGURACIÓN GLOBAL
 // ========================================================
-const APP_VERSION = "v1.0.22"; // Modificá este número antes de cada compilación
+const APP_VERSION = "v1.0.23"; // Modificá este número antes de cada compilación
 
 function obtenerBaseUrl() {
     const dominio = window.location.hostname;

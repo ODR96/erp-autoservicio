@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="css/estilos.css">
 </head>
+
 <body>
 
     <div id="layout-sidebar-placeholder"></div>
@@ -22,18 +24,25 @@
 
             <div class="card-custom">
                 <ul class="nav nav-tabs flex-nowrap overflow-auto" id="proveedoresTabs" style="white-space: nowrap;">
-                    <li class="nav-item"><button class="nav-link active" onclick="cambiarPestanaProv('directorio', event)"><i class="bi bi-journal-richtext"></i> Directorio</button></li>
-                    <li class="nav-item"><button class="nav-link" onclick="cambiarPestanaProv('ingreso', event)"><i class="bi bi-truck"></i> Ingreso de Facturas</button></li>
-                    <li class="nav-item"><button class="nav-link" onclick="cambiarPestanaProv('ctacte', event)"><i class="bi bi-wallet2"></i> Cta. Cte. y Pagos</button></li>
+                    <li class="nav-item"><button class="nav-link active"
+                            onclick="cambiarPestanaProv('directorio', event)"><i class="bi bi-journal-richtext"></i>
+                            Directorio</button></li>
+                    <li class="nav-item"><button class="nav-link" onclick="cambiarPestanaProv('ingreso', event)"><i
+                                class="bi bi-truck"></i> Ingreso de Facturas</button></li>
+                    <li class="nav-item"><button class="nav-link" onclick="cambiarPestanaProv('ctacte', event)"><i
+                                class="bi bi-wallet2"></i> Cta. Cte. y Pagos</button></li>
+                    <li class="nav-item"><button class="nav-link" onclick="cambiarPestanaProv('pedidos', event)"><i
+                                class="bi bi-cart-x"></i> Faltantes y Pedidos</button></li>
                 </ul>
 
                 <div class="tab-content p-4">
-                    
+
                     <div class="tab-pane active" id="tab-prov-directorio">
                         <div class="d-flex justify-content-between mb-3">
                             <div class="input-group w-50">
                                 <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
-                                <input type="text" class="form-control border-start-0 ps-0" id="inputBuscarProv" placeholder="Buscar proveedor...">
+                                <input type="text" class="form-control border-start-0 ps-0" id="inputBuscarProv"
+                                    placeholder="Buscar proveedor...">
                             </div>
                             <button class="btn btn-primary fw-bold shadow-sm" onclick="abrirModalProveedor()">
                                 <i class="bi bi-plus-lg"></i> NUEVO PROVEEDOR
@@ -52,7 +61,9 @@
                                     </tr>
                                 </thead>
                                 <tbody id="tablaProveedoresBody">
-                                    <tr><td colspan="6" class="text-muted py-4">Cargando proveedores...</td></tr>
+                                    <tr>
+                                        <td colspan="6" class="text-muted py-4">Cargando proveedores...</td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -66,7 +77,8 @@
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label fw-bold small text-primary">2. N° Factura / Remito</label>
-                                <input type="text" id="inputNumFactura" class="form-control" placeholder="Ej: 0001-00004567">
+                                <input type="text" id="inputNumFactura" class="form-control"
+                                    placeholder="Ej: 0001-00004567">
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label fw-bold small text-primary">3. Condición</label>
@@ -80,8 +92,10 @@
                         <div class="row g-3 mb-3">
                             <div class="col-md-8">
                                 <div class="input-group">
-                                    <span class="input-group-text bg-white text-muted"><i class="bi bi-upc-scan"></i></span>
-                                    <input type="text" id="inputScanCompra" class="form-control border-start-0" placeholder="Escanear código o buscar producto para agregar a la factura...">
+                                    <span class="input-group-text bg-white text-muted"><i
+                                            class="bi bi-upc-scan"></i></span>
+                                    <input type="text" id="inputScanCompra" class="form-control border-start-0"
+                                        placeholder="Escanear código o buscar producto para agregar a la factura...">
                                 </div>
                             </div>
                         </div>
@@ -99,30 +113,38 @@
                                     </tr>
                                 </thead>
                                 <tbody id="tablaIngresoBody">
-                                    <tr><td colspan="6" class="text-muted py-4">La factura está vacía. Escanee productos.</td></tr>
+                                    <tr>
+                                        <td colspan="6" class="text-muted py-4">La factura está vacía. Escanee
+                                            productos.</td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
 
-<div class="d-flex justify-content-between align-items-center bg-light p-3 rounded border">
-    <button class="btn btn-outline-danger fw-bold" onclick="limpiarFactura()">Anular Carga</button>
+                        <div class="d-flex justify-content-between align-items-center bg-light p-3 rounded border">
+                            <button class="btn btn-outline-danger fw-bold" onclick="limpiarFactura()">Anular
+                                Carga</button>
 
-    <div class="d-flex align-items-center justify-content-end flex-grow-1">
-        <div class="me-4 text-end">
-            <label class="form-label fw-bold text-muted mb-0 small">Cargos Extra (IVA/Flete) $</label>
-            <input type="number" id="inputCargosExtra" class="form-control form-control-lg text-end fw-bold border-secondary" value="0" step="0.01" style="width: 160px;" oninput="actualizarTotalVista()">
-        </div>
+                            <div class="d-flex align-items-center justify-content-end flex-grow-1">
+                                <div class="me-4 text-end">
+                                    <label class="form-label fw-bold text-muted mb-0 small">Cargos Extra (IVA/Flete)
+                                        $</label>
+                                    <input type="number" id="inputCargosExtra"
+                                        class="form-control form-control-lg text-end fw-bold border-secondary" value="0"
+                                        step="0.01" style="width: 160px;" oninput="actualizarTotalVista()">
+                                </div>
 
-        <div class="text-end border-start ps-4">
-            <span class="fs-5 text-muted fw-bold d-block mb-1">TOTAL FACTURA:</span>
-            <span class="display-6 fw-bold text-primary" id="totalFacturaVista">$ 0.00</span>
-        </div>
+                                <div class="text-end border-start ps-4">
+                                    <span class="fs-5 text-muted fw-bold d-block mb-1">TOTAL FACTURA:</span>
+                                    <span class="display-6 fw-bold text-primary" id="totalFacturaVista">$ 0.00</span>
+                                </div>
 
-        <button class="btn btn-success btn-lg fw-bold shadow-sm ms-4" onclick="confirmarIngresoMercaderia()">
-            <i class="bi bi-check2-all"></i> GUARDAR INGRESO
-        </button>
-    </div>
-</div>
+                                <button class="btn btn-success btn-lg fw-bold shadow-sm ms-4"
+                                    onclick="confirmarIngresoMercaderia()">
+                                    <i class="bi bi-check2-all"></i> GUARDAR INGRESO
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="tab-pane" id="tab-prov-ctacte">
@@ -137,28 +159,37 @@
                                 <div id="panelPagoProv" class="d-none">
                                     <h4 class="fw-bold text-primary" id="nombreProvDeuda">Nombre Proveedor</h4>
                                     <div class="alert alert-danger d-inline-block py-2 mb-4 shadow-sm">
-                                        <span class="fw-bold small text-uppercase">Deuda Total:</span> 
+                                        <span class="fw-bold small text-uppercase">Deuda Total:</span>
                                         <span class="fs-4 fw-bold ms-2" id="montoProvDeuda">$ 0.00</span>
                                     </div>
 
-                                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
-                                        <h6 class="fw-bold text-muted mb-0"><i class="bi bi-cash-coin"></i> Registrar Nuevo Pago</h6>
-                                        <button class="btn btn-sm btn-outline-info fw-bold" onclick="verHistorialPagos()"><i class="bi bi-receipt"></i> Historial de Pagos</button>
+                                    <div
+                                        class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                                        <h6 class="fw-bold text-muted mb-0"><i class="bi bi-cash-coin"></i> Registrar
+                                            Nuevo Pago</h6>
+                                        <button class="btn btn-sm btn-outline-info fw-bold"
+                                            onclick="verHistorialPagos()"><i class="bi bi-receipt"></i> Historial de
+                                            Pagos</button>
                                     </div>
-                                    
+
                                     <div class="row g-3 mb-3">
                                         <div class="col-md-5">
                                             <label class="form-label small fw-bold">Monto a Pagar</label>
                                             <div class="input-group">
                                                 <span class="input-group-text fw-bold">$</span>
-                                                <input type="number" id="montoPagoProv" class="form-control form-control-lg fw-bold text-success" placeholder="0.00">
+                                                <input type="number" id="montoPagoProv"
+                                                    class="form-control form-control-lg fw-bold text-success"
+                                                    placeholder="0.00">
                                             </div>
                                         </div>
                                         <div class="col-md-7">
                                             <label class="form-label small fw-bold">Método de Pago / Origen</label>
-                                            <select id="metodoPagoProv" class="form-select form-select-lg" onchange="toggleCamposCheque()">
-                                                <option value="EFECTIVO CAJA">Efectivo (De la Caja Registradora)</option>
-                                                <option value="EFECTIVO BOLSILLO">Efectivo (Bolsillo / Caja Fuerte)</option>
+                                            <select id="metodoPagoProv" class="form-select form-select-lg"
+                                                onchange="toggleCamposCheque()">
+                                                <option value="EFECTIVO CAJA">Efectivo (De la Caja Registradora)
+                                                </option>
+                                                <option value="EFECTIVO BOLSILLO">Efectivo (Bolsillo / Caja Fuerte)
+                                                </option>
                                                 <option value="Transferencia">Transferencia Bancaria</option>
                                                 <option value="Cheque">Emisión de Cheque</option>
                                             </select>
@@ -169,25 +200,30 @@
                                         <div class="row g-2">
                                             <div class="col-md-4">
                                                 <label class="small fw-bold text-muted">N° de Cheque</label>
-                                                <input type="text" id="chqNumero" class="form-control form-control-sm" placeholder="Ej: 45678912">
+                                                <input type="text" id="chqNumero" class="form-control form-control-sm"
+                                                    placeholder="Ej: 45678912">
                                             </div>
                                             <div class="col-md-4">
                                                 <label class="small fw-bold text-muted">Banco</label>
-                                                <input type="text" id="chqBanco" class="form-control form-control-sm" placeholder="Ej: Banco Formosa">
+                                                <input type="text" id="chqBanco" class="form-control form-control-sm"
+                                                    placeholder="Ej: Banco Formosa">
                                             </div>
                                             <div class="col-md-4">
                                                 <label class="small fw-bold text-muted">Fecha de Cobro</label>
-                                                <input type="date" id="chqFechaCobro" class="form-control form-control-sm">
+                                                <input type="date" id="chqFechaCobro"
+                                                    class="form-control form-control-sm">
                                             </div>
                                         </div>
                                     </div>
 
                                     <div class="mb-4">
                                         <label class="form-label small fw-bold">Observaciones / N° Recibo</label>
-                                        <input type="text" id="obsPagoProv" class="form-control" placeholder="Opcional...">
+                                        <input type="text" id="obsPagoProv" class="form-control"
+                                            placeholder="Opcional...">
                                     </div>
 
-                                    <button class="btn btn-warning w-100 fw-bold btn-lg shadow-sm" onclick="registrarPagoProveedor()">
+                                    <button class="btn btn-warning w-100 fw-bold btn-lg shadow-sm"
+                                        onclick="registrarPagoProveedor()">
                                         <i class="bi bi-shield-check"></i> CONFIRMAR PAGO
                                     </button>
                                 </div>
@@ -200,6 +236,57 @@
                         </div>
                     </div>
 
+
+                    <div class="tab-pane" id="tab-prov-pedidos">
+                        <div class="row g-4">
+                            <!-- Columna Izquierda: Lo que piden en el mostrador -->
+                            <div class="col-md-6 border-end">
+                                <h5 class="fw-bold text-info mb-3"><i class="bi bi-person-raised-hand"></i> Anotados en
+                                    Caja (Urgencias)</h5>
+                                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                                    <table class="table table-hover align-middle">
+                                        <thead class="table-light sticky-top">
+                                            <tr>
+                                                <th>Producto / Pedido</th>
+                                                <th>Obs.</th>
+                                                <th class="text-center"><i class="bi bi-check2-all"></i></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="tablaFaltantesCaja">
+                                            <tr>
+                                                <td colspan="3" class="text-muted text-center py-4">Cargando
+                                                    faltantes...</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Columna Derecha: Alertas automáticas de tu base de datos -->
+                            <div class="col-md-6">
+                                <h5 class="fw-bold text-danger mb-3"><i class="bi bi-exclamation-triangle"></i> Alertas
+                                    de Stock Mínimo</h5>
+                                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                                    <table class="table table-sm table-hover align-middle text-center">
+                                        <thead class="table-light sticky-top">
+                                            <tr>
+                                                <th class="text-start">Producto</th>
+                                                <th>Disp.</th>
+                                                <th>Mínimo</th>
+                                                <th>Prov. Sugerido</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="tablaFaltantesSistema">
+                                            <tr>
+                                                <td colspan="4" class="text-muted text-center py-4">Cargando alertas...
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -209,7 +296,8 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content border-primary">
                 <div class="modal-header bg-primary text-white">
-                    <h5 class="modal-title fw-bold" id="tituloModalProv"><i class="bi bi-building-add"></i> Datos del Proveedor</h5>
+                    <h5 class="modal-title fw-bold" id="tituloModalProv"><i class="bi bi-building-add"></i> Datos del
+                        Proveedor</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body p-4">
@@ -230,12 +318,14 @@
                     </div>
                     <div class="mb-2">
                         <label class="form-label fw-bold small">Notas / Observaciones</label>
-                        <textarea id="provObs" class="form-control" rows="2" placeholder="Días de visita, medios de pago..."></textarea>
+                        <textarea id="provObs" class="form-control" rows="2"
+                            placeholder="Días de visita, medios de pago..."></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-primary fw-bold" onclick="guardarProveedor()">Guardar Proveedor</button>
+                    <button type="button" class="btn btn-primary fw-bold" onclick="guardarProveedor()">Guardar
+                        Proveedor</button>
                 </div>
             </div>
         </div>
@@ -243,7 +333,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    
+
     <script src="js/layout.js"></script>
     <script>
         // Funcionalidad básica de pestañas
@@ -268,4 +358,5 @@
     <script src="js/layout.js"></script>
     <script src="js/app_proveedores.js"></script>
 </body>
+
 </html>

@@ -781,7 +781,10 @@ function actualizarTabla() {
     const tbody = document.getElementById("listaTicket");
     tbody.innerHTML = ""; subtotalVenta = 0;
     // Adentro de tu función que actualiza los totales:
-    let cantidadTotalArticulos = carrito.reduce((acumulador, item) => acumulador + parseFloat(item.cantidad), 0);
+    let cantidadTotalArticulos = carrito.reduce((acumulador, item) => {
+            const esPesable = (item.unidad_medida || "un").toLowerCase().includes("kg") || item.tipo_venta === 'PESO';
+            return acumulador + (esPesable ? 1 : parseFloat(item.cantidad));
+        }, 0);
     document.getElementById('visorCantidadArticulos').innerText = `(${cantidadTotalArticulos} Artículos)`;
 
     carrito.forEach((p, i) => {
@@ -2142,7 +2145,10 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
         // 1. Configuracion siempre desde la mochila (es más rápido y no requiere internet)
         const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Mi Negocio", direccion: "", cuit: "00-00000000-0", mensaje_ticket: "¡Gracias por su compra!" };
         // Adentro de tu función que actualiza los totales:
-        let cantidadTotalArticulos = carrito.reduce((acumulador, item) => acumulador + parseFloat(item.cantidad), 0);
+        let cantidadTotalArticulos = carrito.reduce((acumulador, item) => {
+            const esPesable = (item.unidad_medida || "un").toLowerCase().includes("kg") || item.tipo_venta === 'PESO';
+            return acumulador + (esPesable ? 1 : parseFloat(item.cantidad));
+        }, 0);
         document.getElementById('visorCantidadArticulos').innerText = `(${cantidadTotalArticulos} Artículos)`;
         let ticket;
 
@@ -2423,12 +2429,13 @@ async function cargarCategoriasRapidas() {
         contenedor.innerHTML = '';
 
         data.categorias.forEach(cat => {
+            // Le inyectamos el color oscuro a la letra y un formato más ajustado
             contenedor.innerHTML += `
-                <button class="btn-cat" 
-                        style="background-color: ${cat.color_fondo}; color: #333; border: 1px solid rgba(0,0,0,0.1);" 
+                <button class="btn-cat shadow-sm" 
+                        style="background-color: ${cat.color_fondo}; color: #1e293b !important; border: 1px solid rgba(0,0,0,0.1);" 
                         onclick="buscarProducto('${cat.palabra_clave}')">
-                    <i class="bi ${cat.icono} fs-4"></i>
-                    <span>${cat.nombre}</span>
+                    <i class="bi ${cat.icono} fs-3"></i>
+                    <span class="mt-1 fw-bold lh-1" style="font-size: 0.85rem;">${cat.nombre}</span>
                 </button>
             `;
         });
@@ -2768,14 +2775,15 @@ async function guardarFaltante() {
     Swal.fire({ title: 'Anotando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     try {
-        // Le pegamos al backend para que lo guarde en la base de datos de compras
-        const res = await apiFetch(`${obtenerBaseUrl()}/productos/faltantes/anotar`, {
+        // Le pegamos a la ruta REAL que ya tenías programada
+        const res = await apiFetch(`${obtenerBaseUrl()}/registrar_faltante`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                producto_solicitado: nombre,
-                observaciones: obs,
-                usuario_id: empleadoLogueado ? empleadoLogueado.id : 1
+                descripcion: nombre,
+                cantidad: 1.0,
+                notas: obs,
+                usuario_nombre: empleadoLogueado ? empleadoLogueado.nombre : "Caja Principal" // <-- LE MANDAMOS EL NOMBRE
             })
         });
 
