@@ -298,17 +298,17 @@ def crear_oferta_urgente(oferta: LanzarOferta):
         
 @router.get("/detalle_ventas_hora", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def detalle_ventas_por_hora(hora: str):
-    # La hora llega como "08:00", nos quedamos con "08"
-    hora_corta = hora.split(":")[0]
+    # MAGIA: .zfill(2) transforma un "8" en "08", o deja el "11" como "11"
+    hora_corta = hora.split(":")[0].zfill(2)
     
-    # Sacamos la fecha exacta de HOY en Argentina
+    # Buscamos el día exacto en Argentina
     fecha_hoy = datetime.now(ZONA_AR).strftime("%Y-%m-%d")
     
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # En vez de date('now'), le inyectamos la fecha_hoy exacta de Python
+        # Buscamos los tickets cruzando exactamente fecha y hora formadas
         query = '''
             SELECT id, numero_ticket, metodo_pago, total_venta, cajero_nombre
             FROM ventas_cabecera
@@ -322,7 +322,7 @@ def detalle_ventas_por_hora(hora: str):
         
         return {"hora": hora, "tickets": tickets}
     except Exception as e:
-        print(f"Error en detalle_hora: {e}")
+        print(f"🚨 Error en detalle_hora: {e}")
         return {"error": str(e)}
     finally:
         conexion.close()
