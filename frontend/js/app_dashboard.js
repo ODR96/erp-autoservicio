@@ -104,20 +104,20 @@ function renderizarGrafico(datos) {
 async function verDetalleHora(hora) {
     Swal.fire({ title: 'Buscando tickets...', didOpen: () => Swal.showLoading() });
     try {
-        const res = await apiFetchSeguro(`/detalle_ventas_hora?hora=${hora}`);
+        const res = await apiFetchSeguro(`/reportes/detalle_ventas_hora?hora=${hora}`);
         const data = await res.json();
         
         let html = `<div class="table-responsive"><table class="table table-dark table-sm text-start align-middle">
             <thead><tr><th>Ticket</th><th>Método</th><th class="text-end">Total</th><th></th></tr></thead><tbody>`;
             
         if(!data.tickets || data.tickets.length === 0) {
-            html += `<tr><td colspan="4" class="text-center text-muted py-3">No hay tickets emitidos en esta hora.</td></tr>`;
+            html += `<tr><td colspan="4" class="text-center text-muted py-3">No hay tickets en esta hora.</td></tr>`;
         } else {
             data.tickets.forEach(t => { 
                 html += `<tr>
-                    <td class="text-white fw-bold">${t.numero_ticket}</td>
-                    <td><span class="badge bg-secondary">${t.metodo_pago}</span></td>
-                    <td class="text-end text-success fw-bold">$${t.total_venta.toFixed(2)}</td>
+                    <td class="text-white fw-bold">${t.numero_ticket}<br><small class="text-muted"><i class="bi bi-person"></i> ${t.cajero_nombre}</small></td>
+                    <td><span class="badge bg-primary">${t.metodo_pago}</span></td>
+                    <td class="text-end text-success fw-bold fs-6">$${t.total_venta.toFixed(2)}</td>
                     <td class="text-center">
                         <button class="btn btn-sm btn-outline-info py-0" onclick="verDetalleTicketAdmin(${t.id})" title="Ver Detalles"><i class="bi bi-eye"></i></button>
                     </td>
@@ -133,15 +133,15 @@ async function verDetalleHora(hora) {
 window.verDetalleTicketAdmin = async function(ventaId) {
     Swal.fire({ title: 'Abriendo ticket...', didOpen: () => Swal.showLoading() });
     try {
-        // Le pegamos directo a la ruta de ventas para leer el ticket
+        // Le pegamos directo a la ruta de ventas para leer el ticket (fijate tu prefijo)
         const res = await apiFetchSeguro(`/ventas/ticket/${ventaId}`);
         const data = await res.json();
         
         let html = `<div class="table-responsive"><table class="table table-dark table-sm text-start"><thead><tr><th>Cant.</th><th>Producto</th><th class="text-end">Monto</th></tr></thead><tbody>`;
         data.detalle_compra.forEach(d => {
-            html += `<tr><td>${d.cantidad}</td><td class="text-truncate" style="max-width:150px;">${d.nombre}</td><td class="text-end">$${d.subtotal.toFixed(2)}</td></tr>`;
+            html += `<tr><td class="fw-bold text-center">${d.cantidad}</td><td class="text-truncate" style="max-width:180px;">${d.nombre}</td><td class="text-end text-success">$${d.subtotal.toFixed(2)}</td></tr>`;
         });
-        html += `</tbody></table></div><h4 class="text-end text-success mt-2 fw-bold">Total: $${data.totales.total_a_pagar.toFixed(2)}</h4>`;
+        html += `</tbody></table></div><h4 class="text-end text-success mt-3 fw-bold">Total: $${data.totales.total_a_pagar.toFixed(2)}</h4>`;
         
         Swal.fire({ title: `<i class="bi bi-receipt"></i> Ticket #${ventaId}`, html: html, width: '500px', showCloseButton: true, showConfirmButton: false });
     } catch(e) { Swal.fire('Error', 'No se cargó el ticket.', 'error'); }
@@ -150,17 +150,26 @@ window.verDetalleTicketAdmin = async function(ventaId) {
 async function cargarVentasPorPago() {
     const lista = document.getElementById('lista-pagos');
     try {
-        const res = await apiFetchSeguro('/ventas_por_pago');
+        const res = await apiFetchSeguro('/reportes/ventas_por_pago');
         const data = await res.json();
         lista.innerHTML = '';
         if(!data || data.length === 0 || data.error) {
-            lista.innerHTML = '<tr><td class="text-center text-muted py-4">Sin datos</td></tr>';
+            lista.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-4">Sin datos</td></tr>';
         } else {
+            // 1. Calculamos la suma de todos los métodos (El Gran Total)
+            const granTotal = data.reduce((acc, curr) => acc + curr.total_dinero, 0);
+
             data.forEach(m => {
+                // 2. Calculamos el porcentaje
+                const porcentaje = granTotal > 0 ? ((m.total_dinero / granTotal) * 100).toFixed(1) : 0;
+                
                 lista.innerHTML += `<tr>
-                    <td class="text-white fw-bold">${m.metodo_pago}</td>
-                    <td class="text-info text-end">${m.cantidad_transacciones} tx</td>
-                    <td class="text-success text-end fw-bold">${formatiarDinero(m.total_dinero)}</td>
+                    <td class="text-white fw-bold"><i class="bi bi-wallet2 text-muted me-2"></i> ${m.metodo_pago}</td>
+                    <td class="text-center">
+                        <span class="badge bg-secondary fs-6">${porcentaje}%</span><br>
+                        <small class="text-muted">${m.cantidad_transacciones} tx</small>
+                    </td>
+                    <td class="text-success text-end fw-bold fs-5">${formatiarDinero(m.total_dinero)}</td>
                 </tr>`;
             });
         }

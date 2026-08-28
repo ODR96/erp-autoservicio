@@ -301,7 +301,7 @@ def detalle_ventas_por_hora(hora: str):
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # AHORA BUSCAMOS TICKETS, NO PRODUCTOS
+        # AHORA BUSCAMOS TICKETS EN LA CABECERA (A prueba de balas)
         query = '''
             SELECT id, numero_ticket, metodo_pago, total_venta, cajero_nombre
             FROM ventas_cabecera
@@ -313,5 +313,8 @@ def detalle_ventas_por_hora(hora: str):
         cursor.execute(query, (hora_corta,))
         tickets = [dict(row) for row in cursor.fetchall()]
         return {"hora": hora, "tickets": tickets}
+    except Exception as e:
+        print(f"🚨 ERROR SQL en detalle hora: {e}")
+        return {"error": str(e)}
     finally:
         conexion.close()
