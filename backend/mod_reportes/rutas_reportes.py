@@ -301,18 +301,17 @@ def detalle_ventas_por_hora(hora: str):
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
+        # AHORA BUSCAMOS TICKETS, NO PRODUCTOS
         query = '''
-            SELECT p.nombre, SUM(vd.cantidad) as cantidad, SUM(vd.subtotal) as recaudado
-            FROM ventas_detalle vd
-            JOIN ventas_cabecera vc ON vd.venta_id = vc.id
-            JOIN productos p ON vd.producto_id = p.id
-            WHERE date(vc.fecha_hora) = date('now')
-            AND strftime('%H', vc.fecha_hora) = ?
-            GROUP BY p.id
-            ORDER BY cantidad DESC
+            SELECT id, numero_ticket, metodo_pago, total_venta, cajero_nombre
+            FROM ventas_cabecera
+            WHERE date(fecha_hora) = date('now')
+            AND strftime('%H', fecha_hora) = ?
+            AND estado != 'ANULADA'
+            ORDER BY fecha_hora DESC
         '''
         cursor.execute(query, (hora_corta,))
-        detalle = [dict(row) for row in cursor.fetchall()]
-        return {"hora": hora, "detalle": detalle}
+        tickets = [dict(row) for row in cursor.fetchall()]
+        return {"hora": hora, "tickets": tickets}
     finally:
         conexion.close()

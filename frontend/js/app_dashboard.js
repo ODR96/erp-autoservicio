@@ -26,6 +26,7 @@ async function cargarDashboardCompleto() {
     cargarRankingVentas();
     cargarAlertasYVencimientos();
     cargarBajaRotacion();
+    cargarVentasPorPago();
 }
 
 // 1. FINANZAS
@@ -101,23 +102,69 @@ function renderizarGrafico(datos) {
 
 // Click en el gráfico
 async function verDetalleHora(hora) {
-    Swal.fire({ title: 'Buscando ventas...', didOpen: () => Swal.showLoading() });
+    Swal.fire({ title: 'Buscando tickets...', didOpen: () => Swal.showLoading() });
     try {
-        // RUTA CORREGIDA
-        const res = await apiFetchSeguro(`/reportes/detalle_ventas_hora?hora=${hora}`);
+        const res = await apiFetchSeguro(`/detalle_ventas_hora?hora=${hora}`);
         const data = await res.json();
         
-        let html = `<div class="table-responsive"><table class="table table-dark table-sm text-start align-middle"><thead><tr><th style="width:50%">Producto</th><th class="text-center">Cant.</th><th class="text-end">Monto</th></tr></thead><tbody>`;
-        if(!data.detalle || data.detalle.length === 0) html += `<tr><td colspan="3" class="text-center text-muted py-3">No hay desglose</td></tr>`;
-        else {
-            data.detalle.forEach(d => { 
-                html += `<tr><td class="text-truncate" style="max-width:150px;" title="${d.nombre}">${d.nombre}</td><td class="text-center fw-bold">${d.cantidad}</td><td class="text-end text-success fw-bold">$${d.recaudado.toFixed(2)}</td></tr>`; 
+        let html = `<div class="table-responsive"><table class="table table-dark table-sm text-start align-middle">
+            <thead><tr><th>Ticket</th><th>Método</th><th class="text-end">Total</th><th></th></tr></thead><tbody>`;
+            
+        if(!data.tickets || data.tickets.length === 0) {
+            html += `<tr><td colspan="4" class="text-center text-muted py-3">No hay tickets emitidos en esta hora.</td></tr>`;
+        } else {
+            data.tickets.forEach(t => { 
+                html += `<tr>
+                    <td class="text-white fw-bold">${t.numero_ticket}</td>
+                    <td><span class="badge bg-secondary">${t.metodo_pago}</span></td>
+                    <td class="text-end text-success fw-bold">$${t.total_venta.toFixed(2)}</td>
+                    <td class="text-center">
+                        <button class="btn btn-sm btn-outline-info py-0" onclick="verDetalleTicketAdmin(${t.id})" title="Ver Detalles"><i class="bi bi-eye"></i></button>
+                    </td>
+                </tr>`; 
             });
         }
         html += `</tbody></table></div>`;
 
-        Swal.fire({ title: `Ventas de las ${hora}`, html: html, width: '600px', showCloseButton: true, showConfirmButton: false });
+        Swal.fire({ title: `Tickets de las ${hora}`, html: html, width: '600px', showCloseButton: true, showConfirmButton: false });
     } catch (e) { Swal.fire('Error', 'No se pudo cargar.', 'error'); }
+}
+
+window.verDetalleTicketAdmin = async function(ventaId) {
+    Swal.fire({ title: 'Abriendo ticket...', didOpen: () => Swal.showLoading() });
+    try {
+        // Le pegamos directo a la ruta de ventas para leer el ticket
+        const res = await apiFetchSeguro(`/ventas/ticket/${ventaId}`);
+        const data = await res.json();
+        
+        let html = `<div class="table-responsive"><table class="table table-dark table-sm text-start"><thead><tr><th>Cant.</th><th>Producto</th><th class="text-end">Monto</th></tr></thead><tbody>`;
+        data.detalle_compra.forEach(d => {
+            html += `<tr><td>${d.cantidad}</td><td class="text-truncate" style="max-width:150px;">${d.nombre}</td><td class="text-end">$${d.subtotal.toFixed(2)}</td></tr>`;
+        });
+        html += `</tbody></table></div><h4 class="text-end text-success mt-2 fw-bold">Total: $${data.totales.total_a_pagar.toFixed(2)}</h4>`;
+        
+        Swal.fire({ title: `<i class="bi bi-receipt"></i> Ticket #${ventaId}`, html: html, width: '500px', showCloseButton: true, showConfirmButton: false });
+    } catch(e) { Swal.fire('Error', 'No se cargó el ticket.', 'error'); }
+}
+
+async function cargarVentasPorPago() {
+    const lista = document.getElementById('lista-pagos');
+    try {
+        const res = await apiFetchSeguro('/ventas_por_pago');
+        const data = await res.json();
+        lista.innerHTML = '';
+        if(!data || data.length === 0 || data.error) {
+            lista.innerHTML = '<tr><td class="text-center text-muted py-4">Sin datos</td></tr>';
+        } else {
+            data.forEach(m => {
+                lista.innerHTML += `<tr>
+                    <td class="text-white fw-bold">${m.metodo_pago}</td>
+                    <td class="text-info text-end">${m.cantidad_transacciones} tx</td>
+                    <td class="text-success text-end fw-bold">${formatiarDinero(m.total_dinero)}</td>
+                </tr>`;
+            });
+        }
+    } catch(e) { console.warn("Fallo pagos", e); }
 }
 
 // 3. RANKING DINÁMICO
