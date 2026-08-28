@@ -227,23 +227,52 @@ def productos_sin_salida():
     finally:
         conexion.close()
 
-# --- 4. VENTAS POR MÉTODO DE PAGO (¿Efectivo o Tarjeta?) ---
 @router.get("/ventas_por_pago", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def ventas_por_metodo():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
-    query = '''
-        SELECT metodo_pago, COUNT(id) as cantidad_transacciones, SUM(total_venta) as total_dinero
-        FROM ventas_cabecera
-        WHERE strftime('%Y-%m', fecha_hora) = strftime('%Y-%m', 'now')
-        GROUP BY metodo_pago
-    '''
-    cursor.execute(query)
-    metodos = cursor.fetchall()
-    conexion.close()
-    return [dict(m) for m in metodos]
+    try:
+        query = '''
+            WITH VentasPuras AS (
+                -- 1. Buscamos las ventas donde todo se pagó de una sola forma (y no son anuladas)
+                SELECT metodo_pago, COUNT(id) as cantidad_transacciones, SUM(total_venta) as total_dinero
+                FROM ventas_cabecera
+                WHERE strftime('%Y-%m', fecha_hora) = strftime('%Y-%m', 'now')
+                AND metodo_pago != 'MIXTO'
+                AND estado != 'ANULADA'
+                GROUP BY metodo_pago
+            ),
+            VentasMixtas AS (
+                -- 2. Buscamos los pagos mixtos, y los desglosamos por su submétodo
+                SELECT vm.metodo_pago, COUNT(DISTINCT vc.id) as cantidad_transacciones, SUM(vm.monto) as total_dinero
+                FROM ventas_pagos_mixtos vm
+                JOIN ventas_cabecera vc ON vm.venta_id = vc.id
+                WHERE strftime('%Y-%m', vc.fecha_hora) = strftime('%Y-%m', 'now')
+                AND vc.estado != 'ANULADA'
+                GROUP BY vm.metodo_pago
+            )
+            -- 3. Unimos las dos tablas y sumamos si hay métodos iguales (Ej: Efectivo Puro + Efectivo del Mixto)
+            SELECT 
+                metodo_pago, 
+                SUM(cantidad_transacciones) as cantidad_transacciones, 
+                SUM(total_dinero) as total_dinero
+            FROM (
+                SELECT * FROM VentasPuras
+                UNION ALL
+                SELECT * FROM VentasMixtas
+            )
+            GROUP BY metodo_pago
+            ORDER BY total_dinero DESC
+        '''
+        cursor.execute(query)
+        metodos = [dict(row) for row in cursor.fetchall()]
+        return metodos
+    except Exception as e:
+        print(f"🚨 Error en ventas_por_pago: {e}")
+        return {"error": str(e)}
+    finally:
+        conexion.close()
 
 class LanzarOferta(BaseModel):
     producto_id: int
