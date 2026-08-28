@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import sqlite3
 from backend.database import obtener_conexion
 from fastapi import Depends
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 router = APIRouter()
+
+ZONA_AR = timezone(timedelta(hours=-3))
 
 # 1. ACTUALIZAMOS EL MODELO PARA SABER QUIÉN PIDE
 class ProductoFaltante(BaseModel):
@@ -296,25 +298,31 @@ def crear_oferta_urgente(oferta: LanzarOferta):
         
 @router.get("/detalle_ventas_hora", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def detalle_ventas_por_hora(hora: str):
+    # La hora llega como "08:00", nos quedamos con "08"
     hora_corta = hora.split(":")[0]
+    
+    # Sacamos la fecha exacta de HOY en Argentina
+    fecha_hoy = datetime.now(ZONA_AR).strftime("%Y-%m-%d")
+    
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # AHORA BUSCAMOS TICKETS EN LA CABECERA (A prueba de balas)
+        # En vez de date('now'), le inyectamos la fecha_hoy exacta de Python
         query = '''
             SELECT id, numero_ticket, metodo_pago, total_venta, cajero_nombre
             FROM ventas_cabecera
-            WHERE date(fecha_hora) = date('now')
+            WHERE date(fecha_hora) = ?
             AND strftime('%H', fecha_hora) = ?
             AND estado != 'ANULADA'
             ORDER BY fecha_hora DESC
         '''
-        cursor.execute(query, (hora_corta,))
+        cursor.execute(query, (fecha_hoy, hora_corta))
         tickets = [dict(row) for row in cursor.fetchall()]
+        
         return {"hora": hora, "tickets": tickets}
     except Exception as e:
-        print(f"🚨 ERROR SQL en detalle hora: {e}")
+        print(f"Error en detalle_hora: {e}")
         return {"error": str(e)}
     finally:
         conexion.close()
