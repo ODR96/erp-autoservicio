@@ -235,7 +235,7 @@ def ventas_por_metodo():
     try:
         query = '''
             WITH VentasPuras AS (
-                -- 1. Buscamos las ventas donde todo se pagó de una sola forma (y no son anuladas)
+                -- 1. Ventas puras (Toman el nombre tal cual viene de la caja principal)
                 SELECT metodo_pago, COUNT(id) as cantidad_transacciones, SUM(total_venta) as total_dinero
                 FROM ventas_cabecera
                 WHERE strftime('%Y-%m', fecha_hora) = strftime('%Y-%m', 'now')
@@ -244,25 +244,33 @@ def ventas_por_metodo():
                 GROUP BY metodo_pago
             ),
             VentasMixtas AS (
-                -- 2. Buscamos los pagos mixtos, y los desglosamos por su submétodo
-                SELECT vm.metodo_pago, COUNT(DISTINCT vc.id) as cantidad_transacciones, SUM(vm.monto) as total_dinero
+                -- 2. Ventas Mixtas (TRADUCIMOS los nombres internos para que coincidan con los puros)
+                SELECT 
+                    CASE 
+                        WHEN UPPER(vm.metodo_pago) = 'TARJETA' THEN 'Tarjeta / POS'
+                        WHEN UPPER(vm.metodo_pago) = 'TRANSFERENCIA' THEN 'Billetera Virtual / QR'
+                        WHEN UPPER(vm.metodo_pago) = 'EFECTIVO' THEN 'EFECTIVO'
+                        ELSE vm.metodo_pago 
+                    END as metodo_pago_traducido, 
+                    COUNT(DISTINCT vc.id) as cantidad_transacciones, 
+                    SUM(vm.monto) as total_dinero
                 FROM ventas_pagos_mixtos vm
                 JOIN ventas_cabecera vc ON vm.venta_id = vc.id
                 WHERE strftime('%Y-%m', vc.fecha_hora) = strftime('%Y-%m', 'now')
                 AND vc.estado != 'ANULADA'
-                GROUP BY vm.metodo_pago
+                GROUP BY metodo_pago_traducido
             )
-            -- 3. Unimos las dos tablas y sumamos si hay métodos iguales (Ej: Efectivo Puro + Efectivo del Mixto)
+            -- 3. Unimos y sumamos todo bajo los nombres ya unificados
             SELECT 
-                metodo_pago, 
+                metodo_pago_traducido as metodo_pago, 
                 SUM(cantidad_transacciones) as cantidad_transacciones, 
                 SUM(total_dinero) as total_dinero
             FROM (
-                SELECT * FROM VentasPuras
+                SELECT metodo_pago as metodo_pago_traducido, cantidad_transacciones, total_dinero FROM VentasPuras
                 UNION ALL
-                SELECT * FROM VentasMixtas
+                SELECT metodo_pago_traducido, cantidad_transacciones, total_dinero FROM VentasMixtas
             )
-            GROUP BY metodo_pago
+            GROUP BY metodo_pago_traducido
             ORDER BY total_dinero DESC
         '''
         cursor.execute(query)
