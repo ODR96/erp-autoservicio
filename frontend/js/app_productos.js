@@ -251,7 +251,11 @@ async function cargarCatalogo() {
             url += '?estado=1&alerta_stock=true'; 
         } else if (filtroSelect === 'vencimiento') {
             url += '?estado=1&alerta_vencimiento=true';
+        
+        } else if (filtroSelect === 'sincodigo') {
+            url += '?estado=1&sin_codigo=true';
         } else { 
+            
             url += `?estado=${filtroSelect}`; 
         }
         

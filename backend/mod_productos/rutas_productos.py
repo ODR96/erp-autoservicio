@@ -109,9 +109,8 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
             return {"error": mensaje_error}
 
 # --- 2. LEER / CATÁLOGO COMPLETO (R) ---
-# --- 2. LEER / CATÁLOGO COMPLETO (R) ---
 @router.get("/listar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, alerta_vencimiento: bool = False):
+def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, alerta_vencimiento: bool = False, sin_codigo: bool = False):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row 
     cursor = conexion.cursor()
@@ -170,6 +169,14 @@ def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, aler
                     pass # Si la fecha estaba mal escrita en la base, no rompemos el programa
                     
         return {"productos": productos_por_vencer}
+        
+    if sin_codigo:
+        productos_sin_codigo = []
+        for p in productos:
+            # Si es nulo, o si al quitarle los espacios queda vacío ("")
+            if not p["codigo_barras"] or str(p["codigo_barras"]).strip() == "":
+                productos_sin_codigo.append(p)
+        return {"productos": productos_sin_codigo}
         
     return {"productos": productos}
 
