@@ -2775,15 +2775,15 @@ async function guardarFaltante() {
     Swal.fire({ title: 'Anotando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     try {
-        // Le pegamos a la ruta REAL que ya tenías programada
-        const res = await apiFetch(`${obtenerBaseUrl()}/registrar_faltante`, {
+        // EL ARREGLO: Agregamos /reportes/ a la ruta para que Python lo atienda
+        const res = await apiFetch(`${obtenerBaseUrl()}/reportes/registrar_faltante`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 descripcion: nombre,
                 cantidad: 1.0,
                 notas: obs,
-                usuario_nombre: empleadoLogueado ? empleadoLogueado.nombre : "Caja Principal" // <-- LE MANDAMOS EL NOMBRE
+                usuario_nombre: empleadoLogueado ? empleadoLogueado.nombre : "Caja Principal"
             })
         });
 
@@ -2796,7 +2796,7 @@ async function guardarFaltante() {
         setTimeout(() => document.getElementById('inputScan').focus(), 500);
 
     } catch (e) {
-        // Plan B: Si se corta internet, lo anotamos en la libreta del navegador (Offline)
+        // Plan B: Si realmente se corta internet, ahí sí lo guardamos offline
         let faltantesOffline = JSON.parse(localStorage.getItem('faltantes_offline')) || [];
         faltantesOffline.push({ nombre, obs, fecha: new Date().toISOString() });
         localStorage.setItem('faltantes_offline', JSON.stringify(faltantesOffline));

@@ -24,8 +24,9 @@ def obtener_alertas_dashboard():
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
+        # EL ARREGLO: Agregamos p.proveedor_habitual_id a la consulta SELECT
         cursor.execute('''
-            SELECT p.nombre, p.stock_minimo_alerta, 
+            SELECT p.nombre, p.stock_minimo_alerta, p.proveedor_habitual_id,
                    IFNULL((SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo'), 0) as stock_actual
             FROM productos p
             WHERE stock_actual <= p.stock_minimo_alerta 

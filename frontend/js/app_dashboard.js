@@ -177,6 +177,9 @@ async function cargarAlertasYVencimientos() {
         const listaVenc = document.getElementById('lista-vencimientos');
         listaVenc.innerHTML = '';
         if (!data.error && data.alertas_vencimientos) {
+
+            document.getElementById('badge-vencimientos').innerText = data.alertas_vencimientos.length;
+            
             if (data.alertas_vencimientos.length === 0) {
                 listaVenc.innerHTML = '<tr><td colspan="2" class="text-center text-success py-4 fw-bold">Sin vencimientos cercanos</td></tr>';
             } else {
