@@ -10,7 +10,7 @@ let itemsBusquedaActuales = [];
 document.addEventListener("DOMContentLoaded", async () => {
     try {
         const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        const res = await fetch(`${obtenerBaseUrl()}/productos/listar`, { headers: { 'Authorization': `Bearer ${token}` } });
+        const res = await fetch(`${obtenerBaseUrl()}/productos/sincronizar_catalogo`, { headers: { 'Authorization': `Bearer ${token}` } });
         const data = await res.json();
         catalogoLocal = data.productos || [];
         await cargarColaDesdeDB();
@@ -430,4 +430,70 @@ function imprimirTodo(filtroSeleccionado) {
         window.print(); 
         zona.classList.add('d-none'); zona.innerHTML = ''; vaciarCola(); 
     });
+}
+
+async function encolarMasivamenteUI() {
+    // Acá capturás el ID de la categoría que querés imprimir (ej. desde un <select>)
+    const idCategoria = parseInt(document.getElementById('selectCategoriaCarteleria').value);
+    
+    Swal.fire({ title: 'Encolando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar_masivo`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tipo_filtro: 'categoria',
+                filtro_id: idCategoria,
+                tipo_cartel: 'Cenefa',
+                plantilla: 'Clasica'
+            })
+        });
+        
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        
+        Swal.fire('¡Éxito!', data.mensaje, 'success');
+        // Acá llamás a la función que actualiza la tablita de tu cola de impresión
+        cargarColaImpresion(); 
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
+async function encolarPorCategoria() {
+    const idCategoria = parseInt(document.getElementById('selectMasivoCarteleria').value);
+    const formato = document.getElementById('formatoMasivoCarteleria').value;
+
+    if (!idCategoria || isNaN(idCategoria)) {
+        return Swal.fire('Aviso', 'Seleccioná un rubro primero.', 'warning');
+    }
+
+    Swal.fire({ title: 'Generando etiquetas...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar_masivo`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tipo_filtro: 'categoria',
+                filtro_id: idCategoria,
+                tipo_cartel: formato,
+                plantilla: 'Clasica',
+                color_tema: '#000000'
+            })
+        });
+
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        Swal.fire('¡Encolado Masivo Exitoso!', data.mensaje, 'success');
+        
+        // Llamá a tu función que recarga la tablita visual de la cola
+        if (typeof cargarColaImpresion === 'function') {
+            cargarColaImpresion();
+        }
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
 }

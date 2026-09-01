@@ -70,37 +70,29 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
         ''', (producto.codigo_barras, producto.nombre, producto.categoria_id, producto.proveedor_habitual_id, producto.costo_sin_iva, producto.porcentaje_iva, producto.precio_venta_final, producto.stock_minimo_alerta, producto.dias_alerta_vencimiento, producto.unidad_medida, producto.unidades_por_bulto))
         
         nuevo_id = cursor.lastrowid 
-        lote_id = None
         if producto.cantidad_inicial > 0:
             cursor.execute('''
                 INSERT INTO lotes_stock (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento, cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Activo')
             ''', (nuevo_id, producto.numero_lote_proveedor, date.today().isoformat(), producto.fecha_vencimiento, producto.cantidad_inicial, producto.cantidad_inicial, producto.costo_real_ingreso))
             
-            lote_id = cursor.lastrowid
-            
         for comp in producto.componentes_combo:
             cursor.execute("INSERT INTO productos_combos (producto_padre_id, producto_hijo_id, cantidad_hijo) VALUES (?, ?, ?)", (nuevo_id, comp['id'], comp['cantidad']))
         for r in producto.reglas_mayoristas:
             cursor.execute("INSERT INTO promociones_volumen (producto_id, cantidad_minima, precio_oferta_unitario) VALUES (?, ?, ?)", (nuevo_id, r['cantidad'], r['precio']))
             
-        cursor.execute("INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso) VALUES (?, 'Cenefa', 1, 0)", (nuevo_id,))
+        # ACÁ BORRAMOS LA INYECCIÓN AUTOMÁTICA DE LA ETIQUETA
 
         conexion.commit()
         return {"mensaje": "¡Producto y Lote Inicial guardados!", "id": nuevo_id}
     except Exception as e:
-        if conexion:
-            conexion.rollback()
-            
+        if conexion: conexion.rollback()
         mensaje_error = str(e)
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
-            
         return {"error": mensaje_error}
     finally:
-        if conexion:
-            conexion.close()
+        if conexion: conexion.close()
 
 @router.get("/listar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_todos_los_productos(
@@ -217,10 +209,7 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
             if cursor.fetchone():
                 return {"error": "El código ya existe."}
 
-        cursor.execute("SELECT precio_venta_final FROM productos WHERE id = ?", (producto_id,))
-        precio_viejo = cursor.fetchone()['precio_venta_final']
-        if precio_viejo != datos.precio_venta_final:
-            cursor.execute("INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso) VALUES (?, 'Cenefa', 1, 0)", (producto_id,))
+        # ACÁ BORRAMOS LA COMPROBACIÓN DE PRECIO VIEJO Y LA INYECCIÓN AUTOMÁTICA DE LA ETIQUETA
 
         cursor.execute('''
             UPDATE productos 
@@ -241,18 +230,13 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
         conexion.commit()
         return {"mensaje": "Actualizado correctamente."}
     except Exception as e:
-        if conexion:
-            conexion.rollback()
-            
+        if conexion: conexion.rollback()
         mensaje_error = str(e)
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
-            
         return {"error": mensaje_error}
     finally:
-        if conexion:
-            conexion.close()
+        if conexion: conexion.close()
 
 @router.get("/ver/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def ver_producto_por_id(producto_id: int):
@@ -912,3 +896,41 @@ def descargar_catalogo_offline():
         return {"error": str(e)}
     finally:
         conexion.close()
+        
+class EncoladoMasivo(BaseModel):
+    tipo_filtro: str # 'categoria', 'proveedor', 'todos'
+    filtro_id: int
+    tipo_cartel: str = "Cenefa"
+    plantilla: str = "Clasica"
+    color_tema: str = "#000000"
+
+@router.post("/etiquetas/encolar_masivo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def encolar_etiquetas_masivo(datos: EncoladoMasivo):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        query = "SELECT id FROM productos WHERE activo = 1"
+        params = []
+        if datos.tipo_filtro == 'categoria' and datos.filtro_id > 0:
+            query += " AND categoria_id = ?"
+            params.append(datos.filtro_id)
+        elif datos.tipo_filtro == 'proveedor' and datos.filtro_id > 0:
+            query += " AND proveedor_habitual_id = ?"
+            params.append(datos.filtro_id)
+        
+        cursor.execute(query, tuple(params))
+        productos = cursor.fetchall()
+        
+        for p in productos:
+            cursor.execute('''
+                INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, plantilla, color_tema) 
+                VALUES (?, ?, 1, 0, ?, ?)
+            ''', (p[0], datos.tipo_cartel, datos.plantilla, datos.color_tema))
+            
+        conexion.commit()
+        return {"mensaje": f"Se enviaron {len(productos)} productos a la cola de impresión."}
+    except Exception as e:
+        if conexion: conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        if conexion: conexion.close()

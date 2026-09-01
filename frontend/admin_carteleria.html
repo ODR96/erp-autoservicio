@@ -122,6 +122,33 @@
                             </div>
                         </div>
                     </div>
+                    <div class="card border-primary mb-4 shadow-sm">
+                        <div class="card-header bg-primary text-white fw-bold">
+                            <i class="bi bi-printer-fill"></i> Encolado Masivo por Rubro
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-bold text-muted">Seleccione el Rubro a
+                                        imprimir:</label>
+                                    <!-- Asegurate de llenar este select con las categorías al cargar la página -->
+                                    <select id="selectMasivoCarteleria" class="form-select border-primary"></select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small fw-bold text-muted">Formato:</label>
+                                    <select id="formatoMasivoCarteleria" class="form-select">
+                                        <option value="Cenefa">Cenefa (Góndola)</option>
+                                        <option value="Cartel A4">Cartel A4 (Oferta)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <button class="btn btn-primary w-100 fw-bold" onclick="encolarPorCategoria()">
+                                        <i class="bi bi-send-plus"></i> Mandar a la Cola
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- PANEL DERECHO: COLA DE IMPRESIÓN -->
                     <div class="col-md-7">
