@@ -524,17 +524,31 @@ async function setModo(m) {
 function borrarUltimo() { if (carrito.length > 0) { carrito.pop(); actualizarTabla(); } inputScan.focus(); }
 
 inputScan.addEventListener("keyup", (e) => {
+    // NUEVO ATAJO: Si el cajero toca el símbolo "+" (ej: escribe 1500 y toca +)
+    if (e.key === "+") {
+        e.preventDefault();
+        let precioVarios = parseFloat(inputScan.value.replace('+', ''));
+        
+        if (!isNaN(precioVarios) && precioVarios > 0) {
+            inputScan.value = precioVarios; // Dejamos el número limpio
+            setModo('PRECIO'); // ¡LLAMAMOS A TU MODAL ORIGINAL!
+        } else {
+            inputScan.value = "";
+        }
+        return;
+    }
+
     if (e.key === "Enter") {
         let valorLimpio = inputScan.value.trim().toLowerCase();
 
-        // Si detecta un asterisco (Ej: "5*77912345" o "5 * 77912345")
+        // Multiplicador de cantidad (Ej: 5*77912345)
         if (valorLimpio.includes('*')) {
             let partes = valorLimpio.split('*');
             let cantidadIngresada = parseFloat(partes[0].trim());
 
             if (!isNaN(cantidadIngresada) && cantidadIngresada > 0) {
-                mult = cantidadIngresada; // Seteamos el multiplicador global
-                valorLimpio = partes[1].trim(); // Nos quedamos solo con el código
+                mult = cantidadIngresada; 
+                valorLimpio = partes[1].trim(); 
             }
         }
 
@@ -1909,7 +1923,12 @@ document.addEventListener('keydown', (e) => {
     if (e.key === "F3") { e.preventDefault(); abrirBuscadorAvanzado(); }
     if (e.key === "F4") { e.preventDefault(); borrarUltimo(); }
     if (e.key === "F5") { e.preventDefault(); anularVentaConAviso(); }
-    if (e.key === "F8") { e.preventDefault(); recuperarVenta(); }
+    if (e.key === "F7") { 
+        e.preventDefault(); 
+        if (inputScan.value.trim() !== "") {
+            setModo('PRECIO'); // Dispara tu modal si hay un número escrito
+        }
+    }    if (e.key === "F8") { e.preventDefault(); recuperarVenta(); }
     if (e.key === "F9") { e.preventDefault(); ponerEnEspera(); }
     if (e.key === "F10") { e.preventDefault(); modalGestion.show(); }
     if (e.key === "F12") { e.preventDefault(); prepararCobroEfectivo(); }
