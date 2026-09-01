@@ -6,6 +6,21 @@ const colorInstitucional = "#1b365d";
 let indiceBusqueda = -1;
 let itemsBusquedaActuales = [];
 
+async function apiFetch(recurso, config = {}) {
+    if (!config.headers) config.headers = {};
+    const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
+    if (token) config.headers['Authorization'] = `Bearer ${token}`;
+    
+    const respuesta = await fetch(recurso, config);
+    if (respuesta.status === 401) {
+        console.warn("Sesión expirada o sin permisos (401)");
+        localStorage.clear();
+        window.location.href = 'index.html'; 
+        throw new Error("Acceso denegado (401)");
+    }
+    return respuesta;
+}
+
 // --- 1. ARRANQUE Y CARGA DE DATOS ---
 document.addEventListener("DOMContentLoaded", async () => {
     try {
@@ -415,6 +430,7 @@ function imprimirTodo(filtroSeleccionado) {
     zona.innerHTML = html;
     zona.classList.remove('d-none');
 
+    // Generamos los códigos de barras físicos en el DOM invisible
     colaImpresion.forEach((item, idx) => {
         if ((item.formato === "Cenefa_Normal" || item.formato === "Cenefa_Doble") && item.codigo_barras) {
             for (let i = 0; i < item.copias; i++) {
@@ -427,10 +443,34 @@ function imprimirTodo(filtroSeleccionado) {
         }
     });
 
-    Swal.fire({ title: 'Generando Vista Previa...', icon: 'info', timer: 800, showConfirmButton: false }).then(() => {
-        window.print(); 
-        zona.classList.add('d-none'); zona.innerHTML = ''; vaciarCola(); 
-    });
+    // MAGIA DE VISTA PREVIA: Le damos 100ms al navegador para dibujar los códigos de barra y lanzamos el Modal
+    setTimeout(() => {
+        Swal.fire({
+            title: '<i class="bi bi-eye"></i> Vista Previa de Impresión',
+            html: `
+                <div style="background: #525659; padding: 20px; max-height: 55vh; overflow-y: auto; border-radius: 5px; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);">
+                    ${zona.innerHTML}
+                </div>
+                <div class="text-muted small mt-2">Asegurate de que tu impresora esté configurada en tamaño A4 y sin márgenes.</div>
+            `,
+            width: '800px',
+            showCancelButton: true,
+            confirmButtonText: '<i class="bi bi-printer"></i> Imprimir Ahora',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#1b365d',
+            cancelButtonColor: '#dc3545'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                window.print(); 
+                zona.classList.add('d-none'); 
+                zona.innerHTML = ''; 
+                vaciarCola(); // Borra la cola de la base de datos tras imprimir
+            } else {
+                zona.classList.add('d-none'); 
+                zona.innerHTML = '';
+            }
+        });
+    }, 100);
 }
 
 async function encolarPorCategoria() {

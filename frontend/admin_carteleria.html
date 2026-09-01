@@ -35,9 +35,44 @@
                         </button>
                     </div>
                 </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h3 class="fw-bold mb-0" style="color: #1b365d;"><i class="bi bi-megaphone"></i> Marketing y Cartelería</h3>
+                    <div>
+                        <input type="file" id="inputLogo" class="d-none" accept="image/*" onchange="guardarLogoLocal(event)">
+                        <button class="btn btn-outline-secondary fw-bold shadow-sm" onclick="document.getElementById('inputLogo').click()">
+                            <i class="bi bi-image"></i> Logo
+                        </button>
+                        <button class="btn btn-outline-danger fw-bold shadow-sm ms-1" onclick="borrarLogoLocal()" title="Borrar Logo"><i class="bi bi-trash"></i></button>
+                    </div>
+                </div>
+
+                <!-- NUEVA BARRA SUPERIOR: ENCOLADO MASIVO -->
+                <div class="card border-primary mb-3 shadow-sm">
+                    <div class="card-header bg-primary text-white fw-bold py-2">
+                        <i class="bi bi-collection"></i> Agregar Rubro Completo a la Cola
+                    </div>
+                    <div class="card-body py-2">
+                        <div class="row g-2 align-items-center">
+                            <div class="col-md-5">
+                                <select id="selectMasivoCarteleria" class="form-select border-primary"></select>
+                            </div>
+                            <div class="col-md-4">
+                                <select id="formatoMasivoCarteleria" class="form-select">
+                                    <option value="Cenefa">Cenefa Normal (10x4 cm)</option>
+                                    <option value="Cartel_A4">Cartel A4 (Oferta)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn btn-primary w-100 fw-bold" onclick="encolarPorCategoria()">
+                                    <i class="bi bi-send-plus"></i> Encolar Rubro
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="row g-3">
-<!-- PANEL IZQUIERDO: DISEÑO -->
+                <!-- PANEL IZQUIERDO: DISEÑO -->
                     <div class="col-md-5">
                         
                         <!-- TARJETA 1: GENERADOR -->
@@ -120,34 +155,6 @@
                                 </div>
                             </div>
                         </div>
-
-                        <!-- TARJETA 2: ENCOLADO MASIVO -->
-                        <div class="card border-primary mb-4 shadow-sm">
-                            <div class="card-header bg-primary text-white fw-bold">
-                                <i class="bi bi-printer-fill"></i> Encolado Masivo por Rubro
-                            </div>
-                            <div class="card-body">
-                                <div class="row g-2 align-items-end">
-                                    <div class="col-md-6">
-                                        <label class="form-label small fw-bold text-muted">Seleccione Rubro:</label>
-                                        <select id="selectMasivoCarteleria" class="form-select border-primary"></select>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label small fw-bold text-muted">Formato:</label>
-                                        <select id="formatoMasivoCarteleria" class="form-select">
-                                            <option value="Cenefa">Cenefa (Góndola)</option>
-                                            <option value="Cartel A4">Cartel A4 (Oferta)</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-12 mt-3">
-                                        <button class="btn btn-primary w-100 fw-bold" onclick="encolarPorCategoria()">
-                                            <i class="bi bi-send-plus"></i> Mandar Rubro a la Cola
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
                     </div>
                     <!-- FIN PANEL IZQUIERDO -->
 
