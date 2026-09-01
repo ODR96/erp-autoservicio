@@ -13,6 +13,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const res = await fetch(`${obtenerBaseUrl()}/productos/sincronizar_catalogo`, { headers: { 'Authorization': `Bearer ${token}` } });
         const data = await res.json();
         catalogoLocal = data.productos || [];
+        await cargarCategoriasCarteleria();
         await cargarColaDesdeDB();
     } catch (e) { console.error("Error cargando catálogo", e); }
 });
@@ -432,35 +433,6 @@ function imprimirTodo(filtroSeleccionado) {
     });
 }
 
-async function encolarMasivamenteUI() {
-    // Acá capturás el ID de la categoría que querés imprimir (ej. desde un <select>)
-    const idCategoria = parseInt(document.getElementById('selectCategoriaCarteleria').value);
-    
-    Swal.fire({ title: 'Encolando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-    
-    try {
-        const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar_masivo`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                tipo_filtro: 'categoria',
-                filtro_id: idCategoria,
-                tipo_cartel: 'Cenefa',
-                plantilla: 'Clasica'
-            })
-        });
-        
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        
-        Swal.fire('¡Éxito!', data.mensaje, 'success');
-        // Acá llamás a la función que actualiza la tablita de tu cola de impresión
-        cargarColaImpresion(); 
-    } catch (e) {
-        Swal.fire('Error', e.message, 'error');
-    }
-}
-
 async function encolarPorCategoria() {
     const idCategoria = parseInt(document.getElementById('selectMasivoCarteleria').value);
     const formato = document.getElementById('formatoMasivoCarteleria').value;
@@ -496,4 +468,20 @@ async function encolarPorCategoria() {
     } catch (e) {
         Swal.fire('Error', e.message, 'error');
     }
+}
+
+async function cargarCategoriasCarteleria() {
+    try {
+        const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
+        const res = await fetch(`${obtenerBaseUrl()}/productos/categorias`, { headers: { 'Authorization': `Bearer ${token}` } });
+        const data = await res.json();
+        
+        const select = document.getElementById('selectMasivoCarteleria');
+        if (select) {
+            select.innerHTML = '<option value="">-- Seleccione un Rubro --</option>';
+            (data.categorias || []).forEach(c => {
+                select.innerHTML += `<option value="${c.id}">${c.nombre}</option>`;
+            });
+        }
+    } catch (e) { console.error("Error cargando categorías", e); }
 }
