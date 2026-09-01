@@ -2696,10 +2696,11 @@ document.addEventListener('keypress', (e) => {
 });
 
 // --- MOTOR OFFLINE-FIRST: EL CATÁLOGO LOCAL ---
+// --- MOTOR OFFLINE-FIRST: EL CATÁLOGO LOCAL ---
 async function descargarCatalogoParaOffline() {
     try {
-        // Le pedimos al backend la lista completa de productos activos
-        const response = await apiFetch(`${obtenerBaseUrl()}/productos/listar?estado=1`);
+        // EL ARREGLO: Ahora le pega al misil liviano, no al listado pesado
+        const response = await apiFetch(`${obtenerBaseUrl()}/productos/sincronizar_catalogo`);
 
         if (response.ok) {
             const data = await response.json();

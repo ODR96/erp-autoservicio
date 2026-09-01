@@ -90,9 +90,14 @@ async function cargarMonitor() {
                                 <span class="d-block text-muted fw-bold small text-uppercase mb-1">Efectivo Físico en Cajón</span>
                                 <h3 class="fw-bold text-success mb-0">$${t.total_esperado.toFixed(2)}</h3>
                             </div>
-                            <button class="btn btn-outline-danger w-100 fw-bold shadow-sm" onclick="forzarCierreRemoto(${t.turno_id})">
-    <i class="bi bi-x-octagon-fill"></i> FORZAR CIERRE DE CAJA
-</button>
+                            <div class="d-flex gap-2 mt-3">
+                                <button class="btn btn-info w-100 fw-bold shadow-sm" onclick="auditarTurno(${t.turno_id})">
+                                    <i class="bi bi-search"></i> AUDITAR
+                                </button>
+                                <button class="btn btn-outline-danger w-100 fw-bold shadow-sm" onclick="forzarCierreRemoto(${t.turno_id})">
+                                    <i class="bi bi-x-octagon-fill"></i> CERRAR
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -136,6 +141,66 @@ async function forzarCierreRemoto(turnoId) {
         } catch (e) {
             Swal.fire('Error', e.message, 'error');
         }
+    }
+}
+
+// --- MOTOR DE AUDITORÍA EN TIEMPO REAL ---
+async function auditarTurno(turnoId) {
+    document.getElementById('audiTurnoId').innerText = turnoId;
+    const tbody = document.getElementById('tablaAuditoriaBody');
+    tbody.innerHTML = '<tr><td colspan="4" class="text-muted py-5"><div class="spinner-border text-info mb-2"></div><br>Reconstruyendo línea de tiempo...</td></tr>';
+    
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('modalAuditoriaTurno')).show();
+
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/caja/auditoria/${turnoId}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        tbody.innerHTML = '';
+        if (data.linea_tiempo.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-muted py-4">No hay registros para este turno.</td></tr>';
+            return;
+        }
+
+        data.linea_tiempo.forEach(item => {
+            let colorFila = '';
+            let colorMonto = 'text-dark';
+            let signo = '';
+            let detalleAdicional = item.detalle ? `<br><small class="text-muted">${item.detalle}</small>` : '';
+
+            // Lógica de colores según el tipo de plata que se movió
+            if (item.tipo === 'VENTA') {
+                colorMonto = 'text-success fw-bold';
+                signo = '+';
+            } else if (item.tipo === 'VENTA ANULADA') {
+                colorFila = 'bg-light text-muted text-decoration-line-through';
+                colorMonto = 'text-muted';
+            } else if (item.tipo === 'INGRESO') {
+                colorMonto = 'text-primary fw-bold';
+                signo = '+';
+            } else if (item.tipo === 'RETIRO') {
+                colorMonto = 'text-danger fw-bold';
+                signo = '-';
+            } else if (item.tipo === 'APERTURA') {
+                colorMonto = 'text-success fw-bold fs-6';
+                signo = '$';
+            }
+
+            tbody.innerHTML += `
+                <tr class="${colorFila}">
+                    <td class="align-middle text-muted">${item.hora}</td>
+                    <td class="text-start align-middle">
+                        <span class="fw-bold">${item.accion}</span>
+                        ${detalleAdicional}
+                    </td>
+                    <td class="align-middle"><span class="badge border text-dark">${item.metodo || '-'}</span></td>
+                    <td class="text-end pe-3 align-middle ${colorMonto}">${signo}$${item.monto.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                </tr>
+            `;
+        });
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-danger fw-bold py-4">Error: ${e.message}</td></tr>`;
     }
 }
 

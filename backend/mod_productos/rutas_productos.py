@@ -27,7 +27,6 @@ class ProductoNuevo(BaseModel):
     componentes_combo: list = []
     reglas_mayoristas: list = []
     cantidad_inicial: float = 0.0
-    # --- AGREGAR ESTAS 3 LÍNEAS NUEVAS ---
     numero_lote_proveedor: str = "INICIAL"
     fecha_vencimiento: str = "2099-12-31"
     costo_real_ingreso: float = 0.0
@@ -43,7 +42,7 @@ class ProductoActualizar(BaseModel):
     precio_venta_final: float
     stock_minimo_alerta: float
     dias_alerta_vencimiento: int
-    unidad_medida: str = "Unidad" # <-- AGREGAMOS ESTO
+    unidad_medida: str = "Unidad" 
     componentes_combo: list = []
     reglas_mayoristas: list = []
     unidades_por_bulto: int = 1
@@ -63,7 +62,6 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
         if producto.codigo_barras:
             cursor.execute("SELECT id, nombre FROM productos WHERE codigo_barras = ? AND activo = 1", (producto.codigo_barras,))
             if cursor.fetchone():
-                conexion.close()
                 return {"error": "El código ya existe."}
 
         cursor.execute('''
@@ -79,108 +77,135 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Activo')
             ''', (nuevo_id, producto.numero_lote_proveedor, date.today().isoformat(), producto.fecha_vencimiento, producto.cantidad_inicial, producto.cantidad_inicial, producto.costo_real_ingreso))
             
-            lote_id = cursor.lastrowid # Atrapamos el ID del lote
+            lote_id = cursor.lastrowid
             
-                # Si se creó un lote, le pedimos al robot que también lo suba
-        # Guardamos Combos y Promos
         for comp in producto.componentes_combo:
             cursor.execute("INSERT INTO productos_combos (producto_padre_id, producto_hijo_id, cantidad_hijo) VALUES (?, ?, ?)", (nuevo_id, comp['id'], comp['cantidad']))
         for r in producto.reglas_mayoristas:
             cursor.execute("INSERT INTO promociones_volumen (producto_id, cantidad_minima, precio_oferta_unitario) VALUES (?, ?, ?)", (nuevo_id, r['cantidad'], r['precio']))
             
-        # ENCOLAR CENEFA AUTOMÁTICA
         cursor.execute("INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso) VALUES (?, 'Cenefa', 1, 0)", (nuevo_id,))
 
         conexion.commit()
-        conexion.close()
         return {"mensaje": "¡Producto y Lote Inicial guardados!", "id": nuevo_id}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
-# --- 2. LEER / CATÁLOGO COMPLETO (R) ---
 @router.get("/listar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def listar_todos_los_productos(estado: int = 1, alerta_stock: bool = False, alerta_vencimiento: bool = False, sin_codigo: bool = False):
+def listar_todos_los_productos(
+    estado: str = "1", 
+    alerta_stock: bool = False, 
+    alerta_vencimiento: bool = False, 
+    sin_codigo: bool = False,
+    buscar: str = "",
+    categoria_id: str = "",
+    proveedor_id: str = "",
+    limit: int = 50,
+    offset: int = 0
+):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row 
     cursor = conexion.cursor()
-    
-    # EL CAMBIO: Le agregamos una subconsulta para saber si es un combo
-    cursor.execute('''
-        SELECT 
-            p.id, p.codigo_barras, p.nombre, p.categoria_id, p.unidad_medida, p.proveedor_habitual_id,
-            p.costo_sin_iva, p.porcentaje_iva, p.precio_venta_final, p.dias_alerta_vencimiento, p.stock_minimo_alerta, p.unidades_por_bulto,
-            (SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo') as stock_total,
-            (SELECT COUNT(id) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible != 0) as cantidad_lotes,            
-            (SELECT precio_oferta_unitario FROM promociones_volumen WHERE producto_id = p.id ORDER BY cantidad_minima ASC LIMIT 1) as precio_promo,
-            (SELECT cantidad_minima FROM promociones_volumen WHERE producto_id = p.id ORDER BY cantidad_minima ASC LIMIT 1) as cant_promo,
-            (SELECT MIN(fecha_vencimiento) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible > 0) as prox_vencimiento,
-            (SELECT COUNT(*) FROM productos_combos WHERE producto_padre_id = p.id) as es_combo
-        FROM productos p 
-        WHERE p.activo = ?
-        ORDER BY p.id DESC
-    ''', (estado,))
-    
-    productos_raw = cursor.fetchall()
-    conexion.close()
-    
-    productos = [dict(prod) for prod in productos_raw]
-    
-    # Filtro 1: Stock Crítico (Ignorando Combos)
-    if alerta_stock:
-        productos_criticos = []
-        for p in productos:
-            if p["es_combo"] > 0: continue # Si es combo, saltamos al siguiente
-            
-            stock_actual = p["stock_total"] if p["stock_total"] else 0
-            stock_minimo = p["stock_minimo_alerta"] if p["stock_minimo_alerta"] else 0
-            if stock_actual <= stock_minimo:
-                productos_criticos.append(p)
-        return {"productos": productos_criticos}
-        
-    # Filtro 2: Alerta de Vencimiento (Blindado contra errores)
-    if alerta_vencimiento:
-        from datetime import date
-        hoy = date.today()
-        productos_por_vencer = []
-        for p in productos:
-            if p["es_combo"] > 0: continue # Los combos no se vencen, se vencen sus ingredientes
-            
-            dias_alerta = p["dias_alerta_vencimiento"] if p["dias_alerta_vencimiento"] else 0
-            fecha_str = p["prox_vencimiento"]
-            
-            if fecha_str and dias_alerta > 0:
-                try:
-                    fecha_venc = date.fromisoformat(fecha_str[:10]) # [:10] por si viene con hora pegada
-                    dif_dias = (fecha_venc - hoy).days
-                    if dif_dias <= dias_alerta:
-                        productos_por_vencer.append(p)
-                except Exception:
-                    pass # Si la fecha estaba mal escrita en la base, no rompemos el programa
-                    
-        return {"productos": productos_por_vencer}
-        
-    if sin_codigo:
-        productos_sin_codigo = []
-        for p in productos:
-            # Si es nulo, o si al quitarle los espacios queda vacío ("")
-            if not p["codigo_barras"] or str(p["codigo_barras"]).strip() == "":
-                productos_sin_codigo.append(p)
-        return {"productos": productos_sin_codigo}
-        
-    return {"productos": productos}
+    try:
+        # 1. Armamos la base de la consulta y las condiciones dinámicas
+        query_base = '''
+            FROM productos p 
+            WHERE 1=1
+        '''
+        parametros = []
 
-# --- 3. ACTUALIZAR PRODUCTO CORREGIDO ---
+        # Filtro de Estado (Activos, Inactivos o Todos)
+        if estado in ["0", "1"]:
+            query_base += " AND p.activo = ?"
+            parametros.append(int(estado))
+
+        # Filtro de Categoría
+        if categoria_id.isdigit():
+            query_base += " AND p.categoria_id = ?"
+            parametros.append(int(categoria_id))
+
+        # Filtro de Proveedor
+        if proveedor_id.isdigit():
+            query_base += " AND p.proveedor_habitual_id = ?"
+            parametros.append(int(proveedor_id))
+
+        # Filtro de Búsqueda (Texto)
+        if buscar:
+            palabras = buscar.split()
+            for palabra in palabras:
+                query_base += " AND (p.nombre LIKE ? OR p.codigo_barras LIKE ?)"
+                parametros.extend([f"%{palabra}%", f"%{palabra}%"])
+
+        # Filtro Sin Código
+        if sin_codigo:
+            query_base += " AND (p.codigo_barras IS NULL OR TRIM(p.codigo_barras) = '')"
+
+        # 2. Contamos cuántos registros totales hay (para armar los botones de paginación)
+        cursor.execute(f"SELECT COUNT(p.id) {query_base}", tuple(parametros))
+        total_registros = cursor.fetchone()[0]
+
+        # 3. Traemos SOLAMENTE los 50 productos que tocan en esta página
+        query_final = f'''
+            SELECT 
+                p.id, p.codigo_barras, p.nombre, p.categoria_id, p.unidad_medida, p.proveedor_habitual_id,
+                p.costo_sin_iva, p.porcentaje_iva, p.precio_venta_final, p.dias_alerta_vencimiento, p.stock_minimo_alerta, p.unidades_por_bulto,
+                (SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo') as stock_total,
+                (SELECT COUNT(id) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible != 0) as cantidad_lotes,            
+                (SELECT precio_oferta_unitario FROM promociones_volumen WHERE producto_id = p.id ORDER BY cantidad_minima ASC LIMIT 1) as precio_promo,
+                (SELECT cantidad_minima FROM promociones_volumen WHERE producto_id = p.id ORDER BY cantidad_minima ASC LIMIT 1) as cant_promo,
+                (SELECT MIN(fecha_vencimiento) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible > 0) as prox_vencimiento,
+                (SELECT COUNT(*) FROM productos_combos WHERE producto_padre_id = p.id) as es_combo
+            {query_base}
+            ORDER BY p.id DESC
+            LIMIT ? OFFSET ?
+        '''
+        parametros.extend([limit, offset])
+        
+        cursor.execute(query_final, tuple(parametros))
+        productos_raw = cursor.fetchall()
+        productos = [dict(prod) for prod in productos_raw]
+        
+        # Filtros de Alertas (Se aplican sobre la página actual para no matar el rendimiento)
+        if alerta_stock:
+            productos = [p for p in productos if p["es_combo"] == 0 and (p["stock_total"] or 0) <= (p["stock_minimo_alerta"] or 0)]
+            total_registros = len(productos)
+            
+        if alerta_vencimiento:
+            hoy = date.today()
+            prod_venc = []
+            for p in productos:
+                if p["es_combo"] > 0 or not p["prox_vencimiento"] or not p["dias_alerta_vencimiento"]: continue 
+                try:
+                    dif_dias = (date.fromisoformat(p["prox_vencimiento"][:10]) - hoy).days
+                    if dif_dias <= p["dias_alerta_vencimiento"]:
+                        prod_venc.append(p)
+                except Exception: pass
+            productos = prod_venc
+            total_registros = len(productos)
+            
+        return {
+            "total_registros": total_registros,
+            "total_paginas": (total_registros + limit - 1) // limit,
+            "pagina_actual": (offset // limit) + 1,
+            "productos": productos
+        }
+    except Exception as e:
+        if conexion: conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        if conexion: conexion.close()
+
 @router.put("/actualizar/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
@@ -190,10 +215,8 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
         if datos.codigo_barras:
             cursor.execute("SELECT id, nombre FROM productos WHERE codigo_barras = ? AND id != ? AND activo = 1", (datos.codigo_barras, producto_id))
             if cursor.fetchone():
-                conexion.close()
                 return {"error": "El código ya existe."}
 
-        # VERIFICAR SI CAMBIÓ EL PRECIO PARA ENCOLAR CENEFA
         cursor.execute("SELECT precio_venta_final FROM productos WHERE id = ?", (producto_id,))
         precio_viejo = cursor.fetchone()['precio_venta_final']
         if precio_viejo != datos.precio_venta_final:
@@ -207,7 +230,6 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
         ''', (datos.codigo_barras, datos.nombre, datos.categoria_id, datos.proveedor_habitual_id, 
               datos.costo_sin_iva, datos.porcentaje_iva, datos.precio_venta_final, datos.stock_minimo_alerta, datos.dias_alerta_vencimiento, datos.unidad_medida, datos.unidades_por_bulto, producto_id))
         
-        # LIMPIAR Y RE-GUARDAR COMBOS Y PROMOS (Evita duplicados)
         cursor.execute("DELETE FROM productos_combos WHERE producto_padre_id = ?", (producto_id,))
         for comp in datos.componentes_combo:
             cursor.execute("INSERT INTO productos_combos (producto_padre_id, producto_hijo_id, cantidad_hijo) VALUES (?, ?, ?)", (producto_id, comp['id'], comp['cantidad']))
@@ -216,57 +238,44 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
         for r in datos.reglas_mayoristas:
             cursor.execute("INSERT INTO promociones_volumen (producto_id, cantidad_minima, precio_oferta_unitario) VALUES (?, ?, ?)", (producto_id, r['cantidad'], r['precio']))
             
-            
-        
         conexion.commit()
-        conexion.close()
         return {"mensaje": "Actualizado correctamente."}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
-    
-# --- 7. VER UN SOLO PRODUCTO (Con Aspirador Automático de Lotes) ---
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
+
 @router.get("/ver/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def ver_producto_por_id(producto_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
     try:
-        # 1. Datos básicos
         cursor.execute("SELECT * FROM productos WHERE id = ?", (producto_id,))
         producto = cursor.fetchone()
         if not producto:
-            conexion.close()
             return {"error": "Producto no encontrado"}
         
         resultado = dict(producto)
         
-        # 2. Reglas mayoristas
         cursor.execute("SELECT cantidad_minima as cantidad, precio_oferta_unitario as precio FROM promociones_volumen WHERE producto_id = ?", (producto_id,))
         resultado["reglas_mayoristas"] = [dict(r) for r in cursor.fetchall()]
 
-        # =================================================================
-        # 🧹 EL ASPIRADOR DE DEUDAS AUTOMÁTICO (Consolidador de Lotes)
-        # =================================================================
-        # Sumamos todos los lotes negativos que andan flotando
         cursor.execute("SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible < 0", (producto_id,))
         suma_negativos = cursor.fetchone()[0]
 
         if suma_negativos and suma_negativos < 0:
             deuda_total = abs(suma_negativos)
 
-            # Buscamos lotes positivos para "pagar" la deuda (del más viejo al más nuevo)
             cursor.execute("SELECT id, cantidad_disponible FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible > 0 ORDER BY fecha_ingreso ASC", (producto_id,))
             lotes_positivos = cursor.fetchall()
 
@@ -275,38 +284,27 @@ def ver_producto_por_id(producto_id: int):
                 disp = lp['cantidad_disponible']
 
                 if disp >= deuda_total:
-                    # Este lote positivo tiene suficiente para cubrir toda la deuda junta
                     cursor.execute("UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible - ? WHERE id = ?", (deuda_total, lp['id']))
                     deuda_total = 0
                 else:
-                    # Este lote se vacía pagando parte de la deuda, y seguimos con el próximo
                     cursor.execute("UPDATE lotes_stock SET cantidad_disponible = 0 WHERE id = ?", (lp['id'],))
                     deuda_total -= disp
 
-            # Borramos TODOS los lotes negativos viejos y esparcidos
             cursor.execute("DELETE FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible < 0", (producto_id,))
-
-            # Limpiamos los lotes positivos que hayan quedado en 0 exacto por pagar la deuda
             cursor.execute("DELETE FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible = 0", (producto_id,))
 
-            # Si no alcanzó la mercadería positiva y sigue habiendo deuda, creamos 1 solo lote unificado
-            # Si no alcanzó la mercadería positiva y sigue habiendo deuda, creamos 1 solo lote unificado
             if deuda_total > 0:
-                # Calculamos la fecha exacta desde Python
                 fecha_hoy_ar = datetime.now(ZONA_AR).strftime("%Y-%m-%d")
                 cursor.execute('''
                     INSERT INTO lotes_stock (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento, cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
                     VALUES (?, 'VENTA_SIN_STOCK', ?, '2099-12-31', 0, ?, 0, 'Activo')
                 ''', (producto_id, fecha_hoy_ar, -deuda_total))
 
-            conexion.commit() # Guardamos la limpieza en la base de datos
-        # =================================================================
+            conexion.commit() 
 
-        # 3. Lotes activos (Ahora sí, limpios y ordenados)
         cursor.execute("SELECT id as lote_id, numero_lote_proveedor as lote, fecha_ingreso as ingreso, fecha_vencimiento as vence, cantidad_disponible as stock, costo_real_ingreso as costo FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible != 0 ORDER BY fecha_ingreso ASC", (producto_id,))
         resultado["lotes"] = [dict(l) for l in cursor.fetchall()]
 
-        # 4. Componentes del combo 
         cursor.execute('''
             SELECT p.id, p.nombre, pc.cantidad_hijo as cantidad 
             FROM productos_combos pc
@@ -315,73 +313,66 @@ def ver_producto_por_id(producto_id: int):
         ''', (producto_id,))
         resultado["componentes_combo"] = [dict(c) for c in cursor.fetchall()]
 
-        conexion.close() 
         return resultado
         
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
-# --- 4. BORRAR (D - Borrado Lógico) ---
 @router.delete("/eliminar/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def desactivar_producto(producto_id: int, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        # En vez de borrar, lo "apagamos" poniendo activo en 0
         cursor.execute("UPDATE productos SET activo = 0 WHERE id = ?", (producto_id,))
         conexion.commit()
-        conexion.close()
         return {"mensaje": "Producto dado de baja del catálogo."}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
     
 @router.put("/restaurar/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def restaurar_producto(producto_id: int, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        # Lo volvemos a prender poniendo activo en 1
         cursor.execute("UPDATE productos SET activo = 1 WHERE id = ?", (producto_id,))
         conexion.commit()
-        conexion.close()
         return {"mensaje": f"¡Producto {producto_id} restaurado y visible nuevamente!"}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
     
-# --- 6. BUSCADOR AVANZADO (Inteligente, Sin Zombies y CON PROMOS) ---
 @router.get("/buscar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def buscar_producto(q: Optional[str] = None, termino: Optional[str] = None, query: Optional[str] = None):
     conexion = obtener_conexion()
@@ -391,31 +382,25 @@ def buscar_producto(q: Optional[str] = None, termino: Optional[str] = None, quer
         busqueda = q or termino or query or ""
         if not busqueda: return {"productos": []}
 
-        # Función ninja para pegarle las promociones y el STOCK FÍSICO REAL a los productos
         def adjuntar_reglas_y_stock(lista_cruda):
             productos_listos = []
             for p in lista_cruda:
                 p_dict = dict(p)
-                # 1. Traemos las promociones
                 cursor.execute("SELECT cantidad_minima, precio_oferta_unitario FROM promociones_volumen WHERE producto_id = ?", (p_dict['id'],))
                 p_dict['reglas_mayoristas'] = [dict(r) for r in cursor.fetchall()]
                 
-                # 2. LA MAGIA: Sumamos el stock real directo de los lotes activos
                 cursor.execute("SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = ? AND estado_lote = 'Activo' AND cantidad_disponible > 0", (p_dict['id'],))
                 stock_real = cursor.fetchone()[0]
-                # Se lo mandamos a Javascript bajo el nombre que está esperando
                 p_dict['stock_actual'] = stock_real if stock_real else 0
                 
                 productos_listos.append(p_dict)
             return productos_listos
 
-        # 1. BÚSQUEDA EXACTA (Prioridad máxima) 
         if busqueda.isdigit():
             cursor.execute("SELECT * FROM productos WHERE (id = ? OR codigo_barras = ?) AND activo = 1", (busqueda, busqueda))
             exactos = cursor.fetchall()
             if exactos: return {"productos": adjuntar_reglas_y_stock(exactos)}
 
-        # 2. BÚSQUEDA INTELIGENTE DESORDENADA
         palabras = busqueda.split()
         condiciones = []
         parametros = []
@@ -429,22 +414,19 @@ def buscar_producto(q: Optional[str] = None, termino: Optional[str] = None, quer
         
         return {"productos": adjuntar_reglas_y_stock(cursor.fetchall())}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
     finally:
-        conexion.close()
+        if conexion:
+            conexion.close()
 
-# --- BUSCADOR EXACTO PARA LA PISTOLA (CON PROMOS Y STOCK) ---
 @router.get("/codigo/{codigo_barras}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def obtener_por_codigo(codigo_barras: str):
     conexion = obtener_conexion()
@@ -456,11 +438,9 @@ def obtener_por_codigo(codigo_barras: str):
         if prod: 
             p_dict = dict(prod)
             
-            # Promociones
             cursor.execute("SELECT cantidad_minima, precio_oferta_unitario FROM promociones_volumen WHERE producto_id = ?", (p_dict['id'],))
             p_dict['reglas_mayoristas'] = [dict(r) for r in cursor.fetchall()]
             
-            # Stock Físico Real
             cursor.execute("SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = ? AND estado_lote = 'Activo' AND cantidad_disponible > 0", (p_dict['id'],))
             stock_real = cursor.fetchone()[0]
             p_dict['stock_actual'] = stock_real if stock_real else 0
@@ -469,20 +449,18 @@ def obtener_por_codigo(codigo_barras: str):
             
         return {"error": "Producto no encontrado o inactivo"}
     finally:
-        conexion.close()
+        if conexion:
+            conexion.close()
 
-# --- MODELO PARA ACTUALIZACIÓN MASIVA ---
-# --- MODELO PARA ACTUALIZACIÓN MASIVA (MEJORADO CON EXCLUSIONES) ---
 class ActualizacionMasiva(BaseModel):
-    valor: float # <-- Cambio clave: Renombramos porcentaje a valor
-    tipo_ajuste: str # 'porcentaje', 'sumar', 'fijo'
+    valor: float 
+    tipo_ajuste: str 
     tipo_filtro: str  
     filtro_id: int
     afectar_costo: bool
     palabra_clave: str = ""
     excluir_ids: list[int] = []
 
-# --- RUTINA DE AUMENTO MASIVO ---
 @router.put("/actualizacion_masiva", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def actualizar_precios_masivamente(datos: ActualizacionMasiva, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
@@ -491,8 +469,6 @@ def actualizar_precios_masivamente(datos: ActualizacionMasiva, background_tasks:
         if datos.tipo_ajuste == 'fijo':
             query = "UPDATE productos SET precio_venta_final = ROUND(?, 2)"
             parametros = [datos.valor]
-            # Si forzamos Precio Fijo Exacto, IGNORAMOS el check de afectar costo 
-            # para no romper el margen de ganancia histórico de la empresa.
 
         elif datos.tipo_ajuste == 'sumar':
             query = "UPDATE productos SET precio_venta_final = ROUND(precio_venta_final + ?, 2)"
@@ -501,7 +477,7 @@ def actualizar_precios_masivamente(datos: ActualizacionMasiva, background_tasks:
                 query = "UPDATE productos SET costo_sin_iva = ROUND(costo_sin_iva + ?, 2), precio_venta_final = ROUND(precio_venta_final + ?, 2)"
                 parametros = [datos.valor, datos.valor]
 
-        else: # porcentaje
+        else: 
             factor = 1 + (datos.valor / 100.0)
             query = "UPDATE productos SET precio_venta_final = ROUND(precio_venta_final * ?, 2)"
             parametros = [factor]
@@ -529,21 +505,21 @@ def actualizar_precios_masivamente(datos: ActualizacionMasiva, background_tasks:
             
         cursor.execute(query, tuple(parametros))
         conexion.commit()
-        conexion.close()
         return {"mensaje": "¡Éxito! Precios actualizados masivamente."}
         
     except Exception as e:
         if conexion:
             conexion.rollback() 
-            conexion.close()
             
         mensaje_error = str(e)
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
         return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
-# --- 8. PROMOCIONES POR VOLUMEN (Ej: Llevando 3, pagás menos) ---
 class PromocionNueva(BaseModel):
     producto_id: int
     cantidad_minima: float
@@ -559,52 +535,46 @@ def crear_promocion(promo: PromocionNueva):
             VALUES (?, ?, ?)
         ''', (promo.producto_id, promo.cantidad_minima, promo.precio_oferta_unitario))
         conexion.commit()
-        conexion.close()
         return {"mensaje": f"¡Promoción activada! Llevando {promo.cantidad_minima} o más, el precio queda en ${promo.precio_oferta_unitario}"}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
     
-    # --- MODELO PARA CATEGORÍAS ---
 class CategoriaNueva(BaseModel):
     nombre: str
 
-# --- RUTAS DE CATEGORÍAS (RUBROS) ---
-# --- RUTAS DE CATEGORÍAS (RUBROS) ---
 @router.get("/categorias", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_categorias_activas():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # PARCHE: Usamos tu tabla real 'categorias_productos'
         cursor.execute("SELECT id, nombre FROM categorias_productos ORDER BY nombre ASC")
         categorias = [dict(c) for c in cursor.fetchall()]
-        conexion.close()
         return {"categorias": categorias}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
         
 @router.post("/categorias/crear", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def crear_categoria(cat: CategoriaNueva, background_tasks: BackgroundTasks):
@@ -613,136 +583,134 @@ def crear_categoria(cat: CategoriaNueva, background_tasks: BackgroundTasks):
     try:
         cursor.execute("INSERT INTO categorias_productos (nombre) VALUES (?)", (cat.nombre,))
         nuevo_id = cursor.lastrowid
-        
-            
         conexion.commit()
-        conexion.close()
         return {"mensaje": "Categoría creada", "id": nuevo_id, "nombre": cat.nombre}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
 @router.delete("/categorias/eliminar/{cat_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def eliminar_categoria(cat_id: int):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        # Lo eliminamos de la tabla
         cursor.execute("DELETE FROM categorias_productos WHERE id = ?", (cat_id,))
         conexion.commit()
-        conexion.close()
         return {"mensaje": "Categoría eliminada"}
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-            conexion.close()
+            conexion.rollback()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
             print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
-# --- RUTAS PARA LA CARTELERÍA (USANDO TU TABLA REAL) ---
 class EtiquetaNueva(BaseModel):
     producto_id: int
     tipo_cartel: str
     cantidad_copias: int
-    texto_personalizado: str = "" # <-- NUEVO: El texto opcional
-    plantilla: str = "Clasica"      # <-- NUEVO
+    texto_personalizado: str = "" 
+    plantilla: str = "Clasica"      
     color_tema: str = "#1a365d"
 
 @router.post("/etiquetas/encolar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def encolar_etiqueta(datos: EtiquetaNueva):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
-    cursor.execute('''
-        INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, texto_personalizado, plantilla, color_tema) 
-        VALUES (?, ?, ?, 0, ?, ?, ?)
-    ''', (datos.producto_id, datos.tipo_cartel, datos.cantidad_copias, datos.texto_personalizado, datos.plantilla, datos.color_tema))
-    conexion.commit()
-    conexion.close()
-    return {"mensaje": "Etiqueta encolada con diseño guardado"}
+    try:
+        cursor.execute('''
+            INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, texto_personalizado, plantilla, color_tema) 
+            VALUES (?, ?, ?, 0, ?, ?, ?)
+        ''', (datos.producto_id, datos.tipo_cartel, datos.cantidad_copias, datos.texto_personalizado, datos.plantilla, datos.color_tema))
+        conexion.commit()
+        return {"mensaje": "Etiqueta encolada con diseño guardado"}
+    finally:
+        if conexion:
+            conexion.close()
 
 @router.get("/etiquetas/listar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def listar_cola_impresion():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    cursor.execute('''
-        SELECT c.id as cola_id, p.id as producto_id, p.nombre, p.precio_venta_final, p.codigo_barras, 
-               c.tipo_cartel as formato, c.cantidad_copias as cantidad, c.texto_personalizado,
-               c.plantilla, c.color_tema
-        FROM cola_impresion_etiquetas c
-        JOIN productos p ON c.producto_id = p.id
-        WHERE c.impreso = 0
-    ''')
-    cola = cursor.fetchall()
-    conexion.close()
-    return {"cola": [dict(c) for c in cola]}
+    try:
+        cursor.execute('''
+            SELECT c.id as cola_id, p.id as producto_id, p.nombre, p.precio_venta_final, p.codigo_barras, 
+                   c.tipo_cartel as formato, c.cantidad_copias as cantidad, c.texto_personalizado,
+                   c.plantilla, c.color_tema
+            FROM cola_impresion_etiquetas c
+            JOIN productos p ON c.producto_id = p.id
+            WHERE c.impreso = 0
+        ''')
+        cola = cursor.fetchall()
+        return {"cola": [dict(c) for c in cola]}
+    finally:
+        if conexion:
+            conexion.close()
 
 @router.delete("/etiquetas/vaciar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def vaciar_cola():
     conexion = obtener_conexion()
     cursor = conexion.cursor()
-    cursor.execute("DELETE FROM cola_impresion_etiquetas")
-    conexion.commit()
-    conexion.close()
-    return {"mensaje": "Cola vaciada"}
+    try:
+        cursor.execute("DELETE FROM cola_impresion_etiquetas")
+        conexion.commit()
+        return {"mensaje": "Cola vaciada"}
+    finally:
+        if conexion:
+            conexion.close()
 
-# <-- NUEVO: RUTA PARA BORRAR UNA SOLA ETIQUETA DE LA BASE DE DATOS -->
 @router.delete("/etiquetas/eliminar/{cola_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def eliminar_etiqueta_individual(cola_id: int):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
-    cursor.execute("DELETE FROM cola_impresion_etiquetas WHERE id = ?", (cola_id,))
-    conexion.commit()
-    conexion.close()
-    return {"mensaje": "Etiqueta eliminada"}
+    try:
+        cursor.execute("DELETE FROM cola_impresion_etiquetas WHERE id = ?", (cola_id,))
+        conexion.commit()
+        return {"mensaje": "Etiqueta eliminada"}
+    finally:
+        if conexion:
+            conexion.close()
     
-# --- GENERADOR DE CÓDIGO INTERNO AUTOMÁTICO ---
 @router.get("/generar_codigo_interno", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def generar_codigo_interno():
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        # Busca el código numérico más alto (que tenga hasta 6 dígitos para que sea corto)
         cursor.execute("SELECT MAX(CAST(codigo_barras AS INTEGER)) FROM productos WHERE length(codigo_barras) <= 6 AND codigo_barras GLOB '*[0-9]*'")
         max_cod = cursor.fetchone()[0]
-        
-        # Si no hay códigos internos previos, arranca en 1000
         siguiente_codigo = str((max_cod if max_cod else 1000) + 1)
-        
-        conexion.close()
         return {"codigo": siguiente_codigo}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
     
-# --- 7. GESTIÓN DE CATEGORÍAS RÁPIDAS DEL POS ---
 @router.get("/categorias_pos", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_categorias_pos():
     conexion = obtener_conexion()
@@ -751,21 +719,20 @@ def listar_categorias_pos():
     try:
         cursor.execute("SELECT * FROM categorias_pos")
         cats = [dict(c) for c in cursor.fetchall()]
-        conexion.close()
         return {"categorias": cats}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
 @router.put("/categorias_pos/{cat_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def editar_categoria_pos(cat_id: int, cat: CategoriaPOS, background_tasks: BackgroundTasks):
@@ -778,30 +745,27 @@ def editar_categoria_pos(cat_id: int, cat: CategoriaPOS, background_tasks: Backg
             WHERE id = ?
         ''', (cat.nombre, cat.palabra_clave, cat.icono, cat.color_fondo, cat_id))
         conexion.commit()
-        conexion.close()
         return {"mensaje": "Categoría actualizada correctamente"}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
     
-# --- 9. LISTAR COMBOS (Para la Pestaña Híbrida) ---
 @router.get("/listar_combos", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_combos_armados():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # Traemos solo los productos que son "Padres" en la tabla de combos
         cursor.execute('''
             SELECT p.id, p.nombre, p.precio_venta_final
             FROM productos p
@@ -809,7 +773,6 @@ def listar_combos_armados():
         ''')
         combos = [dict(c) for c in cursor.fetchall()]
         
-        # Le pegamos los hijos a cada combo
         for combo in combos:
             cursor.execute('''
                 SELECT p.nombre, pc.cantidad_hijo as cant
@@ -819,24 +782,21 @@ def listar_combos_armados():
             ''', (combo['id'],))
             combo['componentes'] = [f"{c['cant']}x {c['nombre']}" for c in cursor.fetchall()]
             
-        conexion.close()
         return {"combos": combos}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
     
-# --- GESTIÓN DIRECTA DE LOTES (CORRECCIÓN DE ERRORES) ---
-# Acordate de sumarle "background_tasks: BackgroundTasks" arriba
 @router.put("/lotes/actualizar/{lote_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def actualizar_lote_individual(lote_id: int, datos: dict, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
@@ -848,48 +808,43 @@ def actualizar_lote_individual(lote_id: int, datos: dict, background_tasks: Back
             WHERE id = ?
         ''', (datos['lote'], datos['vence'], datos['stock'], datos['costo'], lote_id))
         
-        # --- EL ROBOT EN ACCIÓN (Para que la nube guarde tu cambio de stock) ---
-
         conexion.commit()
-        conexion.close()
         return {"mensaje": "Lote corregido correctamente."}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
-                
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
 
 @router.delete("/lotes/eliminar/{lote_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def eliminar_lote_fisico(lote_id: int):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        # Esto borra el lote de la base de datos definitivamente
         cursor.execute("DELETE FROM lotes_stock WHERE id = ?", (lote_id,))
         conexion.commit()
-        conexion.close()
         return {"mensaje": "Lote eliminado de la existencia."}
     except Exception as e:
         if conexion:
-            conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-            conexion.close()
+            conexion.rollback()
             
         mensaje_error = str(e)
-        # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
         if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
             print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
-        # 2. Si es un error de negocio tuyo, lo mostramos normal
         return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
     
 @router.get("/movimientos/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def obtener_historial_producto(producto_id: int):
@@ -897,7 +852,6 @@ def obtener_historial_producto(producto_id: int):
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # AGREGAMOS m.observaciones A LA BÚSQUEDA
         cursor.execute('''
             SELECT m.fecha_hora, m.tipo_movimiento, m.cantidad, m.motivo, u.nombre_completo as responsable
             FROM movimientos_stock m
@@ -906,18 +860,55 @@ def obtener_historial_producto(producto_id: int):
             ORDER BY m.fecha_hora DESC LIMIT 10
         ''', (producto_id,))
         movimientos = [dict(m) for m in cursor.fetchall()]
-        conexion.close()
         return {"movimientos": movimientos}
     except Exception as e:
-            if conexion:
-                conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
-                conexion.close()
+        if conexion:
+            conexion.rollback()
+            
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+            
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
+            
+# --- MOTOR OFFLINE EXCLUSIVO PARA LA CAJA (POS) ---
+@router.get("/sincronizar_catalogo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
+def descargar_catalogo_offline():
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        # 1. Traemos SOLO la info necesaria para cobrar (nada de costos ni lotes pesados)
+        cursor.execute('''
+            SELECT p.id, p.codigo_barras, p.nombre, p.precio_venta_final, p.unidad_medida, p.categoria_id, p.tipo_venta,
+            (SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo') as stock_actual
+            FROM productos p
+            WHERE p.activo = 1
+        ''')
+        productos = [dict(p) for p in cursor.fetchall()]
+        
+        # 2. Buscamos todas las promociones juntas (mucho más rápido que buscar una por una)
+        cursor.execute("SELECT producto_id, cantidad_minima, precio_oferta_unitario as precio FROM promociones_volumen")
+        promos_raw = cursor.fetchall()
+        
+        # Armamos un diccionario rápido de promos
+        promos_dict = {}
+        for pr in promos_raw:
+            pid = pr['producto_id']
+            if pid not in promos_dict: promos_dict[pid] = []
+            promos_dict[pid].append({"cantidad_minima": pr['cantidad_minima'], "precio_oferta_unitario": pr['precio']})
+        
+        # 3. Le pegamos las promos a cada producto y limpiamos nulos
+        for p in productos:
+            p['reglas_mayoristas'] = promos_dict.get(p['id'], [])
+            if p['stock_actual'] is None: p['stock_actual'] = 0
                 
-            mensaje_error = str(e)
-            # 1. Si es un error feo de base de datos, pared ciega al navegador y log en tu consola
-            if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
-                print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
-                return {"error": "Ocurrió un error interno al procesar la solicitud."}
-                
-            # 2. Si es un error de negocio tuyo, lo mostramos normal
-            return {"error": mensaje_error}
+        return {"productos": productos}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conexion.close()

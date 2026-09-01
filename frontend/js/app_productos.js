@@ -15,10 +15,194 @@ async function apiFetch(recurso, config = {}) {
 }
 
 let productosGlobales = [];
-let categoriasGlobales = []; // <-- NUEVO
+let categoriasGlobales = [];
 let reglasMayoristas = [];
 let productoEditandoId = null;
 let colaEtiquetasActual = [];
+
+// ==========================================
+// Paginación y Buscador (NUEVO MOTOR BACKEND)
+// ==========================================
+let paginaActualProd = 1;
+const itemsPorPagina = 50;
+let timeoutFiltro = null;
+let totalPaginasGlobal = 1; // Guarda el total de páginas que dijo Python
+
+async function cargarCatalogo(pagina = null) {
+    if (pagina !== null) {
+        paginaActualProd = pagina;
+    }
+    const loader = document.getElementById('loaderServidor');
+    const contenedor = document.getElementById('productTabsContent');
+    const tbody = document.getElementById('tablaCatalogoBody');
+    
+    if (tbody) {
+        let skeletonHtml = '';
+        for (let i = 0; i < 8; i++) {
+            skeletonHtml += `<tr class="placeholder-glow"><td colspan="7"><span class="placeholder col-12 bg-secondary opacity-25" style="height:35px;"></span></td></tr>`;
+        }
+        tbody.innerHTML = skeletonHtml;
+    }
+
+    if (loader) loader.style.display = 'none';
+    if (contenedor) contenedor.style.display = 'block';
+
+    try {
+        let estadoSelect = document.getElementById('filtroEstado') ? document.getElementById('filtroEstado').value : '1';
+        let buscarTexto = document.getElementById('inputBuscarCatalogo') ? document.getElementById('inputBuscarCatalogo').value.trim() : '';
+        let catId = document.getElementById('selectFiltroCategoria') ? document.getElementById('selectFiltroCategoria').value : '';
+        let provId = document.getElementById('selectFiltroProveedor') ? document.getElementById('selectFiltroProveedor').value : '';
+
+        let offset = (paginaActualProd - 1) * itemsPorPagina;
+
+        let url = new URL(`${obtenerBaseUrl()}/productos/listar`);
+        url.searchParams.append('limit', itemsPorPagina);
+        url.searchParams.append('offset', offset);
+
+        if (estadoSelect === 'critico') { 
+            url.searchParams.append('estado', '1'); url.searchParams.append('alerta_stock', 'true'); 
+        } else if (estadoSelect === 'vencimiento') {
+            url.searchParams.append('estado', '1'); url.searchParams.append('alerta_vencimiento', 'true');
+        } else if (estadoSelect === 'sincodigo') {
+            url.searchParams.append('estado', '1'); url.searchParams.append('sin_codigo', 'true');
+        } else { 
+            url.searchParams.append('estado', estadoSelect); 
+        }
+
+        if (buscarTexto) url.searchParams.append('buscar', buscarTexto);
+        if (catId) url.searchParams.append('categoria_id', catId);
+        if (provId) url.searchParams.append('proveedor_id', provId);
+
+        const response = await apiFetch(url);
+        const data = await response.json();
+        
+        productosGlobales = data.productos || []; 
+        totalPaginasGlobal = data.total_paginas || 1;
+        
+        dibujarTablaCatalogo(data.productos, estadoSelect);
+        renderizarControlesPaginacion(totalPaginasGlobal);
+        
+        let alturaGuardada = sessionStorage.getItem('alturaScroll');
+        if (alturaGuardada) {
+            setTimeout(() => { window.scrollTo(0, parseInt(alturaGuardada)); }, 100);
+            sessionStorage.removeItem('alturaScroll');
+        }
+        
+    } catch (error) { 
+        console.error("Error cargando catálogo:", error); 
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-5 fw-bold"><i class="bi bi-wifi-off display-6 d-block mb-2"></i> Sin conexión al catálogo.<br><small class="text-muted">Revisá la red y recargá (F5)</small></td></tr>`;
+        }
+    }
+}
+
+function filtrarCatalogoFront() {
+    clearTimeout(timeoutFiltro);
+    timeoutFiltro = setTimeout(() => {
+        cargarCatalogo(1); 
+    }, 300);
+}
+
+function dibujarTablaCatalogo(listaProductos, estadoSeleccionado) {
+    const tbody = document.getElementById('tablaCatalogoBody');
+    tbody.innerHTML = '';
+
+    if(!listaProductos || listaProductos.length === 0) { 
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Sin resultados.</td></tr>'; 
+        return; 
+    }
+
+    const hoy = new Date();
+    hoy.setHours(0,0,0,0);
+
+    listaProductos.forEach(p => {
+        let htmlPromo = p.cant_promo ? `<div class="text-success small mt-1 lh-1"><i class="bi bi-tags-fill"></i> Llevando ${p.cant_promo}: $${p.precio_promo} c/u</div>` : '';
+        
+        let stock = p.stock_total || 0;
+        let minimo = p.stock_minimo_alerta || 0;
+        
+        let badgeClase = stock <= 0 ? 'bg-danger' : (stock <= minimo ? 'bg-warning text-dark' : 'bg-success');
+        let textoStock = `${stock} ${p.unidad_medida === 'Unidad' ? 'un' : p.unidad_medida}`;
+        let htmlLotes = p.cantidad_lotes > 1 ? `<div class="small text-muted mt-1 lh-1"><i class="bi bi-layers"></i> ${p.cantidad_lotes} Lotes</div>` : '';
+        
+        if (p.es_combo > 0) {
+            badgeClase = 'bg-info text-dark border border-info shadow-sm';
+            textoStock = '<i class="bi bi-boxes"></i> COMBO';
+            htmlLotes = ''; 
+        }
+        
+        let alertaVencHTML = '';
+        if (p.prox_vencimiento && p.dias_alerta_vencimiento > 0) {
+            const fechaV = new Date(p.prox_vencimiento + "T00:00:00");
+            const difDias = Math.ceil((fechaV - hoy) / (1000 * 60 * 60 * 24));
+            if (difDias < 0) {
+                alertaVencHTML = `<div class="text-danger small mt-1 fw-bold"><i class="bi bi-exclamation-triangle-fill"></i> ¡Vencido hace ${Math.abs(difDias)} días!</div>`;
+            } else if (difDias <= p.dias_alerta_vencimiento) {
+                alertaVencHTML = `<div class="text-warning small mt-1 fw-bold" style="color: #d97706!important;"><i class="bi bi-clock-history"></i> Vence en ${difDias} días</div>`;
+            }
+        }
+
+        let catReal = categoriasGlobales.find(c => c.id === p.categoria_id);
+        let nombreCat = catReal ? catReal.nombre : 'Sin Rubro';
+
+        let costoF = (p.costo_sin_iva || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+        let unidad = p.unidad_medida && p.unidad_medida !== 'Unidad' ? `x ${p.unidad_medida}` : '';
+        let precioF = (p.precio_venta_final || 0).toLocaleString('es-AR', {minimumFractionDigits: 2}) + ` <span class="small text-muted">${unidad}</span>`;
+        
+        let claseFila = estadoSeleccionado === "0" ? 'producto-inactivo' : '';
+        
+        let botonesAccion = estadoSeleccionado !== "0" ? `
+            <button class="btn btn-sm btn-outline-primary py-0" title="Editar" onclick="abrirEditarProducto(${p.id})"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-info py-0" title="Clonar (Copiar)" onclick="clonarProducto(${p.id})"><i class="bi bi-files"></i></button>
+            <button class="btn btn-sm btn-outline-warning py-0" title="Merma" onclick="abrirModalMerma(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')"><i class="bi bi-box-arrow-down-right"></i></button>
+            <button class="btn btn-sm btn-outline-danger py-0 ms-1" title="Desactivar" onclick="desactivarProducto(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')"><i class="bi bi-trash"></i></button>
+        ` : `<button class="btn btn-sm btn-success py-0 fw-bold shadow-sm" title="Restaurar" onclick="restaurarProducto(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')"><i class="bi bi-arrow-counterclockwise"></i> Restaurar</button>`;
+
+        tbody.innerHTML += `<tr class="${claseFila}"><td class="text-muted align-middle">${p.codigo_barras || 'S/C'}</td><td class="align-middle"><div class="fw-bold lh-1">${p.nombre}</div>${htmlPromo}${alertaVencHTML}</td><td class="align-middle"><span class="badge bg-primary">${nombreCat}</span></td><td class="text-end text-muted align-middle">$ ${costoF}</td><td class="text-end fw-bold text-success align-middle">$ ${precioF}</td><td class="text-center align-middle"><span class="badge ${badgeClase} rounded-pill px-3">${textoStock}</span>${htmlLotes}</td><td class="text-center align-middle">${botonesAccion}</td></tr>`;
+    });
+}
+
+function renderizarControlesPaginacion(totalPaginas) {
+    const contenedor = document.getElementById('paginacionProductos');
+    if (!contenedor) return;
+
+    if (!totalPaginas || totalPaginas <= 1) {
+        contenedor.innerHTML = '';
+        return;
+    }
+
+    let html = `<div class="btn-group shadow-sm">`;
+    html += `<button class="btn btn-outline-primary ${paginaActualProd <= 1 ? 'disabled' : ''}" 
+                onclick="cambiarPaginaProd(${paginaActualProd - 1})"><i class="bi bi-chevron-left"></i> Anterior</button>`;
+    
+    html += `<span class="btn btn-light disabled text-dark fw-bold px-3">Pág. ${paginaActualProd} de ${totalPaginas}</span>`;
+    
+    html += `<button class="btn btn-outline-primary ${paginaActualProd >= totalPaginas ? 'disabled' : ''}" 
+                onclick="cambiarPaginaProd(${paginaActualProd + 1})">Siguiente <i class="bi bi-chevron-right"></i></button>`;
+    html += `</div>`;
+    
+    contenedor.innerHTML = html;
+}
+
+function cambiarPaginaProd(nuevaPagina) {
+    cargarCatalogo(nuevaPagina);
+    document.querySelector('.content-area').scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Navegación por flechas (Vinculada al nuevo motor)
+document.addEventListener('keydown', (e) => {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+    if (document.querySelector('.modal.show')) return;
+    if (!document.getElementById('tab-catalogo').classList.contains('active')) return;
+
+    if (e.key === 'ArrowRight') {
+        e.preventDefault(); 
+        if (paginaActualProd < totalPaginasGlobal) cambiarPaginaProd(paginaActualProd + 1);
+    } else if (e.key === 'ArrowLeft') {
+        e.preventDefault(); 
+        if (paginaActualProd > 1) cambiarPaginaProd(paginaActualProd - 1);
+    }
+});
 
 // ==========================================
 // ABM DE CATEGORÍAS (RUBROS)
@@ -29,21 +213,18 @@ async function cargarCategoriasGlobales() {
         const data = await res.json();
         categoriasGlobales = data.categorias || [];
 
-        // 1. Selector Catálogo
         let selFiltro = document.getElementById('selectFiltroCategoria');
         if (selFiltro) {
             selFiltro.innerHTML = '<option value="">Todas las Categorías</option>';
             categoriasGlobales.forEach(c => selFiltro.innerHTML += `<option value="${c.id}">${c.nombre}</option>`);
         }
 
-        // 2. Selector Modal ABM
         let selModal = document.getElementById('selectCategoria');
         if (selModal) {
             selModal.innerHTML = '';
             categoriasGlobales.forEach(c => selModal.innerHTML += `<option value="${c.id}">${c.nombre}</option>`);
         }
 
-        // 3. PARCHE: Selectores Masivos (Necesitan el formato cat_ID para que no se rompan las búsquedas)
         const selectsMasivos = ['masivaFiltro', 'etiquetaMasivaFiltro'];
         selectsMasivos.forEach(id_elemento => {
             let sel = document.getElementById(id_elemento);
@@ -68,7 +249,6 @@ async function cargarProveedoresGlobales() {
 
         let selModal = document.getElementById('selectProveedor');
         if (selModal) {
-            // EL ARREGLO: Ponemos value="0" para que no choque con tu ID 1 ("El Molino")
             selModal.innerHTML = '<option value="0">-- Sin Proveedor --</option>';
             proveedoresReales.filter(p => p.activo !== 0).forEach(p => {
                 selModal.innerHTML += `<option value="${p.id}">${p.nombre_comercial}</option>`;
@@ -86,7 +266,6 @@ async function cargarProveedoresGlobales() {
 }
 
 async function gestionarCategoriasUI() {
-    // Armamos una listita HTML con botón de borrar para cada categoría
     let htmlLista = categoriasGlobales.map(c => `
         <div class="d-flex justify-content-between align-items-center p-2 border-bottom">
             <span class="fw-bold text-start">${c.nombre}</span>
@@ -118,8 +297,8 @@ async function crearCategoriaUI() {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ nombre: nombre }) 
         });
-        await cargarCategoriasGlobales(); // Recargamos la memoria
-        gestionarCategoriasUI(); // Recargamos el cuadrito de SweetAlert
+        await cargarCategoriasGlobales(); 
+        gestionarCategoriasUI(); 
     } catch (e) { Swal.fire('Error', 'No se pudo crear.', 'error'); }
 }
 
@@ -131,7 +310,6 @@ async function borrarCategoria(id, nombre) {
         gestionarCategoriasUI();
     } catch (e) { Swal.fire('Error', 'No se pudo borrar.', 'error'); }
 }
-
 
 function cambiarPestana(id, evento = null) {
     document.querySelectorAll('#productTabs .nav-link').forEach(el => el.classList.remove('active'));
@@ -145,13 +323,8 @@ function cambiarPestana(id, evento = null) {
     }
     document.getElementById('tab-' + id).classList.add('active');
 
-    // EL INTERRUPTOR CORRECTO PARA CADA PESTAÑA
-    if (id === 'cat-pos') {
-        cargarBotonesPOS();
-    }
-    if (id === 'combos') {
-        cargarListadoCombos(); // <--- AHORA SÍ LLAMA A LOS COMBOS
-    }
+    if (id === 'cat-pos') cargarBotonesPOS();
+    if (id === 'combos') cargarListadoCombos(); 
 }
 
 function cambiarPestanaAbm(id) {
@@ -167,128 +340,61 @@ function toggleAlertaDias() {
 }
 
 document.getElementById('modalNuevoProducto').addEventListener('keypress', function(e) {
-            // Si hay una alerta (Swal) abierta, ignoramos el Enter para que solo cierre la alerta
-            if (typeof Swal !== 'undefined' && Swal.isVisible()) return;
+    if (typeof Swal !== 'undefined' && Swal.isVisible()) return;
 
-            if (e.key === 'Enter' && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'TEXTAREA') { 
-                e.preventDefault(); 
-                
-                // PARCHE LECTORA DE BARRAS: Si estamos en el código, pasamos al Nombre
-                if (e.target.id === 'inputCodigo') {
-                    document.getElementById('inputNombre').focus();
-                    return; // Cortamos la orden acá para que no guarde
-                }
+    if (e.key === 'Enter' && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'TEXTAREA') { 
+        e.preventDefault(); 
+        
+        if (e.target.id === 'inputCodigo') {
+            document.getElementById('inputNombre').focus();
+            return; 
+        }
 
-                guardarProductoCompleto(); 
-            }
-        });
+        guardarProductoCompleto(); 
+    }
+});
 
 document.querySelector('[data-bs-target="#modalNuevoProducto"]').addEventListener('click', () => {
-    // SACAMOS EL CANDADO
-            document.querySelector('button[onclick="generarCodigoInterno()"]').disabled = false;
-            document.getElementById('inputCodigo').removeAttribute('readonly');
-            document.getElementById('inputCodigo').classList.remove('bg-light', 'text-muted');
-            // Prendemos la varita mágica y liberamos el código
-            productoEditandoId = null;
-            document.querySelector('#modalNuevoProducto .modal-title').innerHTML = `<i class="bi bi-box-seam"></i> Alta de Producto`;
-            cambiarPestanaAbm('precios');
-            
-            // LIMPIR TODO
-            document.getElementById('inputUnidadesBulto').value = '1';
-            document.querySelectorAll('#modalNuevoProducto input').forEach(input => input.value = '');
-            document.getElementById('selectUnidadMedida').value = 'Unidad'; 
-            document.getElementById('selectCategoria').value = '1';
-            document.getElementById('selectProveedor').value = '1';
-            document.getElementById('inputMargen').value = '40'; 
-            let campoNuevoIva = document.getElementById('inputIva');
-                campoNuevoIva.value = '21.0'; 
-                if (campoNuevoIva.selectedIndex === -1) {
-                    campoNuevoIva.value = '21'; 
-                }
-            document.getElementById('inputAlertaStock').value = '5'; 
-            document.getElementById('inputDiasAlerta').value = '10';
-            
-            reglasMayoristas = []; dibujarTablaReglas();
-            componentesComboActual = []; dibujarTablaComponentes();
-            document.querySelector('#tab-abm-lotes table tbody').innerHTML = '<tr><td colspan="6" class="text-muted">Aún no hay lotes ingresados.</td></tr>';
-            
-            document.getElementById('btnAgregarLoteRapido').style.display = 'none';
-            document.getElementById('msgLoteNuevo').style.display = 'block';
-        });
-
-async function cargarCatalogo() {
-    const loader = document.getElementById('loaderServidor');
-    const contenedor = document.getElementById('productTabsContent');
-    const tbody = document.getElementById('tablaCatalogoBody');
+    document.querySelector('button[onclick="generarCodigoInterno()"]').disabled = false;
+    document.getElementById('inputCodigo').removeAttribute('readonly');
+    document.getElementById('inputCodigo').classList.remove('bg-light', 'text-muted');
+    productoEditandoId = null;
+    document.querySelector('#modalNuevoProducto .modal-title').innerHTML = `<i class="bi bi-box-seam"></i> Alta de Producto`;
+    cambiarPestanaAbm('precios');
     
-    if (tbody) {
-        // --- SKELETON LOADER (Efecto Corporativo Moderno) ---
-        let skeletonHtml = '';
-        for (let i = 0; i < 8; i++) {
-            skeletonHtml += `
-            <tr class="placeholder-glow">
-                <td class="align-middle"><span class="placeholder col-8 bg-secondary opacity-25"></span></td>
-                <td class="align-middle"><span class="placeholder col-10 bg-secondary opacity-25"></span></td>
-                <td class="align-middle"><span class="placeholder col-6 bg-secondary opacity-25"></span></td>
-                <td class="text-end align-middle"><span class="placeholder col-8 bg-secondary opacity-25"></span></td>
-                <td class="text-end align-middle"><span class="placeholder col-8 bg-secondary opacity-25"></span></td>
-                <td class="text-center align-middle"><span class="placeholder col-8 bg-secondary opacity-25 rounded-pill" style="height:20px;"></span></td>
-                <td class="text-center align-middle"><span class="placeholder col-8 bg-secondary opacity-25"></span></td>
-            </tr>`;
+    document.getElementById('inputUnidadesBulto').value = '1';
+    document.querySelectorAll('#modalNuevoProducto input').forEach(input => input.value = '');
+    document.getElementById('selectUnidadMedida').value = 'Unidad'; 
+    document.getElementById('selectCategoria').value = '1';
+    document.getElementById('selectProveedor').value = '0';
+    document.getElementById('inputMargen').value = '40'; 
+    let campoNuevoIva = document.getElementById('inputIva');
+        campoNuevoIva.value = '21.0'; 
+        if (campoNuevoIva.selectedIndex === -1) {
+            campoNuevoIva.value = '21'; 
         }
-        tbody.innerHTML = skeletonHtml;
-    }
-
-    if (loader) loader.style.display = 'none'; // Ya no usamos el spinner viejo
-    if (contenedor) contenedor.style.display = 'block';
-
-    try {
-        let filtroElemento = document.getElementById('filtroEstado');
-        let filtroSelect = filtroElemento ? filtroElemento.value : '1';
-        
-        let url = `${obtenerBaseUrl()}/productos/listar`;
-        if (filtroSelect === 'critico') { 
-            url += '?estado=1&alerta_stock=true'; 
-        } else if (filtroSelect === 'vencimiento') {
-            url += '?estado=1&alerta_vencimiento=true';
-        
-        } else if (filtroSelect === 'sincodigo') {
-            url += '?estado=1&sin_codigo=true';
-        } else { 
-            
-            url += `?estado=${filtroSelect}`; 
-        }
-        
-        const response = await apiFetch(url);
-        const data = await response.json();
-        productosGlobales = data.productos || [];
-        
-        if (typeof filtrarCatalogoFront === 'function') filtrarCatalogoFront(); 
-        
-        try { if (typeof llenarSelectEtiquetas === 'function') llenarSelectEtiquetas(); } catch(e){}
-        try { if (typeof llenarSelectComponentes === 'function') llenarSelectComponentes(); } catch(e){}
-        
-    } catch (error) { 
-        console.error("Error crítico cargando catálogo:", error); 
-        if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-5 fw-bold"><i class="bi bi-wifi-off display-6 d-block mb-2"></i> Sin conexión al catálogo.<br><small class="text-muted">Revisá la red y recargá (F5)</small></td></tr>`;
-        }
-    }
-}
+    document.getElementById('inputAlertaStock').value = '5'; 
+    document.getElementById('inputDiasAlerta').value = '10';
+    
+    reglasMayoristas = []; dibujarTablaReglas();
+    componentesComboActual = []; dibujarTablaComponentes();
+    document.querySelector('#tab-abm-lotes table tbody').innerHTML = '<tr><td colspan="6" class="text-muted">Aún no hay lotes ingresados.</td></tr>';
+    
+    document.getElementById('btnAgregarLoteRapido').style.display = 'none';
+    document.getElementById('msgLoteNuevo').style.display = 'block';
+});
 
 // ========================================================
-// 1. MAGIA EXPORTAR A EXCEL (CON SELECTOR DE COLUMNAS)
+// 1. MAGIA EXPORTAR A EXCEL 
 // ========================================================
 function obtenerProductosFiltradosActuales() {
     let textoBusqueda = document.getElementById('inputBuscarCatalogo').value.toLowerCase().trim();
     let categoriaSeleccionada = document.getElementById('selectFiltroCategoria').value;
     let proveedorSeleccionado = document.getElementById('selectFiltroProveedor').value; 
 
-    // 1. Separamos lo que tipeaste en palabras sueltas
     let palabras = textoBusqueda.split(" ").filter(p => p !== "");
 
     return productosGlobales.filter(p => {
-        // 2. EL PARCHE INTELIGENTE: Verificamos que el producto contenga TODAS las palabras
         let coincideTexto = palabras.every(palabra => 
             p.nombre.toLowerCase().includes(palabra) || 
             (p.codigo_barras && p.codigo_barras.toLowerCase().includes(palabra))
@@ -311,7 +417,7 @@ async function abrirModalExportar() {
                         <label class="form-label fw-bold small text-primary">1. ¿Qué productos exportar?</label>
                         <select id="swal-export-rango" class="form-select form-select-sm mb-3 border-primary">
                             <option value="filtrado">Solo los que se ven en la tabla ahora</option>
-                            <option value="todo">Catálogo completo (Todos)</option>
+                            <option value="todo">Catálogo completo (Aviso: Si está paginado, solo exporta la página actual)</option>
                         </select>
 
                         <label class="form-label fw-bold small text-primary">2. ¿Qué columnas incluir?</label>
@@ -354,7 +460,6 @@ async function abrirModalExportar() {
 
         listaAExportar.forEach(p => {
             let row = [];
-            // EL PARCHE DEL EXCEL: Le agregamos un ="..." para forzar a Excel a leerlo como Texto
             if (cols.includes('codigo')) row.push(p.codigo_barras ? `="${p.codigo_barras}"` : "");
             if (cols.includes('nombre')) row.push(`"${p.nombre}"`);
             if (cols.includes('rubro')) row.push(p.categoria_id);
@@ -385,150 +490,6 @@ async function generarCodigoInterno() {
     } catch (e) { Swal.fire('Error', 'Problema conectando con Python.', 'error'); }
 }
 
-function filtrarCatalogoFront() {
-    // VERIFICAMOS SI HAY UNA PÁGINA GUARDADA EN MEMORIA
-    let paginaGuardada = sessionStorage.getItem('paginaRetorno');
-    
-    if (paginaGuardada) {
-        paginaActualProd = parseInt(paginaGuardada);
-        sessionStorage.removeItem('paginaRetorno'); // La borramos para que no quede trabada
-    } else {
-        // Si no hay memoria, significa que estás buscando algo, volvemos a la 1
-        paginaActualProd = 1;
-    }
-
-    let filtrados = obtenerProductosFiltradosActuales();
-    let estSelect = document.getElementById('filtroEstado').value;
-    
-    // Le pasamos la lista filtrada a tu tabla para que dibuje
-    dibujarTablaCatalogo(filtrados, estSelect);
-    let alturaGuardada = sessionStorage.getItem('alturaScroll');
-if (alturaGuardada) {
-    setTimeout(() => { window.scrollTo(0, parseInt(alturaGuardada)); }, 100);
-    sessionStorage.removeItem('alturaScroll');
-}
-}
-
-// Variables globales para la paginación (ponelas arriba de todo en tu archivo)
-let paginaActualProd = 1;
-const itemsPorPagina = 50;
-let ultimaListaFiltrada = []; // Guardamos la lista actual para poder cambiar de página
-let ultimoEstadoSeleccionado = "1";
-
-// TU FUNCIÓN FUSIONADA
-function dibujarTablaCatalogo(listaProductos, estadoSeleccionado) {
-    // Guardamos estos datos para cuando toquemos "Siguiente" o "Anterior"
-    ultimaListaFiltrada = listaProductos;
-    ultimoEstadoSeleccionado = estadoSeleccionado;
-
-    const tbody = document.getElementById('tablaCatalogoBody');
-    tbody.innerHTML = '';
-
-    // --- 1. MATEMÁTICA DE PAGINACIÓN ---
-    const totalPaginas = Math.ceil(listaProductos.length / itemsPorPagina);
-    if (paginaActualProd > totalPaginas) paginaActualProd = totalPaginas;
-    if (paginaActualProd < 1) paginaActualProd = 1;
-
-    const inicio = (paginaActualProd - 1) * itemsPorPagina;
-    const fin = inicio + itemsPorPagina;
-    
-    // Cortamos la lista para agarrar solo los 50 de esta página
-    const listaPaginada = listaProductos.slice(inicio, fin);
-
-    if(listaPaginada.length === 0) { 
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Sin resultados.</td></tr>'; 
-        document.getElementById('paginacionProductos').innerHTML = ''; 
-        return; 
-    }
-
-    const hoy = new Date();
-    hoy.setHours(0,0,0,0);
-
-    // --- 2. TU LÓGICA DE DIBUJO INTACTA ---
-    listaPaginada.forEach(p => {
-        let htmlPromo = p.cant_promo ? `<div class="text-success small mt-1 lh-1"><i class="bi bi-tags-fill"></i> Llevando ${p.cant_promo}: $${p.precio_promo} c/u</div>` : '';
-        
-        let stock = p.stock_total || 0;
-        let minimo = p.stock_minimo_alerta || 0;
-        
-        // EL SEMÁFORO NORMAL
-        let badgeClase = stock <= 0 ? 'bg-danger' : (stock <= minimo ? 'bg-warning text-dark' : 'bg-success');
-        let textoStock = `${stock} ${p.unidad_medida === 'Unidad' ? 'un' : p.unidad_medida}`;
-        let htmlLotes = p.cantidad_lotes > 1 ? `<div class="small text-muted mt-1 lh-1"><i class="bi bi-layers"></i> ${p.cantidad_lotes} Lotes</div>` : '';
-        
-        // --- LA INYECCIÓN PARA LOS COMBOS ---
-        if (p.es_combo > 0) {
-            badgeClase = 'bg-info text-dark border border-info shadow-sm';
-            textoStock = '<i class="bi bi-boxes"></i> COMBO';
-            htmlLotes = ''; // Ocultamos lo de los lotes porque el combo no tiene lote físico
-        }
-        // ------------------------------------
-        
-        let alertaVencHTML = '';
-        if (p.prox_vencimiento && p.dias_alerta_vencimiento > 0) {
-            const fechaV = new Date(p.prox_vencimiento + "T00:00:00");
-            const difDias = Math.ceil((fechaV - hoy) / (1000 * 60 * 60 * 24));
-            if (difDias < 0) {
-                alertaVencHTML = `<div class="text-danger small mt-1 fw-bold"><i class="bi bi-exclamation-triangle-fill"></i> ¡Vencido hace ${Math.abs(difDias)} días!</div>`;
-            } else if (difDias <= p.dias_alerta_vencimiento) {
-                alertaVencHTML = `<div class="text-warning small mt-1 fw-bold" style="color: #d97706!important;"><i class="bi bi-clock-history"></i> Vence en ${difDias} días</div>`;
-            }
-        }
-
-        let catReal = categoriasGlobales.find(c => c.id === p.categoria_id);
-        let nombreCat = catReal ? catReal.nombre : 'Sin Rubro';
-
-        let costoF = (p.costo_sin_iva || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
-        let unidad = p.unidad_medida && p.unidad_medida !== 'Unidad' ? `x ${p.unidad_medida}` : '';
-        let precioF = (p.precio_venta_final || 0).toLocaleString('es-AR', {minimumFractionDigits: 2}) + ` <span class="small text-muted">${unidad}</span>`;
-        
-        let claseFila = estadoSeleccionado === "0" ? 'producto-inactivo' : '';
-        
-        let botonesAccion = estadoSeleccionado !== "0" ? `
-            <button class="btn btn-sm btn-outline-primary py-0" title="Editar" onclick="abrirEditarProducto(${p.id})"><i class="bi bi-pencil"></i></button>
-            <button class="btn btn-sm btn-outline-info py-0" title="Clonar (Copiar)" onclick="clonarProducto(${p.id})"><i class="bi bi-files"></i></button>
-            <button class="btn btn-sm btn-outline-warning py-0" title="Merma" onclick="abrirModalMerma(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')"><i class="bi bi-box-arrow-down-right"></i></button>
-            <button class="btn btn-sm btn-outline-danger py-0 ms-1" title="Desactivar" onclick="desactivarProducto(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')"><i class="bi bi-trash"></i></button>
-        ` : `<button class="btn btn-sm btn-success py-0 fw-bold shadow-sm" title="Restaurar" onclick="restaurarProducto(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')"><i class="bi bi-arrow-counterclockwise"></i> Restaurar</button>`;
-
-        // USAMOS textoStock EN VEZ DEL HARDCODEO
-        tbody.innerHTML += `<tr class="${claseFila}"><td class="text-muted align-middle">${p.codigo_barras || 'S/C'}</td><td class="align-middle"><div class="fw-bold lh-1">${p.nombre}</div>${htmlPromo}${alertaVencHTML}</td><td class="align-middle"><span class="badge bg-primary">${nombreCat}</span></td><td class="text-end text-muted align-middle">$ ${costoF}</td><td class="text-end fw-bold text-success align-middle">$ ${precioF}</td><td class="text-center align-middle"><span class="badge ${badgeClase} rounded-pill px-3">${textoStock}</span>${htmlLotes}</td><td class="text-center align-middle">${botonesAccion}</td></tr>`;
-    });
-
-    // --- 3. DIBUJAR LOS BOTONES DE PÁGINA ---
-    renderizarControlesPaginacion(totalPaginas);
-}
-
-// Dibuja los botones de Siguiente / Anterior
-function renderizarControlesPaginacion(totalPaginas) {
-    const contenedor = document.getElementById('paginacionProductos');
-    if (!contenedor) return;
-
-    if (totalPaginas <= 1) {
-        contenedor.innerHTML = '';
-        return;
-    }
-
-    let html = `<div class="btn-group shadow-sm">`;
-    html += `<button class="btn btn-outline-primary ${paginaActualProd === 1 ? 'disabled' : ''}" 
-                onclick="cambiarPaginaProd(${paginaActualProd - 1})"><i class="bi bi-chevron-left"></i> Anterior</button>`;
-    
-    html += `<span class="btn btn-light disabled text-dark fw-bold">Pág. ${paginaActualProd} de ${totalPaginas}</span>`;
-    
-    html += `<button class="btn btn-outline-primary ${paginaActualProd === totalPaginas ? 'disabled' : ''}" 
-                onclick="cambiarPaginaProd(${paginaActualProd + 1})">Siguiente <i class="bi bi-chevron-right"></i></button>`;
-    html += `</div>`;
-    
-    contenedor.innerHTML = html;
-}
-
-// Ejecuta el cambio de página y redibuja
-function cambiarPaginaProd(nuevaPagina) {
-    paginaActualProd = nuevaPagina;
-    dibujarTablaCatalogo(ultimaListaFiltrada, ultimoEstadoSeleccionado);
-    // Hacemos que la pantalla suba suavemente hasta el principio de la tabla
-    document.querySelector('.content-area').scrollTo({ top: 0, behavior: 'smooth' });
-}
 
 // ==========================================
 // 3. ABM Y CÁLCULOS
@@ -576,12 +537,10 @@ async function agregarLoteRapido() {
             showConfirmButton: false 
         }); 
 
-        // 🧹 LIMPIEZA AUTOMÁTICA
         document.getElementById('inputNumLote').value = "";
         document.getElementById('inputCantLote').value = "";
         document.getElementById('inputCostoLote').value = "";
         
-        // EL ARREGLO: Recargamos la tabla de lotes y el catálogo sin funciones inventadas
         abrirEditarProducto(productoEditandoId, 'lotes'); 
         cargarCatalogo(); 
     } catch (e) { 
@@ -594,9 +553,8 @@ async function agregarLoteRapido() {
     }
 }
 
-let idsExcluidosMasiva = []; // Memoria para la lista negra
+let idsExcluidosMasiva = []; 
 
-// NUEVA FUNCION PARA EL ICONO
 function cambiarIconoAjuste() {
     const esPorcentaje = document.getElementById('masivaTipoPorcentaje').checked;
     const icono = document.getElementById('iconoAjusteMasivo');
@@ -609,7 +567,7 @@ async function simularAjusteMasivo() {
     
     const valorAjuste = parseFloat(document.getElementById('masivaValor').value);
     const esFijo = document.getElementById('masivaTipoFijo').checked; 
-    const esSumar = document.getElementById('masivaTipoSumar').checked; // <-- NUEVO
+    const esSumar = document.getElementById('masivaTipoSumar').checked; 
     
     if (isNaN(valorAjuste)) return Swal.fire('Error', 'Ingresá un valor válido', 'warning');
 
@@ -621,6 +579,7 @@ async function simularAjusteMasivo() {
     const filtroId = parseInt(filtroVal.split('_')[1]) || 0;
     const busqueda = document.getElementById('masivaPalabra').value.toLowerCase().trim();
 
+    // Acá usamos productosGlobales que tiene la memoria de LA PÁGINA ACTUAL
     const filtrados = productosGlobales.filter(p => {
         let coincideFiltro = true;
         if (tipoFiltro === 'cat') coincideFiltro = (p.categoria_id === filtroId);
@@ -646,7 +605,7 @@ async function simularAjusteMasivo() {
 
         if (esFijo) {
             n = valorAjuste;
-            if (afCosto) nC = c; // ESCUDO: Si forzás precio exacto, NO pisamos el costo para no destruir el margen.
+            if (afCosto) nC = c; 
         } else if (esSumar) {
             n = v + valorAjuste;
             if (afCosto) nC = c + valorAjuste;
@@ -673,16 +632,13 @@ async function simularAjusteMasivo() {
     });
 }
 
-// NUEVA FUNCIÓN: Al tocar la crucecita, lo borra visualmente y lo anota en la lista negra
 function quitarDeSimulacion(id, btnElement) {
     idsExcluidosMasiva.push(id);
     btnElement.closest('tr').remove();
     
-    // Restamos 1 al contador azul de arriba
     const contadorActual = parseInt(document.getElementById('simuladorContador').innerText);
     document.getElementById('simuladorContador').innerText = `${contadorActual - 1} productos afectados`;
     
-    // Si borraste todos a mano, escondemos el botón de guardar
     if(contadorActual - 1 === 0) {
         document.getElementById('footerSimulador').classList.add('d-none');
         document.querySelector('#tablaSimulacion tbody').innerHTML = '<tr><td colspan="5" class="text-muted py-5">No quedaron productos en la lista.</td></tr>';
@@ -698,7 +654,6 @@ async function confirmarAjusteMasivo() {
     const valorNum = parseFloat(document.getElementById('masivaValor').value); 
     const afCosto = document.getElementById('masivaCostoYVenta').checked; 
     
-    // Identificamos exactamente qué tipo de ajuste eligió
     const tAjuste = document.getElementById('masivaTipoPorcentaje').checked ? 'porcentaje' : (document.getElementById('masivaTipoSumar').checked ? 'sumar' : 'fijo');
     
     try { 
@@ -720,7 +675,7 @@ async function confirmarAjusteMasivo() {
 
 async function abrirEditarProducto(id, pestana = 'precios') {
     productoEditandoId = id;
-cambiarPestanaAbm(pestana); 
+    cambiarPestanaAbm(pestana); 
     
     document.querySelectorAll('#modalNuevoProducto input').forEach(i => i.value = '');
 
@@ -729,25 +684,22 @@ cambiarPestanaAbm(pestana);
         const p = await response.json(); 
         if (p.error) throw new Error(p.error);
 
-const codigoActual = p.codigo_barras || "";
+        const codigoActual = p.codigo_barras || "";
         document.getElementById('inputCodigo').value = codigoActual;
         
         const btnGenerarCodigo = document.querySelector('button[onclick="generarCodigoInterno()"]');
         
         if (codigoActual.trim() !== "") {
-            // Si YA TIENE código, ponemos el candado para que no lo rompan
             document.getElementById('inputCodigo').setAttribute('readonly', true);
             document.getElementById('inputCodigo').classList.add('bg-light', 'text-muted');
             if (btnGenerarCodigo) btnGenerarCodigo.disabled = true;
         } else {
-            // Si está VACÍO, abrimos el candado para que lo puedas cargar
             document.getElementById('inputCodigo').removeAttribute('readonly');
             document.getElementById('inputCodigo').classList.remove('bg-light', 'text-muted');
             if (btnGenerarCodigo) btnGenerarCodigo.disabled = false;
         }
         document.getElementById('inputNombre').value = p.nombre;
         
-        // REFUERZO: Esperamos pacientemente a que la lista cargue antes de asignar
         let intentos = 0;
         const interval = setInterval(() => {
             const selProv = document.getElementById('selectProveedor');
@@ -764,30 +716,26 @@ const codigoActual = p.codigo_barras || "";
         document.getElementById('selectUnidadMedida').value = p.unidad_medida || 'Unidad';
         document.getElementById('inputUnidadesBulto').value = p.unidades_por_bulto || 1;
         document.getElementById('inputCosto').value = p.costo_sin_iva;
-// --- BLINDAJE DEL IVA ---
+
         let ivaLimpio = p.porcentaje_iva;
-        if (ivaLimpio === null || ivaLimpio === undefined || ivaLimpio === "") ivaLimpio = 21; // Si viene vacío, asume 21
-        if (ivaLimpio > 0 && ivaLimpio <= 1) ivaLimpio = ivaLimpio * 100;  // Si Python manda 0.21, lo convierte a 21
+        if (ivaLimpio === null || ivaLimpio === undefined || ivaLimpio === "") ivaLimpio = 21; 
+        if (ivaLimpio > 0 && ivaLimpio <= 1) ivaLimpio = ivaLimpio * 100;  
 
         let ivaFinal = parseFloat(ivaLimpio);
         let campoIva = document.getElementById('inputIva');
         
-        // Intento 1: Buscar como número entero/limpio (Ej: "21" o "10.5")
         campoIva.value = ivaFinal; 
         
-        // Intento 2: Si falló y quedó vacío, buscar con un decimal (Ej: "21.0")
         if (campoIva.value === "" || campoIva.selectedIndex === -1) {
             campoIva.value = ivaFinal.toFixed(1); 
         }
         
-        // Intento 3: Si sigue fallando, buscar con dos decimales (Ej: "21.00")
         if (campoIva.value === "" || campoIva.selectedIndex === -1) {
             campoIva.value = ivaFinal.toFixed(2); 
         }
 
         document.getElementById('inputPrecioVenta').value = p.precio_venta_final;
 
-        // ---> LA MATEMÁTICA CORRECTA DEL MARGEN <---
         let costoConIva = p.costo_sin_iva * (1 + (ivaFinal / 100));
         
         if (costoConIva > 0) {
@@ -813,7 +761,7 @@ const codigoActual = p.codigo_barras || "";
             const diasAlertaSeteado = p.dias_alerta_vencimiento || 10;
             const hoy = new Date(); hoy.setHours(0,0,0,0); 
 
-const rolActual = localStorage.getItem('usuario_rol');
+            const rolActual = localStorage.getItem('usuario_rol');
 
             p.lotes.forEach(l => {
                 let cartelVenc = '<span class="badge bg-secondary">Seco</span>';
@@ -825,7 +773,6 @@ const rolActual = localStorage.getItem('usuario_rol');
                     else cartelVenc = `<br><span class="badge bg-success mt-1">Ok (${difDias} días)</span>`;
                 }
 
-                // EL CANDADO DE SEGURIDAD: Solo el ADMIN ve los botones de Lápiz y Tacho
                 let botonesAccionLote = '';
                 if (rolActual === 'ADMIN') {
                     botonesAccionLote = `
@@ -852,14 +799,14 @@ const rolActual = localStorage.getItem('usuario_rol');
 
         componentesComboActual = p.componentes_combo || [];
         dibujarTablaComponentes();
-try {
+        
+        try {
             const resHist = await apiFetch(`${obtenerBaseUrl()}/productos/movimientos/${id}`);
             const dataHist = await resHist.json();
             
             const tbHist = document.getElementById('tablaHistorialProd');
             tbHist.innerHTML = '';
             
-            // EL DETECTOR DE MENTIRAS: Si Python tira error, frenamos todo y lo mostramos
             if (dataHist.error) throw new Error(dataHist.error);
             
             if (dataHist.movimientos && dataHist.movimientos.length > 0) {
@@ -867,7 +814,6 @@ try {
                     let color = m.tipo_movimiento.toLowerCase().includes('ingreso') ? 'text-success' : 'text-danger';
                     let signo = m.tipo_movimiento.toLowerCase().includes('ingreso') ? '+' : '-';
                     
-                    // EL ARREGLO: Leemos "m.motivo"
                     let detalle = m.motivo ? `<br><small class="text-muted fw-normal">${m.motivo}</small>` : '';
 
                     tbHist.innerHTML += `<tr>
@@ -934,14 +880,11 @@ async function guardarProductoCompleto() {
         const data = await res.json();
         if (data.error) throw new Error(data.error); 
         
-        // Cerramos el modal y recargamos el catálogo en segundo plano
         bootstrap.Modal.getInstance(document.getElementById('modalNuevoProducto')).hide();
         sessionStorage.setItem('paginaRetorno', paginaActualProd);
         sessionStorage.setItem('alturaScroll', window.scrollY);
         cargarCatalogo(); 
         
-        // --- EL NUEVO MOTOR DE ENCOLADO AUTOMÁTICO ---
-        // Rescatamos el ID (si era nuevo, Python lo devuelve. Si era edición, usamos el que teníamos)
         const idGuardado = productoEditandoId || data.producto_id || data.id;
 
         if (idGuardado) {
@@ -957,7 +900,6 @@ async function guardarProductoCompleto() {
             });
 
             if (confirmEtiqueta.isConfirmed) {
-                // Le pegamos directo a la API de etiquetas sin pasar por la UI vieja
                 await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1007,8 +949,6 @@ async function abrirModalMerma(id, nombre) {
         document.getElementById('mermaCantidad').value = "1";
         document.getElementById('mermaObservaciones').value = "";
         
-        // ¡ACÁ ESTABA EL ERROR! Borramos la línea que pedía el mermaPin.
-
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalMerma')).show();
     } catch (e) {
         Swal.fire('Error', 'No se pudieron cargar los lotes.', 'error');
@@ -1039,7 +979,6 @@ async function confirmarMerma() {
         await Swal.fire('¡Merma Registrada!', 'El stock fue descontado y registrado en la auditoría.', 'success');
         bootstrap.Modal.getInstance(document.getElementById('modalMerma')).hide();
         
-        // --- EL PARCHE DE MEMORIA ANTES DE RECARGAR ---
         sessionStorage.setItem('paginaRetorno', paginaActualProd);
         sessionStorage.setItem('alturaScroll', window.scrollY);
         
@@ -1050,11 +989,9 @@ async function confirmarMerma() {
 }
 
 async function forzarDescargaRapida(evento) {
-    // 1. ESCUDO ANTI-RECARGA: Frena cualquier "refresh" fantasma automático del HTML
     if (evento) evento.preventDefault();
     else if (window.event) window.event.preventDefault();
 
-    // 2. CLONACIÓN INBORRABLE: Anotamos dónde estás parado antes de hacer nada
     let paginaSegura = paginaActualProd;
     let scrollSeguro = window.scrollY;
 
@@ -1066,8 +1003,6 @@ async function forzarDescargaRapida(evento) {
         
         await cargarCategoriasGlobales();
         
-        // 3. INYECCIÓN JUSTO A TIEMPO: Guardamos la memoria un milisegundo antes 
-        // de recargar el catálogo, para que sea imposible que se borre en la espera.
         sessionStorage.setItem('paginaRetorno', paginaSegura);
         sessionStorage.setItem('alturaScroll', scrollSeguro);
         
@@ -1123,7 +1058,7 @@ async function guardarBotonPOS(id, iconoActual) {
             body: JSON.stringify({ nombre: nombre, palabra_clave: clave, icono: iconoActual, color_fondo: color })
         });
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Botón actualizado', showConfirmButton: false, timer: 1500 });
-        cargarBotonesPOS(); // Recarga la tablita
+        cargarBotonesPOS(); 
     } catch (e) {
         Swal.fire('Error', 'No se pudo guardar', 'error');
     }
@@ -1138,20 +1073,21 @@ function buscarComponenteCombo(busqueda) {
     const contenedor = document.getElementById('resultadosBusquedaCombo');
     if (busqueda.length < 2) { contenedor.classList.add('d-none'); return; }
 
-    const filtrados = productosGlobales.filter(p =>
-        p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-        (p.codigo_barras && p.codigo_barras.includes(busqueda))
-    ).slice(0, 10);
-
-    contenedor.innerHTML = '';
-    filtrados.forEach(p => {
-        contenedor.innerHTML += `
-            <button type="button" class="list-group-item list-group-item-action small py-1" 
-                onclick="seleccionarComponente(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')">
-                <b>${p.codigo_barras || 'S/C'}</b> - ${p.nombre} ($${p.precio_venta_final})
-            </button>`;
-    });
-    contenedor.classList.remove('d-none');
+    // PARCHE: Para el combo buscamos en el servidor (la memoria solo tiene 50)
+    apiFetch(`${obtenerBaseUrl()}/productos/buscar?termino=${busqueda}`)
+        .then(res => res.json())
+        .then(data => {
+            const filtrados = data.productos || [];
+            contenedor.innerHTML = '';
+            filtrados.forEach(p => {
+                contenedor.innerHTML += `
+                    <button type="button" class="list-group-item list-group-item-action small py-1" 
+                        onclick="seleccionarComponente(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')">
+                        <b>${p.codigo_barras || 'S/C'}</b> - ${p.nombre} ($${p.precio_venta_final})
+                    </button>`;
+            });
+            contenedor.classList.remove('d-none');
+        });
 }
 
 function seleccionarComponente(id, nombre) {
@@ -1169,7 +1105,7 @@ function agregarComponenteUI() {
             nombre: componenteSeleccionadoTemporal.nombre,
             cantidad: cant
         });
-        dibujarTablaComponentes(); // <-- Esto era lo que faltaba y no dejaba que se vea!
+        dibujarTablaComponentes(); 
 
         componenteSeleccionadoTemporal = null;
         document.getElementById('inputBuscarComponente').value = "";
@@ -1188,22 +1124,12 @@ function dibujarTablaComponentes() {
     const tbody = document.getElementById('tablaComponentesCombo');
     tbody.innerHTML = '';
 
-    let costoSugerido = 0;
-    let precioSugerido = 0;
-
     if (componentesComboActual.length === 0) {
         tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Este producto no es un combo.</td></tr>';
         return;
     }
 
     componentesComboActual.forEach((c, idx) => {
-        // Buscamos el producto real en la memoria para saber su costo/precio
-        const pReal = productosGlobales.find(p => p.id === c.id);
-        if (pReal) {
-            costoSugerido += (pReal.costo_sin_iva * c.cantidad);
-            precioSugerido += (pReal.precio_venta_final * c.cantidad);
-        }
-
         tbody.innerHTML += `
             <tr>
                 <td>${c.nombre}</td>
@@ -1214,14 +1140,6 @@ function dibujarTablaComponentes() {
             </tr>
         `;
     });
-
-    // PARCHE: Autocompletar la pestaña de Precios para que no de error
-    document.getElementById('inputCosto').value = costoSugerido.toFixed(2);
-    // Sugerimos el precio sin descuento, el usuario después lo baja a mano
-    if (!productoEditandoId) {
-        document.getElementById('inputPrecioVenta').value = precioSugerido.toFixed(2);
-        calcularPrecioAutomatico(); // Esto calcula el margen automáticamente
-    }
 }
 
 // --- CARGAR PESTAÑA CENTRAL DE COMBOS ---
@@ -1261,16 +1179,13 @@ async function cargarListadoCombos() {
 }
 
 function limpiarFiltrosCatalogo() {
-    // Vaciamos todos los campos visuales
     if(document.getElementById('inputBuscarCatalogo')) document.getElementById('inputBuscarCatalogo').value = '';
     if(document.getElementById('selectFiltroCategoria')) document.getElementById('selectFiltroCategoria').value = '';
     if(document.getElementById('selectFiltroProveedor')) document.getElementById('selectFiltroProveedor').value = '';
     
-    // Dejamos el estado en "Activos" por defecto
     if(document.getElementById('filtroEstado')) document.getElementById('filtroEstado').value = '1';
     
-    // Recargamos el catálogo desde cero
-    cargarCatalogo();
+    cargarCatalogo(1);
 }
 
 async function corregirLoteUI(id, lote, vence, stock, costo) {
@@ -1320,7 +1235,6 @@ async function corregirLoteUI(id, lote, vence, stock, costo) {
 
     if (formValues) {
         try {
-            // ARREGLO: La ruta correcta es /productos/lotes/actualizar
             const res = await apiFetch(`${obtenerBaseUrl()}/productos/lotes/actualizar/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -1328,11 +1242,10 @@ async function corregirLoteUI(id, lote, vence, stock, costo) {
             });
             const data = await res.json();
             
-            // DETECTOR DE MENTIRAS: Si algo falló en Python, tiramos error real
             if (!res.ok || data.error) throw new Error(data.error || 'Error en el servidor');
 
             Swal.fire({ title: '¡Corregido!', icon: 'success', timer: 1500, showConfirmButton: false });
-            abrirEditarProducto(productoEditandoId, 'lotes'); // Recargamos el fondo
+            abrirEditarProducto(productoEditandoId, 'lotes'); 
         } catch (e) { 
             Swal.fire('Error', e.message || 'No se pudo actualizar.', 'error'); 
         }
@@ -1349,11 +1262,9 @@ async function eliminarLoteUI(id) {
 
     if (confirm.isConfirmed) {
         try {
-            // ARREGLO: La ruta correcta es /productos/lotes/eliminar
             const res = await apiFetch(`${obtenerBaseUrl()}/productos/lotes/eliminar/${id}`, { method: 'DELETE' });
             const data = await res.json();
             
-            // DETECTOR DE MENTIRAS
             if (!res.ok || data.error) throw new Error(data.error || 'Error en el servidor');
 
             await Swal.fire({title: 'Eliminado', text: 'El lote desapareció del sistema.', icon: 'success', target: document.getElementById('modalNuevoProducto')});
@@ -1366,52 +1277,23 @@ async function eliminarLoteUI(id) {
 }
 
 async function clonarProducto(id) {
-    // 1. Reutilizamos tu función para que llene todo el formulario
     await abrirEditarProducto(id, 'precios'); 
     
-    // 2. LA TRAMPA: Le borramos la memoria para que crea que es un producto nuevo
     productoEditandoId = null; 
     
-    // 3. Limpiamos la identidad (código, nombre y lotes viejos)
     document.querySelector('#modalNuevoProducto .modal-title').innerHTML = `<i class="bi bi-files text-info"></i> Clonando Producto...`;
     document.getElementById('inputCodigo').value = ''; 
     document.getElementById('inputNombre').value += ' (Copia)';
-    document.getElementById('inputNombre').select(); // Selecciona el texto para que escribas rápido
+    document.getElementById('inputNombre').select(); 
     
-    // 4. Liberamos los candados
     document.getElementById('inputCodigo').removeAttribute('readonly');
     document.getElementById('inputCodigo').classList.remove('bg-light', 'text-muted');
     document.querySelector('button[onclick="generarCodigoInterno()"]').disabled = false;
     
-    // 5. Ocultamos los lotes del producto viejo
     document.getElementById('btnAgregarLoteRapido').style.display = 'none';
     document.getElementById('msgLoteNuevo').style.display = 'block';
     document.querySelector('#tab-abm-lotes table tbody').innerHTML = '<tr><td colspan="6" class="text-muted">Ingresá el stock inicial aquí arriba.</td></tr>';
 }
-
-// ==========================================
-// NAVEGACIÓN POR FLECHAS (PAGINACIÓN)
-// ==========================================
-document.addEventListener('keydown', (e) => {
-    // Si el usuario está escribiendo en el buscador o en algún formulario, frenamos para no molestarlo
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-    
-    // Si hay alguna ventana flotante abierta (como la de Nuevo Producto), frenamos
-    if (document.querySelector('.modal.show')) return;
-
-    // Solo navegamos si estamos en la pestaña del catálogo
-    if (!document.getElementById('tab-catalogo').classList.contains('active')) return;
-
-    const totalPaginas = Math.ceil(ultimaListaFiltrada.length / itemsPorPagina);
-
-    if (e.key === 'ArrowRight') {
-        e.preventDefault(); // Evita que la pantalla se mueva a la derecha
-        if (paginaActualProd < totalPaginas) cambiarPaginaProd(paginaActualProd + 1);
-    } else if (e.key === 'ArrowLeft') {
-        e.preventDefault(); // Evita que la pantalla se mueva a la izquierda
-        if (paginaActualProd > 1) cambiarPaginaProd(paginaActualProd - 1);
-    }
-});
 
 // ==========================================
 // ESCANEO DIRECTO CON PISTOLA EN EL CATÁLOGO
@@ -1420,14 +1302,12 @@ let bufferEscaneo = '';
 let timeoutEscaneo = null;
 
 document.addEventListener('keydown', async (e) => {
-    // Si estás escribiendo o hay ventanas abiertas, la pistola no interrumpe
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
     if (document.querySelector('.modal.show')) return;
     if (!document.getElementById('tab-catalogo').classList.contains('active')) return;
 
     if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') return;
 
-    // La pistola escribe rapidísimo (menos de 50ms). Si tardás más, asumimos que fue un humano y borramos la memoria.
     clearTimeout(timeoutEscaneo);
     timeoutEscaneo = setTimeout(() => { bufferEscaneo = ''; }, 50);
 
@@ -1437,7 +1317,6 @@ document.addEventListener('keydown', async (e) => {
             try {
                 Swal.fire({ title: 'Buscando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
                 
-                // EL ARREGLO: Nombre correcto de variable y lectura de array
                 const resp = await apiFetch(`${obtenerBaseUrl()}/productos/buscar?termino=${bufferEscaneo}`);
                 const dataBusqueda = await resp.json();
 
@@ -1445,7 +1324,6 @@ document.addEventListener('keydown', async (e) => {
                     Swal.fire('No encontrado', 'El código escaneado no existe o el producto está inactivo.', 'warning');
                 } else {
                     Swal.close();
-                    // Abrimos el primer producto que coincida con el código
                     abrirEditarProducto(dataBusqueda.productos[0].id, 'precios'); 
                 }
             } catch (err) {
@@ -1454,7 +1332,7 @@ document.addEventListener('keydown', async (e) => {
         }
         bufferEscaneo = ''; 
     } else if (e.key.length === 1) { 
-        bufferEscaneo += e.key; // Guarda la letra/número en la memoria rápida
+        bufferEscaneo += e.key; 
     }
 });
 

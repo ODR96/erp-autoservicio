@@ -403,3 +403,70 @@ def listar_todas_las_cajas():
     cajas = [dict(row) for row in cursor.fetchall()]
     conexion.close()
     return {"cajas": cajas}
+
+# --- AUDITORÍA DE TURNO (LÍNEA DE TIEMPO) ---
+@router.get("/auditoria/{turno_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def auditar_turno(turno_id: int):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        linea_tiempo = []
+
+        # 1. Atrapamos el momento de la Apertura
+        cursor.execute("SELECT fecha_hora_apertura, monto_inicial FROM turnos_caja WHERE id = ?", (turno_id,))
+        turno = cursor.fetchone()
+        if turno:
+            linea_tiempo.append({
+                "fecha_hora_cruda": turno['fecha_hora_apertura'],
+                "hora": turno['fecha_hora_apertura'][11:16] if turno['fecha_hora_apertura'] else "-",
+                "tipo": "APERTURA",
+                "accion": "Apertura de Caja",
+                "detalle": "Fondo inicial declarado en caja",
+                "metodo": "EFECTIVO",
+                "monto": turno['monto_inicial']
+            })
+
+        # 2. Atrapamos todas las Ventas y Anulaciones
+        cursor.execute('''
+            SELECT fecha_hora, numero_ticket, metodo_pago, total_venta, estado 
+            FROM ventas_cabecera 
+            WHERE turno_id = ?
+        ''', (turno_id,))
+        for v in cursor.fetchall():
+            estado_str = "VENTA ANULADA" if v['estado'] == 'ANULADA' else "VENTA"
+            linea_tiempo.append({
+                "fecha_hora_cruda": v['fecha_hora'],
+                "hora": v['fecha_hora'][11:16] if v['fecha_hora'] else "-",
+                "tipo": estado_str,
+                "accion": f"Ticket #{v['numero_ticket']}",
+                "detalle": "Venta de mostrador",
+                "metodo": v['metodo_pago'],
+                "monto": v['total_venta']
+            })
+
+        # 3. Atrapamos los Movimientos de Caja (Retiros e Ingresos)
+        cursor.execute('''
+            SELECT fecha_hora, tipo_movimiento, monto, observaciones 
+            FROM movimientos_caja 
+            WHERE turno_id = ?
+        ''', (turno_id,))
+        for m in cursor.fetchall():
+            linea_tiempo.append({
+                "fecha_hora_cruda": m['fecha_hora'],
+                "hora": m['fecha_hora'][11:16] if m['fecha_hora'] else "-",
+                "tipo": m['tipo_movimiento'].upper(),
+                "accion": m['tipo_movimiento'].upper() + " DE CAJA",
+                "detalle": m['observaciones'],
+                "metodo": "EFECTIVO",
+                "monto": m['monto']
+            })
+
+        # Ordenamos todo de lo más reciente a lo más viejo
+        linea_tiempo.sort(key=lambda x: x['fecha_hora_cruda'], reverse=True)
+
+        return {"linea_tiempo": linea_tiempo}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if conexion: conexion.close()
