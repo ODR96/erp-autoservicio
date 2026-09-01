@@ -146,16 +146,23 @@ async function forzarCierreRemoto(turnoId) {
 
 // --- MOTOR DE AUDITORÍA EN TIEMPO REAL ---
 async function auditarTurno(turnoId) {
-    document.getElementById('audiTurnoId').innerText = turnoId;
+    document.getElementById('audiTurnoId').innerText = turnoId + " - Cargando...";
     const tbody = document.getElementById('tablaAuditoriaBody');
     tbody.innerHTML = '<tr><td colspan="4" class="text-muted py-5"><div class="spinner-border text-info mb-2"></div><br>Reconstruyendo línea de tiempo...</td></tr>';
     
+    // MAGIA: Si el modal de historial de ayer está abierto, lo ocultamos para que no se pisen las ventanas
+    const modalHistorico = bootstrap.Modal.getInstance(document.getElementById('modalVentasHistoricas'));
+    if (modalHistorico) modalHistorico.hide();
+
     bootstrap.Modal.getOrCreateInstance(document.getElementById('modalAuditoriaTurno')).show();
 
     try {
         const res = await apiFetch(`${obtenerBaseUrl()}/caja/auditoria/${turnoId}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
+
+        // ¡ACÁ ESTÁ EL NOMBRE DEL CAJERO!
+        document.getElementById('audiTurnoId').innerText = `${turnoId} - ${data.cajero}`;
 
         tbody.innerHTML = '';
         if (data.linea_tiempo.length === 0) {
@@ -169,7 +176,6 @@ async function auditarTurno(turnoId) {
             let signo = '';
             let detalleAdicional = item.detalle ? `<br><small class="text-muted">${item.detalle}</small>` : '';
 
-            // Lógica de colores según el tipo de plata que se movió
             if (item.tipo === 'VENTA') {
                 colorMonto = 'text-success fw-bold';
                 signo = '+';
@@ -212,11 +218,47 @@ async function buscarVentasPorFecha() {
     const totalVisor = document.getElementById('totalDiaHistorico');
     const desglose = document.getElementById('desgloseHistorico');
     
-    // Mostramos que está buscando y ocultamos el desglose viejo
+    // Capturamos los contenedores nuevos
+    const contenedorTurnos = document.getElementById('contenedorTurnosHistoricos');
+    const listaTurnos = document.getElementById('listaTurnosHistoricos');
+    
     tbody.innerHTML = '<tr><td colspan="8" class="py-4"><div class="spinner-border text-warning"></div> Buscando...</td></tr>';
     desglose.classList.add('d-none');
+    if (contenedorTurnos) contenedorTurnos.classList.add('d-none');
     
     try {
+        // 1. Buscamos los TURNOS de ese día y dibujamos las tarjetas
+        if (contenedorTurnos && listaTurnos) {
+            const resTurnos = await apiFetch(`${obtenerBaseUrl()}/caja/turnos_por_fecha?fecha=${fecha}`);
+            const dataTurnos = await resTurnos.json();
+            
+            if (dataTurnos.turnos && dataTurnos.turnos.length > 0) {
+                listaTurnos.innerHTML = '';
+                dataTurnos.turnos.forEach(t => {
+                    let estadoBadge = t.estado_turno === 'CERRADO' ? '<span class="badge bg-secondary">Cerrado</span>' : '<span class="badge bg-success">Abierto</span>';
+                    let difBadge = '';
+                    if (t.estado_turno === 'CERRADO') {
+                        if (t.diferencia < 0) difBadge = `<span class="badge bg-danger rounded-pill"><i class="bi bi-arrow-down-short"></i> Faltante: $${Math.abs(t.diferencia).toFixed(2)}</span>`;
+                        else if (t.diferencia > 0) difBadge = `<span class="badge bg-info text-dark rounded-pill"><i class="bi bi-arrow-up-short"></i> Sobrante: $${t.diferencia.toFixed(2)}</span>`;
+                        else difBadge = `<span class="badge bg-success rounded-pill">Caja Exacta</span>`;
+                    }
+
+                    listaTurnos.innerHTML += `
+                        <div class="card border-primary shadow-sm" style="min-width: 260px;">
+                            <div class="card-body p-3">
+                                <h6 class="fw-bold mb-1">Turno #${t.turno_id} ${estadoBadge}</h6>
+                                <div class="small text-muted mb-2"><i class="bi bi-person-badge"></i> ${t.cajero || 'Desconocido'}</div>
+                                <div class="mb-3">${difBadge}</div>
+                                <button class="btn btn-sm btn-info w-100 fw-bold shadow-sm" onclick="auditarTurno(${t.turno_id})"><i class="bi bi-search"></i> Auditar Turno</button>
+                            </div>
+                        </div>
+                    `;
+                });
+                contenedorTurnos.classList.remove('d-none');
+            }
+        }
+
+        // 2. Buscamos los TICKETS individuales (Tu código original intacto)
         const res = await apiFetch(`${obtenerBaseUrl()}/ventas/por_fecha?fecha=${fecha}`);
         const data = await res.json();
         
@@ -227,7 +269,6 @@ async function buscarVentasPorFecha() {
         if (data.error) throw new Error(data.error);
 
         tbody.innerHTML = '';
-        // Cajas para guardar la plata separada
         let sumaTotal = 0, sumaEfectivo = 0, sumaVirtual = 0, sumaFiado = 0;
 
         if (!data.ventas || data.ventas.length === 0) {
@@ -241,7 +282,6 @@ async function buscarVentasPorFecha() {
             const colorFila = esAnulada ? 'text-muted text-decoration-line-through bg-light' : '';
             const badge = esAnulada ? '<span class="badge bg-danger">Anulada</span>' : '<span class="badge bg-success">Ok</span>';
             
-            // LA MEJORA 1: Matemática de desglose
             if (!esAnulada) {
                 sumaTotal += v.total_venta;
                 let metodo = (v.metodo_pago || "").toUpperCase();
@@ -254,11 +294,9 @@ async function buscarVentasPorFecha() {
             let clienteLimpio = v.cliente || 'Consumidor Final';
             clienteLimpio = clienteLimpio.split(' Debe:')[0].split(' A favor:')[0].trim();
 
-            // Los botones (le agregamos stopPropagation para que no choquen con el doble clic)
             const btnOjo = `<button class="btn btn-sm btn-outline-info py-0 me-1" onclick="verDetalleTicketHistorico(${v.id}); event.stopPropagation();" title="Ver Detalle"><i class="bi bi-eye"></i></button>`;
             const btnImprimir = `<button class="btn btn-sm btn-outline-secondary py-0" onclick="imprimirTicketHistorico(${v.id}); event.stopPropagation();" title="Imprimir Copia"><i class="bi bi-printer"></i></button>`;
 
-            // LA MEJORA 3: Fila Clickeable (ondblclick)
             tbody.innerHTML += `
                 <tr class="fila-historica ${colorFila}" style="cursor:pointer;" ondblclick="verDetalleTicketHistorico(${v.id})" title="Doble clic para ver detalle">
                     <td>${v.fecha_hora.split(' ')[1]}</td>
@@ -273,13 +311,10 @@ async function buscarVentasPorFecha() {
             `;
         });
 
-        // Actualizamos los textos en pantalla
         totalVisor.innerText = `$${sumaTotal.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
         document.getElementById('badgeEfectivo').innerText = `Efec: $${sumaEfectivo.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
         document.getElementById('badgeVirtual').innerText = `Virt: $${sumaVirtual.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
         document.getElementById('badgeFiado').innerText = `Cta: $${sumaFiado.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-        
-        // Prendemos el desglose
         desglose.classList.remove('d-none');
 
     } catch (e) {

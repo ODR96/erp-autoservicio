@@ -404,7 +404,7 @@ def listar_todas_las_cajas():
     conexion.close()
     return {"cajas": cajas}
 
-# --- AUDITORÍA DE TURNO (LÍNEA DE TIEMPO) ---
+# --- 1. AUDITORÍA DE TURNO ARREGLADA (CON NOMBRE DE CAJERO) ---
 @router.get("/auditoria/{turno_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def auditar_turno(turno_id: int):
     conexion = obtener_conexion()
@@ -413,23 +413,30 @@ def auditar_turno(turno_id: int):
     try:
         linea_tiempo = []
 
-        # 1. Atrapamos el momento de la Apertura
-        cursor.execute("SELECT fecha_hora_apertura, monto_inicial FROM turnos_caja WHERE id = ?", (turno_id,))
+        # Atrapamos el turno y el nombre del cajero
+        cursor.execute('''
+            SELECT t.fecha_hora_apertura, t.monto_inicial, u.nombre_completo as cajero
+            FROM turnos_caja t
+            LEFT JOIN usuarios u ON t.usuario_id = u.id
+            WHERE t.id = ?
+        ''', (turno_id,))
         turno = cursor.fetchone()
+        nombre_cajero = turno['cajero'] if turno and turno['cajero'] else "Cajero Desconocido"
+
         if turno:
             linea_tiempo.append({
                 "fecha_hora_cruda": turno['fecha_hora_apertura'],
                 "hora": turno['fecha_hora_apertura'][11:16] if turno['fecha_hora_apertura'] else "-",
                 "tipo": "APERTURA",
                 "accion": "Apertura de Caja",
-                "detalle": "Fondo inicial declarado en caja",
+                "detalle": f"Fondo inicial - Abrió: {nombre_cajero}",
                 "metodo": "EFECTIVO",
                 "monto": turno['monto_inicial']
             })
 
-        # 2. Atrapamos todas las Ventas y Anulaciones
+        # EL ARREGLO: Usamos "id" en vez de "numero_ticket"
         cursor.execute('''
-            SELECT fecha_hora, numero_ticket, metodo_pago, total_venta, estado 
+            SELECT id, fecha_hora, metodo_pago, total_venta, estado 
             FROM ventas_cabecera 
             WHERE turno_id = ?
         ''', (turno_id,))
@@ -439,13 +446,12 @@ def auditar_turno(turno_id: int):
                 "fecha_hora_cruda": v['fecha_hora'],
                 "hora": v['fecha_hora'][11:16] if v['fecha_hora'] else "-",
                 "tipo": estado_str,
-                "accion": f"Ticket #{v['numero_ticket']}",
-                "detalle": "Venta de mostrador",
+                "accion": f"Ticket #{v['id']}",
+                "detalle": f"Venta de mostrador - Cobró: {nombre_cajero}",
                 "metodo": v['metodo_pago'],
                 "monto": v['total_venta']
             })
 
-        # 3. Atrapamos los Movimientos de Caja (Retiros e Ingresos)
         cursor.execute('''
             SELECT fecha_hora, tipo_movimiento, monto, observaciones 
             FROM movimientos_caja 
@@ -462,10 +468,32 @@ def auditar_turno(turno_id: int):
                 "monto": m['monto']
             })
 
-        # Ordenamos todo de lo más reciente a lo más viejo
         linea_tiempo.sort(key=lambda x: x['fecha_hora_cruda'], reverse=True)
+        # Devolvemos también el nombre del cajero al frontend
+        return {"linea_tiempo": linea_tiempo, "cajero": nombre_cajero}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if conexion: conexion.close()
 
-        return {"linea_tiempo": linea_tiempo}
+# --- 2. RUTA NUEVA: BUSCAR TURNOS POR FECHA ---
+@router.get("/turnos_por_fecha", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def obtener_turnos_por_fecha(fecha: str):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute('''
+            SELECT t.id as turno_id, t.caja_id, t.fecha_hora_apertura, t.fecha_hora_cierre, 
+                   t.monto_final_declarado, t.diferencia, t.estado_turno, 
+                   u.nombre_completo as cajero
+            FROM turnos_caja t
+            LEFT JOIN usuarios u ON t.usuario_id = u.id
+            WHERE date(t.fecha_hora_apertura) = ? OR date(t.fecha_hora_cierre) = ?
+            ORDER BY t.id DESC
+        ''', (fecha, fecha))
+        turnos = [dict(t) for t in cursor.fetchall()]
+        return {"turnos": turnos}
     except Exception as e:
         return {"error": str(e)}
     finally:
