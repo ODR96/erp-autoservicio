@@ -524,24 +524,24 @@ async function setModo(m) {
 function borrarUltimo() { if (carrito.length > 0) { carrito.pop(); actualizarTabla(); } inputScan.focus(); }
 
 inputScan.addEventListener("keyup", (e) => {
-    // NUEVO ATAJO: Si el cajero toca el símbolo "+" (ej: escribe 1500 y toca +)
-    if (e.key === "+") {
-        e.preventDefault();
-        let precioVarios = parseFloat(inputScan.value.replace('+', ''));
-        
-        if (!isNaN(precioVarios) && precioVarios > 0) {
-            inputScan.value = precioVarios; // Dejamos el número limpio
-            setModo('PRECIO'); // ¡LLAMAMOS A TU MODAL ORIGINAL!
-        } else {
-            inputScan.value = "";
-        }
-        return;
-    }
-
+    // Toda la magia ocurre SOLO cuando el cajero presiona Enter
     if (e.key === "Enter") {
         let valorLimpio = inputScan.value.trim().toLowerCase();
 
-        // Multiplicador de cantidad (Ej: 5*77912345)
+        // 1. ATAJO VARIOS (+): Si el texto tiene un "+" (Ej: +1500 o 1500+)
+        if (valorLimpio.includes('+')) {
+            let precioVarios = parseFloat(valorLimpio.replace('+', ''));
+            
+            if (!isNaN(precioVarios) && precioVarios > 0) {
+                inputScan.value = precioVarios; // Limpiamos el "+" para que tu modal lea solo el número
+                setModo('PRECIO'); // Dispara tu modal original pidiendo el nombre
+            } else {
+                inputScan.value = "";
+            }
+            return; // Cortamos acá para que no busque el "+" en la base de datos
+        }
+
+        // 2. MULTIPLICADOR (*): (Ej: 5*77912345)
         if (valorLimpio.includes('*')) {
             let partes = valorLimpio.split('*');
             let cantidadIngresada = parseFloat(partes[0].trim());
