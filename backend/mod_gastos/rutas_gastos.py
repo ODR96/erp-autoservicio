@@ -14,17 +14,17 @@ router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
 
 # =================================================================
-# 0. MIGRACIONES INTELIGENTES (CON PRAGMA)
+# 0. MIGRACIONES INTELIGENTES (CON PRAGMA BLINDADO)
 # =================================================================
 def asegurar_tablas_tesoreria():
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     
-    cursor.execute('''CREATE TABLE IF NOT EXISTS gastos_operativos (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha DATETIME NOT NULL, categoria_id INTEGER NOT NULL, descripcion_detalle TEXT, monto REAL NOT NULL, metodo_pago TEXT NOT NULL, usuario_id INTEGER NOT NULL)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS gastos_operativos (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha DATETIME NOT NULL, categoria_id INTEGER NOT NULL, descripcion_detalle TEXT, monto REAL NOT NULL, metodo_pago TEXT NOT NULL, usuario_id INTEGER NOT NULL DEFAULT 1)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS movimientos_caja_mayor (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha_hora DATETIME NOT NULL, tipo_movimiento TEXT NOT NULL, monto REAL NOT NULL, concepto TEXT NOT NULL, usuario_id INTEGER NOT NULL, referencia_gasto_id INTEGER)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS categorias_gasto (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL)''')
 
-    # Escaneo inteligente de columnas (Para que funcione en cualquier negocio)
+    # Escaneo inteligente de columnas 
     cursor.execute("PRAGMA table_info(categorias_gasto)")
     cols_cat = [col[1] for col in cursor.fetchall()]
     if 'tipo_categoria' not in cols_cat:
@@ -32,10 +32,15 @@ def asegurar_tablas_tesoreria():
 
     cursor.execute("PRAGMA table_info(gastos_operativos)")
     cols_gastos = [col[1] for col in cursor.fetchall()]
+    
+    # Parches de columnas faltantes
     if 'origen_fondos' not in cols_gastos:
         cursor.execute("ALTER TABLE gastos_operativos ADD COLUMN origen_fondos TEXT DEFAULT 'CAJA_MAYOR'")
     if 'turno_id' not in cols_gastos:
         cursor.execute("ALTER TABLE gastos_operativos ADD COLUMN turno_id INTEGER")
+    if 'usuario_id' not in cols_gastos:
+        # ACA ESTÁ LA MAGIA QUE FALTABA
+        cursor.execute("ALTER TABLE gastos_operativos ADD COLUMN usuario_id INTEGER DEFAULT 1")
         
     conexion.commit()
     conexion.close()
