@@ -46,6 +46,11 @@ def asegurar_tablas_tesoreria():
             referencia_gasto_id INTEGER
         )
     ''')
+    try:
+        cursor.execute("ALTER TABLE categorias_gasto ADD COLUMN tipo_categoria TEXT DEFAULT 'OPERATIVO'")
+    except sqlite3.OperationalError:
+        pass # Si la columna ya existe, sigue de largo
+        
     conexion.commit()
     conexion.close()
 
@@ -63,7 +68,8 @@ def get_db():
         conexion.close()
 
 class NuevaCategoria(BaseModel):
-    nombre: str = Field(..., min_length=2, max_length=50, strip_whitespace=True)
+    nombre: str = Field(..., min_length=2, max_length=50)
+    tipo_categoria: str = Field(..., description="OPERATIVO o RETIRO_SOCIO")
 
 class NuevoGasto(BaseModel):
     categoria_id: int = Field(..., gt=0)
@@ -81,12 +87,12 @@ class NuevoGasto(BaseModel):
 @router.post("/categorias", status_code=status.HTTP_201_CREATED, dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def crear_categoria(cat: NuevaCategoria, db: sqlite3.Connection = Depends(get_db)):
     try:
-        db.execute("INSERT INTO categorias_gasto (nombre) VALUES (?)", (cat.nombre,))
+        db.execute("INSERT INTO categorias_gasto (nombre, tipo_categoria) VALUES (?, ?)", (cat.nombre, cat.tipo_categoria))
         db.commit()
         return {"mensaje": f"Categoría '{cat.nombre}' creada con éxito."}
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Error al crear la categoría. ¿Quizás ya existe?")
+        raise HTTPException(status_code=400, detail="Error al crear la categoría.")
 
 @router.get("/categorias", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_categorias(db: sqlite3.Connection = Depends(get_db)):

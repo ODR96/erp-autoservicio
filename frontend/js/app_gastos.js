@@ -36,6 +36,59 @@ async function cargarCategorias() {
     }
 }
 
+// --- NUEVA FUNCIÓN PARA CREAR CATEGORÍAS ---
+async function crearCategoria() {
+    const { value: formValues } = await Swal.fire({
+        title: 'Nueva Categoría',
+        html: `
+            <input id="swal-nombre" class="swal2-input form-control-dark w-75 mx-auto" placeholder="Ej: Sueldo, Luz, Limpieza">
+            <select id="swal-tipo" class="swal2-select form-select-dark w-75 mx-auto mt-3">
+                <option value="OPERATIVO">Gasto del Local (Costos)</option>
+                <option value="RETIRO_SOCIO">Retiro Personal / Socio</option>
+            </select>
+        `,
+        background: '#111C2A', color: '#fff',
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Crear',
+        confirmButtonColor: '#38bdf8',
+        preConfirm: () => {
+            return {
+                nombre: document.getElementById('swal-nombre').value,
+                tipo_categoria: document.getElementById('swal-tipo').value
+            }
+        }
+    });
+
+    if (formValues && formValues.nombre) {
+        try {
+            Swal.fire({ title: 'Guardando...', background: '#111C2A', color: '#fff', didOpen: () => Swal.showLoading() });
+            
+            const res = await apiFetchSeguro('/gastos/categorias', {
+                method: 'POST',
+                body: JSON.stringify(formValues)
+            });
+            const data = await res.json();
+            
+            if(data.error) throw new Error(data.error);
+            
+            Swal.fire({
+                icon: 'success', 
+                title: '¡Listo!', 
+                text: data.mensaje, 
+                background: '#111C2A', 
+                color: '#fff', 
+                timer: 1500, 
+                showConfirmButton: false
+            });
+            
+            cargarCategorias(); // Recargamos el selector automáticamente
+        } catch(e) {
+            Swal.fire({icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff'});
+        }
+    }
+}
+
 // --- 2. REGISTRAR UN NUEVO GASTO ---
 async function registrarGastoNuevo() {
     const categoriaId = document.getElementById('selectCategoriaGasto').value;
