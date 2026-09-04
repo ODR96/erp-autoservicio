@@ -13,9 +13,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
 
-# =================================================================
-# 0. MIGRACIONES INTELIGENTES (CON PRAGMA BLINDADO)
-# =================================================================
 def asegurar_tablas_tesoreria():
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -24,23 +21,34 @@ def asegurar_tablas_tesoreria():
     cursor.execute('''CREATE TABLE IF NOT EXISTS movimientos_caja_mayor (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha_hora DATETIME NOT NULL, tipo_movimiento TEXT NOT NULL, monto REAL NOT NULL, concepto TEXT NOT NULL, usuario_id INTEGER NOT NULL, referencia_gasto_id INTEGER)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS categorias_gasto (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL)''')
 
-    # Escaneo inteligente de columnas 
+    # 1. Escaneo inteligente (Categorías)
     cursor.execute("PRAGMA table_info(categorias_gasto)")
     cols_cat = [col[1] for col in cursor.fetchall()]
     if 'tipo_categoria' not in cols_cat:
         cursor.execute("ALTER TABLE categorias_gasto ADD COLUMN tipo_categoria TEXT DEFAULT 'OPERATIVO'")
 
+    # 2. Escaneo inteligente (Gastos)
     cursor.execute("PRAGMA table_info(gastos_operativos)")
     cols_gastos = [col[1] for col in cursor.fetchall()]
     
-    # Parches de columnas faltantes
     if 'origen_fondos' not in cols_gastos:
         cursor.execute("ALTER TABLE gastos_operativos ADD COLUMN origen_fondos TEXT DEFAULT 'CAJA_MAYOR'")
     if 'turno_id' not in cols_gastos:
         cursor.execute("ALTER TABLE gastos_operativos ADD COLUMN turno_id INTEGER")
     if 'usuario_id' not in cols_gastos:
-        # ACA ESTÁ LA MAGIA QUE FALTABA
         cursor.execute("ALTER TABLE gastos_operativos ADD COLUMN usuario_id INTEGER DEFAULT 1")
+
+    # 3. EL PARCHE NUEVO: Escaneo de la tabla del POS
+    try:
+        cursor.execute("PRAGMA table_info(movimientos_caja)")
+        cols_movs = [col[1] for col in cursor.fetchall()]
+        if cols_movs: # Si la tabla existe
+            if 'caja_id' not in cols_movs:
+                cursor.execute("ALTER TABLE movimientos_caja ADD COLUMN caja_id INTEGER")
+            if 'turno_id' not in cols_movs:
+                cursor.execute("ALTER TABLE movimientos_caja ADD COLUMN turno_id INTEGER")
+    except Exception:
+        pass
         
     conexion.commit()
     conexion.close()
