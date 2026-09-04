@@ -48,6 +48,7 @@ async function crearCategoria() {
             <select id="swal-tipo" class="swal2-select form-select-dark w-75 mx-auto mt-3">
                 <option value="OPERATIVO">Gasto del Local (Costos)</option>
                 <option value="RETIRO_SOCIO">Retiro Personal / Socio</option>
+                <option value="MOVIMIENTO_INTERNO">Movimiento Interno (Sangría a Caja Fuerte)</option>
             </select>
         `,
         background: '#111C2A', color: '#fff',
@@ -171,7 +172,8 @@ async function cargarResumenMensual() {
             data.gastos_por_categoria.forEach(item => {
                 if (item.tipo_categoria === 'RETIRO_SOCIO') {
                     totalRetirosSocio += item.total_gastado;
-                } else {
+                } else if (item.tipo_categoria === 'OPERATIVO') {
+                    // Solo sumamos a la aguja roja si es realmente un gasto
                     totalGastosOperativos += item.total_gastado;
                 }
             });

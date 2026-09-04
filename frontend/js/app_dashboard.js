@@ -30,26 +30,69 @@ async function cargarDashboardCompleto() {
 }
 
 // 1. FINANZAS
+// 1. FINANZAS Y PUNTO DE EQUILIBRIO
 async function cargarMeticasFinancieras() {
     try {
-        // RUTA CORREGIDA: Apunta directo a tu backend
         const res = await apiFetchSeguro('/reportes/ganancia_neta'); 
         const data = await res.json();
+        
         if (!data.error) {
             const rf = data.resumen_financiero;
-            const cajaIngresos = document.getElementById('dash-ingresos-mes');
-            cajaIngresos.innerText = formatiarDinero(rf['1_ingresos_por_ventas']);
-            cajaIngresos.setAttribute('title', formatiarDinero(rf['1_ingresos_por_ventas']));
-            
-            document.getElementById('dash-cmv').innerText = formatiarDinero(rf['2_costo_de_la_mercaderia']);
-            document.getElementById('dash-cmv').setAttribute('title', formatiarDinero(rf['2_costo_de_la_mercaderia']));
-            
-            document.getElementById('dash-gastos').innerText = formatiarDinero(rf['3_gastos_del_local']);
-            
-            document.getElementById('dash-ganancia').innerText = formatiarDinero(rf['4_GANANCIA_NETA_PURA']);
-            document.getElementById('dash-ganancia').setAttribute('title', formatiarDinero(rf['4_GANANCIA_NETA_PURA']));
-            
+            const ingresos = rf['1_ingresos_por_ventas'];
+            const cmv = rf['2_costo_de_la_mercaderia'];
+            const gastos = rf['3_gastos_del_local'];
+            const gananciaNeta = rf['4_GANANCIA_NETA_PURA'];
+
+            // 1. Llenamos las cajas de texto de arriba
+            document.getElementById('dash-ingresos-mes').innerText = formatiarDinero(ingresos);
+            document.getElementById('dash-cmv').innerText = formatiarDinero(cmv);
+            document.getElementById('dash-gastos').innerText = formatiarDinero(gastos);
+            document.getElementById('dash-ganancia').innerText = formatiarDinero(gananciaNeta);
             document.getElementById('dash-rentabilidad').innerText = rf['5_rentabilidad_del_mes'];
+
+            // ==============================================================
+            // 2. MATEMÁTICA DEL PUNTO DE EQUILIBRIO (El Velocímetro)
+            // ==============================================================
+            // Ganancia Bruta = Lo que te queda después de pagarle al camión que te trajo la mercadería
+// 2. MATEMÁTICA DEL PUNTO DE EQUILIBRIO
+            const gananciaBruta = ingresos - cmv;
+            let porcentajeEquilibrio = 0;
+            
+            if (gastos > 0) {
+                porcentajeEquilibrio = (gananciaBruta / gastos) * 100;
+            } else if (gananciaBruta > 0) {
+                porcentajeEquilibrio = 100; 
+            }
+
+            let porcentajeVisual = porcentajeEquilibrio;
+            if (porcentajeVisual < 0) porcentajeVisual = 0;
+            if (porcentajeVisual > 100) porcentajeVisual = 100;
+
+            // 3. ACTUALIZAMOS TU HTML EXACTO
+            const textoProgreso = document.getElementById('dash-progreso-texto');
+            if (textoProgreso) {
+                // Muestra: "$ 50.000 / $ 110.000" (Ganancia Bruta vs Gastos Reales)
+                textoProgreso.innerText = `${formatiarDinero(gananciaBruta)} / ${formatiarDinero(gastos)}`;
+            }
+
+            const textoPorcentaje = document.getElementById('dash-progreso-porcentaje');
+            if (textoPorcentaje) {
+                textoPorcentaje.innerText = `${porcentajeEquilibrio.toFixed(1)}%`;
+            }
+
+            const barraEquilibrio = document.getElementById('dash-progreso-barra');
+            if (barraEquilibrio) {
+                barraEquilibrio.style.width = `${porcentajeVisual}%`;
+                
+                // Cambiamos el color según cómo venimos
+                if (porcentajeEquilibrio >= 100) {
+                    barraEquilibrio.className = "progress-bar bg-success progress-bar-striped progress-bar-animated"; 
+                } else if (porcentajeEquilibrio >= 75) {
+                    barraEquilibrio.className = "progress-bar bg-warning progress-bar-striped progress-bar-animated";
+                } else {
+                    barraEquilibrio.className = "progress-bar bg-danger progress-bar-striped progress-bar-animated";
+                }
+            }
         }
     } catch(e) { console.warn("Fallo finanzas", e); }
 }
