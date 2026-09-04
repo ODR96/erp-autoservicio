@@ -164,9 +164,9 @@ async function cargarResumenMensual() {
             let totalGastosOperativos = 0;
             let totalRetirosSocio = 0;
 
-            // Separar la plata tuya de la del local
+            // Magia corporativa: Agrupamos leyendo el TIPO que dice la base de datos
             data.gastos_por_categoria.forEach(item => {
-                if (item.categoria.toLowerCase().includes('retiro socio') || item.categoria.toLowerCase().includes('sueldo orlando')) {
+                if (item.tipo_categoria === 'RETIRO_SOCIO') {
                     totalRetirosSocio += item.total_gastado;
                 } else {
                     totalGastosOperativos += item.total_gastado;

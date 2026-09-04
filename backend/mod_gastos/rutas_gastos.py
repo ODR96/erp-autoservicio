@@ -21,6 +21,7 @@ def asegurar_tablas_tesoreria():
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     
+    # Creamos las tablas si no existen...
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS gastos_operativos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +35,6 @@ def asegurar_tablas_tesoreria():
             turno_id INTEGER
         )
     ''')
-    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS movimientos_caja_mayor (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,11 +46,17 @@ def asegurar_tablas_tesoreria():
             referencia_gasto_id INTEGER
         )
     ''')
-    try:
-        cursor.execute("ALTER TABLE categorias_gasto ADD COLUMN tipo_categoria TEXT DEFAULT 'OPERATIVO'")
-    except sqlite3.OperationalError:
-        pass # Si la columna ya existe, sigue de largo
-        
+    
+    # MIGRACIONES FORZADAS: Agregamos las columnas a la fuerza por si las tablas son viejas
+    try: cursor.execute("ALTER TABLE categorias_gasto ADD COLUMN tipo_categoria TEXT DEFAULT 'OPERATIVO'")
+    except: pass
+    
+    try: cursor.execute("ALTER TABLE gastos_operativos ADD COLUMN origen_fondos TEXT DEFAULT 'CAJA_MAYOR'")
+    except: pass
+
+    try: cursor.execute("ALTER TABLE gastos_operativos ADD COLUMN turno_id INTEGER")
+    except: pass
+    
     conexion.commit()
     conexion.close()
 
@@ -145,7 +151,7 @@ def obtener_historial_gastos(limite: int = 50, db: sqlite3.Connection = Depends(
 def resumen_gastos_del_mes(db: sqlite3.Connection = Depends(get_db)):
     mes_actual = datetime.now(ZONA_AR).strftime("%Y-%m")
     cursor = db.execute('''
-        SELECT c.nombre as categoria, SUM(g.monto) as total_gastado
+        SELECT c.nombre as categoria, c.tipo_categoria, SUM(g.monto) as total_gastado
         FROM gastos_operativos g
         JOIN categorias_gasto c ON g.categoria_id = c.id
         WHERE strftime('%Y-%m', g.fecha) = ?
