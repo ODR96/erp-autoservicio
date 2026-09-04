@@ -58,7 +58,7 @@
         #layout-navbar-placeholder .navbar-brand {
             color: #E2E8F0 !important;
         }
-        
+
         #layout-navbar-placeholder .text-muted {
             color: #94A3B8 !important;
         }
@@ -181,6 +181,20 @@
                         onclick="cargarDashboardCompleto()">
                         <i class="bi bi-arrow-clockwise"></i> Sincronizar Datos
                     </button>
+                </div>
+                <!-- PUNTO DE EQUILIBRIO DIARIO -->
+                <div class="card-dash p-3 mb-4" style="border-left: 4px solid #f59e0b;">
+                    <div class="d-flex justify-content-between align-items-end mb-2">
+                        <div>
+                            <h6 class="text-uppercase fw-bold text-muted mb-0 small">Punto de Equilibrio (Hoy)</h6>
+                            <h4 class="fw-bold text-white mb-0" id="dash-progreso-texto">$ 0 / $ 110.000</h4>
+                        </div>
+                        <span class="badge bg-warning text-dark fw-bold" id="dash-progreso-porcentaje">0%</span>
+                    </div>
+                    <div class="progress" style="height: 12px; background-color: #1F304A;">
+                        <div class="progress-bar bg-warning progress-bar-striped progress-bar-animated"
+                            id="dash-progreso-barra" role="progressbar" style="width: 0%"></div>
+                    </div>
                 </div>
 
                 <!-- 1. MÉTRICAS FINANCIERAS -->

@@ -177,18 +177,19 @@ def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
     
     # Definimos el filtro de fecha según el periodo
     if periodo == "dia":
-        filtro = "date('now')"
+        filtro = "date(vc.fecha_hora) = date('now')"
     elif periodo == "semana":
-        filtro = "date('now', '-7 days')"
+        filtro = "date(vc.fecha_hora) >= date('now', '-7 days')"
     else:
-        filtro = "date('now', '-30 days')"
+        # Filtra exactamente por el mes en curso (Ej: Todo septiembre)
+        filtro = "strftime('%Y-%m', vc.fecha_hora) = strftime('%Y-%m', 'now')"
 
     query = f'''
         SELECT p.nombre, SUM(vd.cantidad) as total_vendido, SUM(vd.subtotal) as recaudacion
         FROM ventas_detalle vd
         JOIN ventas_cabecera vc ON vd.venta_id = vc.id
         JOIN productos p ON vd.producto_id = p.id
-        WHERE date(vc.fecha_hora) >= {filtro}
+        WHERE {filtro}
         GROUP BY p.id
         ORDER BY total_vendido DESC
         LIMIT 10

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP Admin - Tesorería y Caja Mayor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        body { background-color: #0B1320; color: #E2E8F0; }
+        .panel-tesoreria { background-color: #142032; border: 1px solid #1F304A; border-radius: 10px; box-shadow: 0 8px 15px rgba(0,0,0,0.4); }
+        .kpi-card { background-color: #0D1627; border-left: 4px solid #38bdf8; border-radius: 8px; }
+        .kpi-red { border-left-color: #ef4444; }
+        .kpi-green { border-left-color: #10b981; }
+        .form-control-dark, .form-select-dark { background-color: #070B14; border: 1px solid #1F304A; color: white; }
+        .form-control-dark:focus { border-color: #38bdf8; box-shadow: 0 0 5px rgba(56, 189, 248, 0.5); }
+    </style>
+</head>
+<body>
+    <div id="layout-sidebar-placeholder"></div>
+    <div class="main-wrapper">
+        <div id="layout-navbar-placeholder"></div>
+
+        <div class="content-area p-4">
+            <h3 class="fw-bold mb-4 text-white"><i class="bi bi-bank"></i> Tesorería y Control de Gastos</h3>
+
+            <!-- KPI CARDS -->
+            <div class="row g-4 mb-4">
+                <div class="col-md-4">
+                    <div class="kpi-card p-3 kpi-red h-100">
+                        <h6 class="text-muted text-uppercase fw-bold small">Gastos Operativos (Mes)</h6>
+                        <h2 class="fw-bold text-danger mb-0" id="kpiGastos">$ 0.00</h2>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="kpi-card p-3 h-100" style="border-left-color: #f59e0b;">
+                        <h6 class="text-muted text-uppercase fw-bold small">Tus Retiros Personales (Mes)</h6>
+                        <h2 class="fw-bold text-warning mb-0" id="kpiRetiros">$ 0.00</h2>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="kpi-card p-3 kpi-green h-100">
+                        <h6 class="text-muted text-uppercase fw-bold small">Fondo Caja Mayor (Oficina)</h6>
+                        <h2 class="fw-bold text-success mb-0" id="kpiCajaMayor">$ 0.00</h2>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row g-4">
+                <!-- FORMULARIO DE CARGA -->
+                <div class="col-md-4">
+                    <div class="panel-tesoreria p-4 h-100">
+                        <h5 class="fw-bold text-info mb-4"><i class="bi bi-receipt"></i> Registrar Salida</h5>
+                        
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-muted">¿A dónde fue la plata?</label>
+                            <select id="selectCategoriaGasto" class="form-select form-select-dark form-select-lg"></select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-muted">Monto Exacto</label>
+                            <div class="input-group input-group-lg">
+                                <span class="input-group-text bg-dark border-secondary text-white">$</span>
+                                <input type="number" id="inputMontoGasto" class="form-control form-control-dark fw-bold text-end" placeholder="0.00">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-muted">Detalle / Motivo</label>
+                            <input type="text" id="inputDetalleGasto" class="form-control form-control-dark" placeholder="Ej: Sueldo Juan quincena 1">
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="form-label small fw-bold text-muted">¿De dónde salieron los fondos?</label>
+                            <select id="selectOrigenFondos" class="form-select form-select-dark">
+                                <option value="CAJA_MAYOR">Caja Fuerte (Oficina)</option>
+                                <option value="CAJA_DIARIA_EFECTIVO">Cajón del Mostrador (POS)</option>
+                                <option value="BANCO_TRANSFERENCIA">Cuenta Bancaria / MercadoPago</option>
+                            </select>
+                        </div>
+
+                        <button class="btn btn-info w-100 fw-bold btn-lg shadow-sm" onclick="registrarGastoNuevo()">
+                            <i class="bi bi-save"></i> REGISTRAR SALIDA
+                        </button>
+                    </div>
+                </div>
+
+                <!-- HISTORIAL DE GASTOS -->
+                <div class="col-md-8">
+                    <div class="panel-tesoreria p-0 h-100 overflow-hidden d-flex flex-column">
+                        <div class="p-3 border-bottom border-secondary bg-dark d-flex justify-content-between align-items-center">
+                            <h5 class="fw-bold mb-0 text-white"><i class="bi bi-clock-history"></i> Historial de Movimientos</h5>
+                            <button class="btn btn-sm btn-outline-light"><i class="bi bi-funnel"></i> Filtrar</button>
+                        </div>
+                        <div class="table-responsive flex-grow-1" style="max-height: 500px; overflow-y: auto;">
+                            <table class="table table-dark table-hover align-middle mb-0 text-center">
+                                <thead class="sticky-top" style="background-color: #070B14;">
+                                    <tr>
+                                        <th>Fecha</th>
+                                        <th class="text-start">Categoría</th>
+                                        <th class="text-start">Detalle</th>
+                                        <th>Origen</th>
+                                        <th class="text-end pe-4">Monto</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tablaGastosBody">
+                                    <tr><td colspan="5" class="py-5 text-muted">Cargando movimientos...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="js/layout.js"></script>
+    <script src="js/app_tesoreria.js"></script>
+</body>
+</html>

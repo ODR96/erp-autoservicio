@@ -66,7 +66,7 @@ function inyectarLayout() {
                 <a href="admin_mayorista.html" class="menu-item"><i class="bi bi-truck"></i> Venta Depósito</a>
                 
                 ${esAdmin ? `<a href="admin_cajas.html" class="menu-item"><i class="bi bi-safe"></i> Cajas y Turnos</a>` : ''}
-                ${esAdmin ? `<a href="#" class="menu-item"><i class="bi bi-receipt"></i> Cheques y Gastos</a>` : ''}
+                ${esAdmin ? `<a href="admin_gastos.html" class="menu-item"><i class="bi bi-receipt"></i> Cheques y Gastos</a>` : ''}
                 
                 <a href="admin_clientes.html" class="menu-item"><i class="bi bi-people"></i> Clientes (Cta Cte)</a>
                 <a href="admin_proveedores.html" class="menu-item"><i class="bi bi-building"></i> Proveedores</a>
