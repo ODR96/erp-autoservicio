@@ -17,6 +17,9 @@ async function apiFetchSeguro(recurso, config = {}) {
     return res;
 }
 
+const empleadoStorage = JSON.parse(localStorage.getItem('empleado_pos')) || {};
+const idUsuarioReal = empleadoStorage.id || parseInt(localStorage.getItem('usuario_id')) || 1;
+
 // --- 1. CARGAR CATEGORÍAS EN EL SELECTOR ---
 async function cargarCategorias() {
     const selector = document.getElementById('selectCategoriaGasto');
@@ -115,7 +118,7 @@ async function registrarGastoNuevo() {
             monto: parseFloat(monto),
             metodo_pago: origen,
             origen_fondos: origen,
-            usuario_id: 1 // Esto luego lo toma el backend automático
+            usuario_id: idUsuarioReal        
         };
 
         const res = await apiFetchSeguro('/gastos/registrar', {

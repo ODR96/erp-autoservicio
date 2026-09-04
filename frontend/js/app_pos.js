@@ -1692,30 +1692,73 @@ function cargarVentaEspera(index) {
 }
 
 // --- MÓDULO INGRESO Y RETIRO DE CAJA (F10) (SIN HARDCODEO) ---
+// --- MÓDULO INGRESO Y RETIRO DE CAJA (F10) (DISEÑO OSCURO UNIFICADO) ---
 async function registrarMovimientoCaja(tipo) {
     modalGestion.hide();
 
-    const titulo = tipo === 'ingreso' ? 'Ingreso de Dinero' : 'Retiro de Dinero';
-    const colorBtn = tipo === 'ingreso' ? '#198754' : '#dc3545';
-
-    let inputsHtml = '<input id="swal-monto" type="number" class="swal2-input" placeholder="Monto ($)" style="max-width: 80%;">' +
-        '<input id="swal-motivo" type="text" class="swal2-input" placeholder="Motivo / Concepto" style="max-width: 80%;">';
+    const titulo = tipo === 'ingreso' ? 'Ingreso de Dinero' : 'Retiro de Efectivo';
+    const colorBtn = tipo === 'ingreso' ? '#10b981' : '#ef4444';
+    let opcionesCategoria = '';
 
     if (tipo === 'retiro') {
-        inputsHtml += '<hr><input id="swal-pin" type="password" class="swal2-input" placeholder="PIN Encargado" style="max-width: 80%; border-color: #ffc107;">';
+        try {
+            Swal.fire({ title: 'Cargando...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+            const resCat = await apiFetch(`${obtenerBaseUrl()}/gastos/categorias`);
+            const dataCat = await resCat.json();
+            Swal.close();
+            
+            if(dataCat.categorias) {
+                opcionesCategoria = '<select id="swal-categoria" class="form-select form-select-lg mb-3" style="background-color: #070B14; border: 1px solid #1F304A; color: white; width: 80%; margin: 0 auto; border-radius: 8px;">';
+                opcionesCategoria += '<option value="" disabled selected>-- Elegí una Categoría --</option>';
+                dataCat.categorias.forEach(c => {
+                    opcionesCategoria += `<option value="${c.id}">${c.nombre}</option>`;
+                });
+                opcionesCategoria += '</select>';
+            }
+        } catch (e) {
+            console.error("Fallo al cargar categorías", e);
+            opcionesCategoria = '<input id="swal-categoria" type="hidden" value="1">';
+        }
+    }
+
+    // CSS integrado para matar las flechitas feas de los input number
+    const estilosInput = `
+        <style>
+            .swal2-input::-webkit-outer-spin-button,
+            .swal2-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+            .swal2-input[type=number] { -moz-appearance: textfield; }
+            .input-dark-custom { background-color: #070B14 !important; border: 1px solid #1F304A !important; color: white !important; border-radius: 8px !important; width: 80% !important; margin: 0 auto 15px auto !important; }
+            .input-dark-custom:focus { border-color: #38bdf8 !important; box-shadow: 0 0 5px rgba(56, 189, 248, 0.5) !important; }
+        </style>
+    `;
+
+    let inputsHtml = estilosInput + `<input id="swal-monto" type="number" class="swal2-input input-dark-custom" placeholder="Monto ($)">`;
+    
+    if (tipo === 'retiro') {
+        inputsHtml += opcionesCategoria;
+        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (Ej: Proveedor pan, Vale Juan)">`;
+        inputsHtml += `<hr style="border-color: #1F304A; width: 80%; margin: 15px auto;"><input id="swal-pin" type="password" class="swal2-input input-dark-custom" placeholder="PIN Encargado" style="border-color: #f59e0b !important;">`;
+    } else {
+        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" placeholder="Motivo (Ej: Cambio inicial)">`;
     }
 
     const { value: formValues } = await Swal.fire({
-        title: titulo,
+        title: `<span style="color: #fff; font-weight: bold;">${titulo}</span>`,
         html: inputsHtml,
+        background: '#111C2A',
+        color: '#fff',
         focusConfirm: false,
         showCancelButton: true,
         confirmButtonText: 'Registrar',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: colorBtn,
+        cancelButtonColor: '#475569',
+        customClass: {
+            popup: 'rounded-4 shadow-lg border border-secondary'
+        },
         didOpen: () => {
             const popup = Swal.getPopup();
-            const inputs = popup.querySelectorAll('input');
+            const inputs = popup.querySelectorAll('input, select');
             inputs.forEach(input => {
                 input.addEventListener('keypress', (e) => {
                     if (e.key === 'Enter') Swal.clickConfirm();
@@ -1727,12 +1770,19 @@ async function registrarMovimientoCaja(tipo) {
             const monto = document.getElementById('swal-monto').value;
             const motivo = document.getElementById('swal-motivo').value;
             const pinEl = document.getElementById('swal-pin');
+            let catId = null;
 
             if (!monto || monto <= 0) { Swal.showValidationMessage('Ingrese un monto mayor a 0'); return false; }
-            if (!motivo) { Swal.showValidationMessage('Debe especificar el motivo'); return false; }
+            if (tipo === 'ingreso' && !motivo) { Swal.showValidationMessage('Debe especificar el motivo'); return false; }
 
             if (tipo === 'retiro') {
+                const catEl = document.getElementById('swal-categoria');
+                if(catEl) catId = catEl.value;
+                
+                if(!catId) { Swal.showValidationMessage('Elegí una categoría de gasto'); return false; }
+                if (!motivo) { Swal.showValidationMessage('Completá el detalle del gasto'); return false; }
                 if (!pinEl || !pinEl.value) { Swal.showValidationMessage('Ingrese su PIN secreto'); return false; }
+                
                 try {
                     const resAuth = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1745,39 +1795,54 @@ async function registrarMovimientoCaja(tipo) {
                 }
             }
 
-            return { monto: parseFloat(monto), motivo: motivo };
+            return { monto: parseFloat(monto), motivo: motivo, categoria_id: catId };
         }
     });
 
     if (formValues) {
         try {
-            // INYECTAMOS LA CABALLERÍA PESADA
-            const payloadMovimiento = {
-                tipo_movimiento: tipo,
-                monto: formValues.monto,
-                observaciones: formValues.motivo,
-                turno_id: turnoActualId,
-                caja_id: terminal_id, // Para que la plata afecte a ESTA caja
-                usuario_id: empleadoLogueado.id // Para que sepamos qué cajero la tocó
-            };
+            Swal.fire({ title: 'Registrando...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
-            const response = await apiFetch(`${obtenerBaseUrl()}/caja/movimiento`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}` // Usamos la llave maestra
-                },
-                body: JSON.stringify(payloadMovimiento)
-            });
+            if (tipo === 'ingreso') {
+                const payloadMovimiento = {
+                    tipo_movimiento: tipo,
+                    monto: formValues.monto,
+                    observaciones: formValues.motivo,
+                    turno_id: turnoActualId,
+                    caja_id: terminal_id, 
+                    usuario_id: empleadoLogueado.id 
+                };
 
-            if (!response.ok) {
-                const errData = await response.json();
-                throw new Error(errData.detail || "Fallo en el servidor");
+                const response = await apiFetch(`${obtenerBaseUrl()}/caja/movimiento`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(payloadMovimiento)
+                });
+                if (!response.ok) throw new Error("Fallo en el servidor al registrar ingreso");
+
+            } else if (tipo === 'retiro') {
+                const payloadGasto = {
+                    categoria_id: parseInt(formValues.categoria_id),
+                    descripcion_detalle: formValues.motivo,
+                    monto: formValues.monto,
+                    metodo_pago: "EFECTIVO",
+                    origen_fondos: "CAJA_DIARIA",
+                    turno_id: turnoActualId,
+                    usuario_id: empleadoLogueado.id
+                };
+
+                const response = await apiFetch(`${obtenerBaseUrl()}/gastos/registrar`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(payloadGasto)
+                });
+
+                if (!response.ok) throw new Error("Fallo al asentar el gasto en Tesorería");
             }
 
-            Swal.fire({ title: '✅ Registrado', text: `Se guardó un ${tipo} de $${formValues.monto} en el sistema.`, icon: 'success', timer: 2000, showConfirmButton: false });
+            Swal.fire({ title: '✅ Registrado', text: `Se guardó un ${tipo} de $${formValues.monto} en el sistema.`, background: '#111C2A', color: '#fff', icon: 'success', timer: 2000, showConfirmButton: false });
         } catch (e) {
-            Swal.fire('Error', e.message, 'error');
+            Swal.fire({ title: 'Error', text: e.message, background: '#111C2A', color: '#fff', icon: 'error' });
         }
         setTimeout(() => inputScan.focus(), 2000);
     } else {
