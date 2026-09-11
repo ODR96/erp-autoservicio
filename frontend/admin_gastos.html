@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es" data-bs-theme="dark">
 
 <head>
@@ -91,8 +91,8 @@
                     </div>
                     <div class="col-md-4">
                         <div class="kpi-card p-3 kpi-green h-100">
-                            <h6 class="text-muted text-uppercase fw-bold small">Fondo Caja Mayor</h6>
-                            <h2 class="fw-bold text-success mb-0" id="kpiCajaMayor">$ 0.00</h2>
+                            <h6 class="text-muted text-uppercase fw-bold small">Salidas del cajón (mes)</h6>
+                            <h2 class="fw-bold text-success mb-0" id="kpiSalidasCajon">$ 0.00</h2>
                         </div>
                     </div>
                 </div>
@@ -111,6 +111,10 @@
                                     <button class="btn btn-outline-info rounded" onclick="crearCategoria()"
                                         title="Nueva Categoría">
                                         <i class="bi bi-plus-lg fs-5"></i>
+                                    </button>
+                                    <button type="button" id="btnGestionCategorias" class="btn btn-outline-secondary rounded"
+                                        title="Gestionar Categorías (editar / eliminar)">
+                                        <i class="bi bi-gear fs-5"></i>
                                     </button>
                                 </div>
                             </div>
@@ -178,8 +182,8 @@
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="js/layout.js"></script>
-    <script src="js/app_gastos.js"></script>
+    <script src="js/layout.js?v=1.0.29"></script>
+    <script src="js/app_gastos.js?v=1.0.29"></script>
 </body>
 
 </html>

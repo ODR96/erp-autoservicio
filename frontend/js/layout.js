@@ -1,7 +1,7 @@
 // ========================================================
 // CONFIGURACIÓN GLOBAL
 // ========================================================
-const APP_VERSION = "v1.0.26"; // Modificá este número antes de cada compilación
+const APP_VERSION = "v1.0.29"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
 
 function obtenerBaseUrl() {
     const dominio = window.location.hostname;
@@ -32,7 +32,7 @@ function obtenerBaseUrl() {
     }
 
     if (rol === 'ENCARGADO') {
-        const zonasProhibidas = ['admin_cajas.html', 'admin_cheques.html', 'admin_reportes.html', 'admin_config.html'];
+        const zonasProhibidas = ['admin_cajas.html', 'admin_cheques.html', 'admin_reportes.html', 'admin_config.html', 'admin_rrhh.html'];
         if (zonasProhibidas.some(zona => rutaActual.includes(zona))) {
             alert("ACCESO RESTRINGIDO: Esta sección es exclusiva del Administrador.");
             window.location.href = "admin_productos.html";
@@ -67,6 +67,7 @@ function inyectarLayout() {
                 
                 ${esAdmin ? `<a href="admin_cajas.html" class="menu-item"><i class="bi bi-safe"></i> Cajas y Turnos</a>` : ''}
                 ${esAdmin ? `<a href="admin_gastos.html" class="menu-item"><i class="bi bi-receipt"></i> Cheques y Gastos</a>` : ''}
+                ${esAdmin ? `<a href="admin_rrhh.html" class="menu-item"><i class="bi bi-person-badge"></i> RRHH: Sueldos</a>` : ''}
                 
                 <a href="admin_clientes.html" class="menu-item"><i class="bi bi-people"></i> Clientes (Cta Cte)</a>
                 <a href="admin_proveedores.html" class="menu-item"><i class="bi bi-building"></i> Proveedores</a>

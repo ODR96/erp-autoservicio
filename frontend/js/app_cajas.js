@@ -52,7 +52,9 @@ async function cargarMonitor() {
 
         turnos.forEach(t => {
             // Formatear la fecha para que se lea linda
-            let fecha = new Date(t.fecha_hora_apertura).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+            // La hora se guardó en Argentina (YYYY-MM-DD HH:MM:SS). No pasar por Date()
+            // del navegador: en PC en inglés/UTC corre el horario.
+            const horaApertura = (t.fecha_hora_apertura || '').toString().slice(11, 16) || '--:--';
 
             contenedor.innerHTML += `
                 <div class="col-md-6 col-lg-4">
@@ -63,7 +65,7 @@ async function cargarMonitor() {
                         </div>
                         <div class="card-body">
                             <h5 class="fw-bold mb-0 text-primary">${t.cajero || "Cajero Desconocido"}</h5>
-                            <small class="text-muted d-block mb-3">Abrió a las: ${fecha}</small>
+                            <small class="text-muted d-block mb-3">Abrió a las: ${horaApertura}</small>
                             
 <ul class="list-group list-group-flush mb-3 small">
                                 <li class="list-group-item d-flex justify-content-between px-0">

@@ -139,7 +139,48 @@ def dar_baja_manual(datos: BajaManual): # <-- Eliminado el background_tasks inú
 class DescuentoStock(BaseModel):
     producto_id: int
     cantidad_vendida: float
-    
+
+
+# --- FUNCIÓN COMPARTIDA: LÓGICA PURA DE DESCUENTO FIFO ---
+# A diferencia del endpoint de abajo, esta función NO abre conexión propia ni hace
+# commit: recibe un cursor ya abierto por quien la llama, para que el descuento de
+# stock quede DENTRO de la misma transacción que el resto de la operación (venta,
+# consumo de personal, etc.). Además deja auditoría completa en movimientos_stock,
+# un registro por cada lote tocado.
+def ejecutar_descuento_fifo(cursor, producto_id: int, cantidad_a_descontar: float,
+                             tipo_movimiento: str, motivo: str,
+                             usuario_id: int = None, fecha_hora: str = None) -> float:
+    """
+    Descuenta stock de los lotes activos de un producto, respetando FIFO por
+    fecha de vencimiento. Devuelve la cantidad que NO se pudo descontar por falta
+    de stock (0.0 si se descontó todo).
+    """
+    cursor.execute('''
+        SELECT id, cantidad_disponible 
+        FROM lotes_stock 
+        WHERE producto_id = ? AND cantidad_disponible > 0 AND estado_lote = 'Activo'
+        ORDER BY fecha_vencimiento ASC
+    ''', (producto_id,))
+    lotes = cursor.fetchall()
+    cantidad_restante = cantidad_a_descontar
+
+    for lote in lotes:
+        lote_id = lote[0]
+        disponible = lote[1]
+        if cantidad_restante <= 0:
+            break
+
+        cantidad_tomada = min(disponible, cantidad_restante)
+        cursor.execute("UPDATE lotes_stock SET cantidad_disponible = ? WHERE id = ?", (disponible - cantidad_tomada, lote_id))
+        cursor.execute('''
+            INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo, usuario_id, fecha_hora)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (producto_id, lote_id, cantidad_tomada, tipo_movimiento, motivo, usuario_id, fecha_hora))
+        cantidad_restante -= cantidad_tomada
+
+    return cantidad_restante
+
+
 # --- 4. DESCUENTO AUTOMÁTICO DE STOCK (El método FIFO para Ventas) ---
 @router.put("/descontar_fifo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def descontar_stock_fifo(datos: DescuentoStock):

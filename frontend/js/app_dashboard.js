@@ -42,24 +42,22 @@ async function cargarMeticasFinancieras() {
             const cmv = rf['2_costo_de_la_mercaderia'];
             const gastos = rf['3_gastos_del_local'];
             const gananciaNeta = rf['4_GANANCIA_NETA_PURA'];
+            const sueldosComprometidos = rf['6_sueldos_comprometidos'] || 0;
+            const pisoMes = (rf['7_piso_operativo_mes'] != null) ? rf['7_piso_operativo_mes'] : (gastos + sueldosComprometidos);
 
-            // 1. Llenamos las cajas de texto de arriba
+            // 1. Llenamos las cajas de texto de arriba (hechos: la ganancia neta NO mete proyección)
             document.getElementById('dash-ingresos-mes').innerText = formatiarDinero(ingresos);
             document.getElementById('dash-cmv').innerText = formatiarDinero(cmv);
             document.getElementById('dash-gastos').innerText = formatiarDinero(gastos);
             document.getElementById('dash-ganancia').innerText = formatiarDinero(gananciaNeta);
             document.getElementById('dash-rentabilidad').innerText = rf['5_rentabilidad_del_mes'];
 
-            // ==============================================================
-            // 2. MATEMÁTICA DEL PUNTO DE EQUILIBRIO (El Velocímetro)
-            // ==============================================================
-            // Ganancia Bruta = Lo que te queda después de pagarle al camión que te trajo la mercadería
-// 2. MATEMÁTICA DEL PUNTO DE EQUILIBRIO
+            // 2. Piso del mes = gastos ya anotados + sueldos que todavía no se liquidaron
             const gananciaBruta = ingresos - cmv;
             let porcentajeEquilibrio = 0;
             
-            if (gastos > 0) {
-                porcentajeEquilibrio = (gananciaBruta / gastos) * 100;
+            if (pisoMes > 0) {
+                porcentajeEquilibrio = (gananciaBruta / pisoMes) * 100;
             } else if (gananciaBruta > 0) {
                 porcentajeEquilibrio = 100; 
             }
@@ -68,11 +66,13 @@ async function cargarMeticasFinancieras() {
             if (porcentajeVisual < 0) porcentajeVisual = 0;
             if (porcentajeVisual > 100) porcentajeVisual = 100;
 
-            // 3. ACTUALIZAMOS TU HTML EXACTO
             const textoProgreso = document.getElementById('dash-progreso-texto');
             if (textoProgreso) {
-                // Muestra: "$ 50.000 / $ 110.000" (Ganancia Bruta vs Gastos Reales)
-                textoProgreso.innerText = `${formatiarDinero(gananciaBruta)} / ${formatiarDinero(gastos)}`;
+                textoProgreso.innerText = `${formatiarDinero(gananciaBruta)} / ${formatiarDinero(pisoMes)}`;
+            }
+            const detallePiso = document.getElementById('dash-progreso-detalle');
+            if (detallePiso) {
+                detallePiso.innerText = `${formatiarDinero(gastos)} ya anotados + ${formatiarDinero(sueldosComprometidos)} sueldos pendientes de liquidar`;
             }
 
             const textoPorcentaje = document.getElementById('dash-progreso-porcentaje');

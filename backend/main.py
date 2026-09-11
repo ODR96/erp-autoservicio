@@ -23,6 +23,7 @@ from backend.mod_reportes.rutas_reportes import router as router_reportes
 from backend.mod_usuarios.rutas_usuarios import router as router_usuarios
 from backend.mod_config.rutas_config import router as router_config
 from backend.mod_dashboard.rutas_dashboard import router as router_dashboard
+from backend.mod_rrhh.rutas_rrhh import router as router_rrhh
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -117,6 +118,7 @@ app.include_router(router_proveedores, prefix="/proveedores", tags=["Proveedores
 app.include_router(router_reportes, prefix="/reportes", tags=["Dashboard y Estadísticas"])
 app.include_router(router_usuarios, prefix="/usuarios", tags=["Personal y Permisos"])
 app.include_router(router_config, prefix="/config", tags=["Ajustes del Local y Logo"])
+app.include_router(router_rrhh, prefix="/rrhh", tags=["RRHH: Sueldos, Asistencia y Adelantos"])
 
 @app.get("/")
 def leer_raiz():

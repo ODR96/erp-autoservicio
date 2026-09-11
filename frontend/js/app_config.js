@@ -65,6 +65,7 @@ async function cargarConfiguracionActual() {
         document.getElementById('confDir').value = config.direccion || '';
         document.getElementById('confImpresora').value = config.impresora_por_defecto || '80mm';
         document.getElementById('confMsj').value = config.mensaje_ticket || '';
+        document.getElementById('confTopeDescuento').value = config.tope_maximo_descuento_sueldo_pct ?? 50;
 
         if (config.ruta_logo) {
             document.getElementById('previewLogo').src = `${baseUrl}/static/logos/${config.ruta_logo}?t=${new Date().getTime()}`;
@@ -84,6 +85,7 @@ async function guardarConfiguracion(event) {
     formData.append('direccion', document.getElementById('confDir').value);
     formData.append('impresora_por_defecto', document.getElementById('confImpresora').value);
     formData.append('mensaje_ticket', document.getElementById('confMsj').value);
+    formData.append('tope_maximo_descuento_sueldo_pct', document.getElementById('confTopeDescuento').value || 50);
 
     try {
         const baseUrl = obtenerBaseUrl();

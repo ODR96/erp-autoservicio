@@ -46,6 +46,7 @@ class MovimientoCaja(BaseModel):
     monto: float
     observaciones: str
     turno_id: int
+    es_sangria: Optional[bool] = False  # <-- NUEVO: True = Retiro físico/tesorería (NO es Gasto Operativo)
 
 class CierreCaja(BaseModel):
     turno_id: int
@@ -105,11 +106,17 @@ def registrar_movimiento(mov: MovimientoCaja):
         
         # EL SELLO DE SEGURIDAD: Limpiamos espacios y forzamos mayúsculas
         tipo_mayuscula = mov.tipo_movimiento.strip().upper()
+
+        # ETIQUETA DE TESORERÍA: si es Sangría física, lo marcamos clarito en la
+        # observación para diferenciarlo en la Auditoría de Turno de un retiro por Gasto Operativo.
+        observacion_final = mov.observaciones
+        if tipo_mayuscula == 'RETIRO' and mov.es_sangria:
+            observacion_final = f"[SANGRÍA/RETIRO FÍSICO] {mov.observaciones}"
         
         cursor.execute('''
             INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', (fecha_actual, mov.usuario_id, tipo_mayuscula, mov.monto, mov.observaciones, mov.turno_id))
+        ''', (fecha_actual, mov.usuario_id, tipo_mayuscula, mov.monto, observacion_final, mov.turno_id))
         
         conexion.commit()
         return {"mensaje": f"¡{tipo_mayuscula} de ${mov.monto} registrado correctamente!"}

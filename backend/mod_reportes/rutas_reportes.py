@@ -10,6 +10,104 @@ router = APIRouter()
 
 ZONA_AR = timezone(timedelta(hours=-3))
 
+
+def _ahora_ar():
+    return datetime.now(ZONA_AR)
+
+
+def _hoy_ar_iso():
+    return _ahora_ar().strftime("%Y-%m-%d")
+
+
+def _mes_ar(mes: str = None):
+    return mes or _ahora_ar().strftime("%Y-%m")
+
+
+def _calcular_sueldos_comprometidos(cursor, mes: str) -> float:
+    """Sueldos que este mes YA se van a deber y todavía NO se liquidaron.
+
+    - MENSUAL: la tarifa vigente menos lo ya liquidado (PAGADO) en ese mes.
+    - JORNAL / POR_HORA: solo días u horas ya cargados y sin liquidar en ese mes.
+      No inventamos el resto del mes (el empleado puede no venir).
+
+    Nunca se suma lo que ya está en gastos_operativos por una liquidación:
+    eso ya vive en 'gastos del local'. Acá solo el hueco.
+    """
+    desde_mes = f"{mes}-01"
+    try:
+        cursor.execute('''
+            SELECT usuario_id, modalidad_pago, valor, vigente_desde
+            FROM historial_tarifas_empleado
+            WHERE vigente_hasta IS NULL AND vigente_desde <= ?
+        ''', (f"{mes}-31",))
+        tarifas = cursor.fetchall()
+    except sqlite3.OperationalError:
+        return 0.0
+
+    if not tarifas:
+        return 0.0
+
+    comprometido = 0.0
+    for t in tarifas:
+        usuario_id = t['usuario_id'] if isinstance(t, sqlite3.Row) else t[0]
+        modalidad = t['modalidad_pago'] if isinstance(t, sqlite3.Row) else t[1]
+        valor = t['valor'] if isinstance(t, sqlite3.Row) else t[2]
+
+        if modalidad == 'MENSUAL':
+            cursor.execute('''
+                SELECT IFNULL(SUM(monto_bruto), 0) FROM liquidaciones_sueldos
+                WHERE usuario_id = ? AND estado = 'PAGADO'
+                AND strftime('%Y-%m', fecha_liquidacion) = ?
+            ''', (usuario_id, mes))
+            ya_liquidado = cursor.fetchone()[0] or 0.0
+            hueco = round((valor or 0) - ya_liquidado, 2)
+            if hueco > 0:
+                comprometido += hueco
+        else:
+            cursor.execute('''
+                SELECT IFNULL(SUM(presente), 0), IFNULL(SUM(horas_trabajadas), 0)
+                FROM partes_de_trabajo
+                WHERE usuario_id = ? AND liquidacion_id IS NULL
+                AND fecha >= ? AND fecha <= ?
+            ''', (usuario_id, desde_mes, f"{mes}-31"))
+            dias, horas = cursor.fetchone()
+            unidades = (horas or 0) if modalidad == 'POR_HORA' else (dias or 0)
+            if unidades > 0:
+                comprometido += round(unidades * (valor or 0), 2)
+
+    return round(comprometido, 2)
+
+# =================================================================
+# MIGRACIÓN AUTOMÁTICA (mismo patrón que mod_gastos/mod_rrhh): a diferencia de antes,
+# esta tabla ya NO depende de que alguien haya corrido crear_base.py/actualizar_bas.py
+# a mano, ni de que se haya registrado al menos un faltante (la columna usuario_anoto
+# se creaba recién ahí). Si faltaba la tabla o la columna, GET /faltantes_pendientes
+# tiraba 500 apenas alguien abría la pantalla de Proveedores.
+# =================================================================
+def asegurar_tablas_reportes():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS productos_solicitados_faltantes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
+            descripcion_producto TEXT,
+            cantidad_pedida REAL,
+            notas TEXT
+        )
+    ''')
+
+    cursor.execute("PRAGMA table_info(productos_solicitados_faltantes)")
+    columnas = [c[1] for c in cursor.fetchall()]
+    if 'usuario_anoto' not in columnas:
+        cursor.execute("ALTER TABLE productos_solicitados_faltantes ADD COLUMN usuario_anoto TEXT DEFAULT 'Desconocido'")
+
+    conexion.commit()
+    conexion.close()
+
+asegurar_tablas_reportes()
+
 # 1. ACTUALIZAMOS EL MODELO PARA SABER QUIÉN PIDE
 class ProductoFaltante(BaseModel):
     descripcion: str
@@ -42,10 +140,10 @@ def obtener_alertas_dashboard():
             JOIN productos p ON l.producto_id = p.id
             WHERE l.cantidad_disponible > 0 
             AND l.estado_lote = 'Activo' 
-            AND l.fecha_vencimiento <= date('now', '+' || IFNULL(p.dias_alerta_vencimiento, 30) || ' days')
+            AND l.fecha_vencimiento <= date(?, '+' || IFNULL(p.dias_alerta_vencimiento, 30) || ' days')
             AND p.id NOT IN (SELECT producto_padre_id FROM productos_combos)
             ORDER BY l.fecha_vencimiento ASC
-        ''')
+        ''', (_hoy_ar_iso(),))
         alertas_vencimiento = [dict(row) for row in cursor.fetchall()]
         return {"alertas_stock_critico": alertas_stock, "alertas_vencimientos": alertas_vencimiento}
     finally:
@@ -55,11 +153,10 @@ def obtener_alertas_dashboard():
 # --- 2. LA VERDAD DE LA MILANESA: GANANCIA NETA REAL ---
 @router.get("/ganancia_neta", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def calcular_ganancia_neta(mes: str = None):
-    # Si no le mandamos mes, analiza el mes actual en curso
-    if not mes:
-        mes = datetime.now().strftime("%Y-%m")
+    mes = _mes_ar(mes)
 
     conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
 
     try:
@@ -83,13 +180,22 @@ def calcular_ganancia_neta(mes: str = None):
         costos_mercaderia = cursor.fetchone()[0] or 0.0
 
         # 3. GASTOS OPERATIVOS FIJOS (Los que cargaste en el módulo de Gastos)
+        # BLINDAJE: excluimos categorías RETIRO_SOCIO / MOVIMIENTO_INTERNO, que son
+        # movimientos de tesorería y NO deben afectar la rentabilidad del negocio.
         cursor.execute('''
-            SELECT SUM(monto) FROM gastos_operativos 
-            WHERE strftime('%Y-%m', fecha) = ?
+            SELECT SUM(g.monto) 
+            FROM gastos_operativos g
+            JOIN categorias_gasto c ON g.categoria_id = c.id
+            WHERE strftime('%Y-%m', g.fecha) = ?
+            AND IFNULL(c.tipo_categoria, 'OPERATIVO') = 'OPERATIVO'
+            AND IFNULL(g.estado, 'ACTIVO') = 'ACTIVO'
         ''', (mes,))
         gastos = cursor.fetchone()[0] or 0.0
 
-        # 4. MATEMÁTICA PURA DE NEGOCIOS
+        sueldos_comprometidos = _calcular_sueldos_comprometidos(cursor, mes)
+        piso_operativo_mes = round(gastos + sueldos_comprometidos, 2)
+
+        # 4. MATEMÁTICA PURA DE NEGOCIOS (hechos: no mezcla proyección)
         ganancia_neta = ingresos - costos_mercaderia - gastos
         
         # Sacamos el porcentaje de rentabilidad
@@ -104,7 +210,9 @@ def calcular_ganancia_neta(mes: str = None):
                 "2_costo_de_la_mercaderia": round(costos_mercaderia, 2),
                 "3_gastos_del_local": round(gastos, 2),
                 "4_GANANCIA_NETA_PURA": round(ganancia_neta, 2),
-                "5_rentabilidad_del_mes": f"{round(margen_porcentaje, 2)}%"
+                "5_rentabilidad_del_mes": f"{round(margen_porcentaje, 2)}%",
+                "6_sueldos_comprometidos": sueldos_comprometidos,
+                "7_piso_operativo_mes": piso_operativo_mes
             }
         }
     except Exception as e:
@@ -176,13 +284,17 @@ def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
     cursor = conexion.cursor()
     
     # Definimos el filtro de fecha según el periodo
+    hoy = _hoy_ar_iso()
+    mes = _mes_ar()
     if periodo == "dia":
-        filtro = "date(vc.fecha_hora) = date('now')"
+        filtro = "date(vc.fecha_hora) = ?"
+        params = (hoy,)
     elif periodo == "semana":
-        filtro = "date(vc.fecha_hora) >= date('now', '-7 days')"
+        filtro = "date(vc.fecha_hora) >= date(?, '-7 days')"
+        params = (hoy,)
     else:
-        # Filtra exactamente por el mes en curso (Ej: Todo septiembre)
-        filtro = "strftime('%Y-%m', vc.fecha_hora) = strftime('%Y-%m', 'now')"
+        filtro = "strftime('%Y-%m', vc.fecha_hora) = ?"
+        params = (mes,)
 
     query = f'''
         SELECT p.nombre, SUM(vd.cantidad) as total_vendido, SUM(vd.subtotal) as recaudacion
@@ -190,11 +302,12 @@ def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
         JOIN ventas_cabecera vc ON vd.venta_id = vc.id
         JOIN productos p ON vd.producto_id = p.id
         WHERE {filtro}
+        AND vc.estado != 'ANULADA'
         GROUP BY p.id
         ORDER BY total_vendido DESC
         LIMIT 10
     '''
-    cursor.execute(query)
+    cursor.execute(query, params)
     ranking = cursor.fetchall()
     conexion.close()
     return [dict(r) for r in ranking]
@@ -207,23 +320,25 @@ def productos_sin_salida():
     cursor = conexion.cursor()
     try:
         # EL ARREGLO: Calcula dias_clavado y filtra los ingresados hoy
+        hoy = _hoy_ar_iso()
         query = '''
             SELECT p.id as producto_id, p.nombre, 
                    SUM(l.cantidad_disponible) as stock_estancado,
-                   CAST(julianday('now') - julianday(MIN(l.fecha_ingreso)) AS INTEGER) as dias_clavado
+                   CAST(julianday(?) - julianday(MIN(l.fecha_ingreso)) AS INTEGER) as dias_clavado
             FROM productos p
             JOIN lotes_stock l ON p.id = l.producto_id
             WHERE l.cantidad_disponible > 0 AND l.estado_lote = 'Activo'
-            AND l.fecha_ingreso <= date('now', '-30 days')
+            AND l.fecha_ingreso <= date(?, '-30 days')
             AND p.id NOT IN (
                 SELECT vd.producto_id
                 FROM ventas_detalle vd
                 JOIN ventas_cabecera vc ON vd.venta_id = vc.id
-                WHERE date(vc.fecha_hora) >= date('now', '-30 days')
+                WHERE date(vc.fecha_hora) >= date(?, '-30 days')
+                AND vc.estado != 'ANULADA'
             )
             GROUP BY p.id
         '''
-        cursor.execute(query)
+        cursor.execute(query, (hoy, hoy, hoy))
         estancados = [dict(e) for e in cursor.fetchall()]
         return estancados
     finally:
@@ -240,7 +355,7 @@ def ventas_por_metodo():
                 -- 1. Ventas puras (Toman el nombre tal cual viene de la caja principal)
                 SELECT metodo_pago, COUNT(id) as cantidad_transacciones, SUM(total_venta) as total_dinero
                 FROM ventas_cabecera
-                WHERE strftime('%Y-%m', fecha_hora) = strftime('%Y-%m', 'now')
+                WHERE strftime('%Y-%m', fecha_hora) = ?
                 AND metodo_pago != 'MIXTO'
                 AND estado != 'ANULADA'
                 GROUP BY metodo_pago
@@ -258,7 +373,7 @@ def ventas_por_metodo():
                     SUM(vm.monto) as total_dinero
                 FROM ventas_pagos_mixtos vm
                 JOIN ventas_cabecera vc ON vm.venta_id = vc.id
-                WHERE strftime('%Y-%m', vc.fecha_hora) = strftime('%Y-%m', 'now')
+                WHERE strftime('%Y-%m', vc.fecha_hora) = ?
                 AND vc.estado != 'ANULADA'
                 GROUP BY metodo_pago_traducido
             )
@@ -275,7 +390,8 @@ def ventas_por_metodo():
             GROUP BY metodo_pago_traducido
             ORDER BY total_dinero DESC
         '''
-        cursor.execute(query)
+        mes = _mes_ar()
+        cursor.execute(query, (mes, mes))
         metodos = [dict(row) for row in cursor.fetchall()]
         return metodos
     except Exception as e:

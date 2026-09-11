@@ -1696,11 +1696,44 @@ function cargarVentaEspera(index) {
 async function registrarMovimientoCaja(tipo) {
     modalGestion.hide();
 
-    const titulo = tipo === 'ingreso' ? 'Ingreso de Dinero' : 'Retiro de Efectivo';
-    const colorBtn = tipo === 'ingreso' ? '#10b981' : '#ef4444';
+    // --- PASO 0 (SOLO RETIROS): ¿Es un Gasto del Local o una Sangría/Retiro Físico? ---
+    let esSangria = false;
+    if (tipo === 'retiro') {
+        const eleccion = await Swal.fire({
+            title: '<span style="color:#fff; font-weight:bold;">¿Qué tipo de retiro es?</span>',
+            html: `<p style="color:#94a3b8; font-size: 0.9rem;">
+                     Elegí bien: los <b>Gastos del Local</b> impactan la rentabilidad del mes.<br>
+                     Las <b>Sangrías / Retiros Físicos</b> son solo movimientos internos de tesorería
+                     (ej: cambio para otra caja, retiro para el dueño) y NO afectan la rentabilidad.
+                   </p>`,
+            icon: 'question',
+            background: '#111C2A',
+            color: '#fff',
+            showDenyButton: true,
+            showCancelButton: true,
+            confirmButtonText: '🧾 Gasto del Local',
+            denyButtonText: '💰 Sangría / Retiro Físico',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#ef4444',
+            denyButtonColor: '#f59e0b',
+            cancelButtonColor: '#475569'
+        });
+
+        if (!eleccion.isConfirmed && !eleccion.isDenied) {
+            inputScan.focus();
+            return; // Canceló
+        }
+        esSangria = eleccion.isDenied;
+    }
+
+    const titulo = tipo === 'ingreso'
+        ? 'Ingreso de Dinero'
+        : (esSangria ? 'Sangría / Retiro Físico' : 'Retiro por Gasto del Local');
+    const colorBtn = tipo === 'ingreso' ? '#10b981' : (esSangria ? '#f59e0b' : '#ef4444');
     let opcionesCategoria = '';
 
-    if (tipo === 'retiro') {
+    // La categoría de gasto SOLO aplica si es un Gasto del Local real
+    if (tipo === 'retiro' && !esSangria) {
         try {
             Swal.fire({ title: 'Cargando...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
             const resCat = await apiFetch(`${obtenerBaseUrl()}/gastos/categorias`);
@@ -1733,10 +1766,15 @@ async function registrarMovimientoCaja(tipo) {
     `;
 
     let inputsHtml = estilosInput + `<input id="swal-monto" type="number" class="swal2-input input-dark-custom" placeholder="Monto ($)">`;
-    
-    if (tipo === 'retiro') {
+
+    if (tipo === 'retiro' && !esSangria) {
+        // Flujo GASTO DEL LOCAL (sin cambios de comportamiento)
         inputsHtml += opcionesCategoria;
         inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (Ej: Proveedor pan, Vale Juan)">`;
+        inputsHtml += `<hr style="border-color: #1F304A; width: 80%; margin: 15px auto;"><input id="swal-pin" type="password" class="swal2-input input-dark-custom" placeholder="PIN Encargado" style="border-color: #f59e0b !important;">`;
+    } else if (tipo === 'retiro' && esSangria) {
+        // Flujo SANGRÍA / RETIRO FÍSICO (simple, sin categoría de gasto)
+        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Motivo (Ej: Cambio para Caja 2, Retiro dueño)">`;
         inputsHtml += `<hr style="border-color: #1F304A; width: 80%; margin: 15px auto;"><input id="swal-pin" type="password" class="swal2-input input-dark-custom" placeholder="PIN Encargado" style="border-color: #f59e0b !important;">`;
     } else {
         inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" placeholder="Motivo (Ej: Cambio inicial)">`;
@@ -1776,11 +1814,12 @@ async function registrarMovimientoCaja(tipo) {
             if (tipo === 'ingreso' && !motivo) { Swal.showValidationMessage('Debe especificar el motivo'); return false; }
 
             if (tipo === 'retiro') {
-                const catEl = document.getElementById('swal-categoria');
-                if(catEl) catId = catEl.value;
-                
-                if(!catId) { Swal.showValidationMessage('Elegí una categoría de gasto'); return false; }
-                if (!motivo) { Swal.showValidationMessage('Completá el detalle del gasto'); return false; }
+                if (!esSangria) {
+                    const catEl = document.getElementById('swal-categoria');
+                    if(catEl) catId = catEl.value;
+                    if(!catId) { Swal.showValidationMessage('Elegí una categoría de gasto'); return false; }
+                }
+                if (!motivo) { Swal.showValidationMessage('Completá el detalle/motivo'); return false; }
                 if (!pinEl || !pinEl.value) { Swal.showValidationMessage('Ingrese su PIN secreto'); return false; }
                 
                 try {
@@ -1820,7 +1859,27 @@ async function registrarMovimientoCaja(tipo) {
                 });
                 if (!response.ok) throw new Error("Fallo en el servidor al registrar ingreso");
 
+            } else if (tipo === 'retiro' && esSangria) {
+                // --- SANGRÍA / RETIRO FÍSICO: pega directo a Caja, NUNCA pasa por Gastos ---
+                const payloadMovimiento = {
+                    tipo_movimiento: 'retiro',
+                    monto: formValues.monto,
+                    observaciones: formValues.motivo,
+                    turno_id: turnoActualId,
+                    caja_id: terminal_id,
+                    usuario_id: empleadoLogueado.id,
+                    es_sangria: true
+                };
+
+                const response = await apiFetch(`${obtenerBaseUrl()}/caja/movimiento`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(payloadMovimiento)
+                });
+                if (!response.ok) throw new Error("Fallo en el servidor al registrar la sangría");
+
             } else if (tipo === 'retiro') {
+                // --- GASTO DEL LOCAL: flujo original, impacta gastos_operativos ---
                 const payloadGasto = {
                     categoria_id: parseInt(formValues.categoria_id),
                     descripcion_detalle: formValues.motivo,
@@ -1840,7 +1899,8 @@ async function registrarMovimientoCaja(tipo) {
                 if (!response.ok) throw new Error("Fallo al asentar el gasto en Tesorería");
             }
 
-            Swal.fire({ title: '✅ Registrado', text: `Se guardó un ${tipo} de $${formValues.monto} en el sistema.`, background: '#111C2A', color: '#fff', icon: 'success', timer: 2000, showConfirmButton: false });
+            const etiquetaExito = tipo === 'ingreso' ? 'ingreso' : (esSangria ? 'sangría' : 'retiro/gasto');
+            Swal.fire({ title: '✅ Registrado', text: `Se guardó un ${etiquetaExito} de $${formValues.monto} en el sistema.`, background: '#111C2A', color: '#fff', icon: 'success', timer: 2000, showConfirmButton: false });
         } catch (e) {
             Swal.fire({ title: 'Error', text: e.message, background: '#111C2A', color: '#fff', icon: 'error' });
         }

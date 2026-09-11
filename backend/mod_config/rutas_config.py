@@ -35,6 +35,8 @@ def asegurar_tabla_configuracion():
     except: pass
     try: cursor.execute("ALTER TABLE configuracion_local ADD COLUMN impresora_por_defecto TEXT DEFAULT '80mm'")
     except: pass
+    try: cursor.execute("ALTER TABLE configuracion_local ADD COLUMN tope_maximo_descuento_sueldo_pct REAL DEFAULT 50.0")
+    except: pass
 
     cursor.execute("INSERT OR IGNORE INTO configuracion_local (id) VALUES (1)")
     conexion.commit()
@@ -51,16 +53,20 @@ def actualizar_configuracion(
     mensaje_ticket: str = Form(...),
     cuit: str = Form(...),
     condicion_iva: str = Form(...),
-    impresora_por_defecto: str = Form(...)
+    impresora_por_defecto: str = Form(...),
+    tope_maximo_descuento_sueldo_pct: float = Form(50.0)
 ):
+    if tope_maximo_descuento_sueldo_pct < 0 or tope_maximo_descuento_sueldo_pct > 100:
+        return {"error": "El tope de descuento de sueldo debe ser un porcentaje entre 0 y 100."}
+
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute('''
             UPDATE configuracion_local 
-            SET nombre_negocio = ?, direccion = ?, telefono = ?, mensaje_ticket = ?, cuit = ?, condicion_iva = ?, impresora_por_defecto = ?
+            SET nombre_negocio = ?, direccion = ?, telefono = ?, mensaje_ticket = ?, cuit = ?, condicion_iva = ?, impresora_por_defecto = ?, tope_maximo_descuento_sueldo_pct = ?
             WHERE id = 1
-        ''', (nombre_negocio, direccion, telefono, mensaje_ticket, cuit, condicion_iva, impresora_por_defecto))
+        ''', (nombre_negocio, direccion, telefono, mensaje_ticket, cuit, condicion_iva, impresora_por_defecto, tope_maximo_descuento_sueldo_pct))
         conexion.commit()
         return {"mensaje": "¡Configuración del negocio guardada con éxito!"}
     except Exception as e:
