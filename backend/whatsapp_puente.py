@@ -1,23 +1,33 @@
 """Puente dispara-y-olvida hacia el microservicio Node (puerto 3000).
 
-Python NUNCA espera a que WhatsApp entregue el mensaje. Si Node está caído,
-se loguea y el ERP sigue. No usar pywhatkit, selenium ni librerías de WhatsApp.
+Contrato con el bot whatsapp-web.js:
+  POST http://127.0.0.1:3000/enviar
+  { "destino": "<id @c.us o @g.us>", "mensaje": "..." }
+  Header opcional: X-ERP-Token = PUENTE_TOKEN / WHATSAPP_BRIDGE_TOKEN
+
+Python NUNCA espera a que WhatsApp entregue. Si Node está caído, se loguea y el ERP sigue.
 """
 import os
 import requests
 from backend.database import obtener_conexion
 
-PUENTE_URL = os.getenv("WHATSAPP_BRIDGE_URL", "http://127.0.0.1:3000")
+PUENTE_URL = os.getenv("WHATSAPP_BRIDGE_URL", "http://127.0.0.1:3000/enviar")
 TIMEOUT_SEG = 0.5
+TOKEN = (os.getenv("WHATSAPP_BRIDGE_TOKEN") or os.getenv("PUENTE_TOKEN") or "").strip()
 
 
-def _normalizar_numero(raw: str) -> str:
+def _normalizar_destino(raw: str) -> str:
     texto = (raw or "").strip()
     if not texto:
         return ""
-    if texto.startswith("+"):
-        return "+" + "".join(ch for ch in texto[1:] if ch.isdigit())
-    return "".join(ch for ch in texto if ch.isdigit())
+    if "@" in texto:
+        return texto
+    digitos = "".join(ch for ch in texto if ch.isdigit())
+    if not digitos:
+        return ""
+    if not digitos.startswith("54"):
+        digitos = "54" + digitos
+    return f"{digitos}@c.us"
 
 
 def _telefono_admin():
@@ -26,7 +36,7 @@ def _telefono_admin():
         fila = conexion.execute("SELECT telefono FROM configuracion_local WHERE id = 1").fetchone()
         if not fila:
             return ""
-        return _normalizar_numero(fila[0] or "")
+        return _normalizar_destino(fila[0] or "")
     except Exception as e:
         print(f"WhatsApp puente: no se pudo leer el teléfono de config ({e})")
         return ""
@@ -35,16 +45,20 @@ def _telefono_admin():
 
 
 def enviar_whatsapp(mensaje: str, numero: str = None):
-    destino = _normalizar_numero(numero or _telefono_admin())
+    destino = _normalizar_destino(numero) if numero else _telefono_admin()
     if not destino:
         print("WhatsApp puente: sin número en Configuración. No se envió.")
         return {"ok": False, "detalle": "Falta el teléfono en Configuración."}
     if not (mensaje or "").strip():
         return {"ok": False, "detalle": "Mensaje vacío."}
+    headers = {"Content-Type": "application/json"}
+    if TOKEN:
+        headers["X-ERP-Token"] = TOKEN
     try:
         res = requests.post(
             PUENTE_URL,
-            json={"numero": destino, "mensaje": mensaje.strip()},
+            json={"destino": destino, "mensaje": mensaje.strip()},
+            headers=headers,
             timeout=TIMEOUT_SEG,
         )
         if res.status_code >= 400:
