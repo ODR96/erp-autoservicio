@@ -103,6 +103,18 @@ function filtrarCatalogoFront() {
     }, 300);
 }
 
+function htmlTxt(valor) {
+    return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function attrJs(valor) {
+    return String(valor ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, ' ');
+}
+
 function dibujarTablaCatalogo(listaProductos, estadoSeleccionado) {
     const tbody = document.getElementById('tablaCatalogoBody');
     tbody.innerHTML = '';
@@ -151,14 +163,31 @@ function dibujarTablaCatalogo(listaProductos, estadoSeleccionado) {
         
         let claseFila = estadoSeleccionado === "0" ? 'producto-inactivo' : '';
         
-        let botonesAccion = estadoSeleccionado !== "0" ? `
-            <button class="btn btn-sm btn-outline-primary py-0" title="Editar" onclick="abrirEditarProducto(${p.id})"><i class="bi bi-pencil"></i></button>
-            <button class="btn btn-sm btn-outline-info py-0" title="Clonar (Copiar)" onclick="clonarProducto(${p.id})"><i class="bi bi-files"></i></button>
-            <button class="btn btn-sm btn-outline-warning py-0" title="Merma" onclick="abrirModalMerma(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')"><i class="bi bi-box-arrow-down-right"></i></button>
-            <button class="btn btn-sm btn-outline-danger py-0 ms-1" title="Desactivar" onclick="desactivarProducto(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')"><i class="bi bi-trash"></i></button>
-        ` : `<button class="btn btn-sm btn-success py-0 fw-bold shadow-sm" title="Restaurar" onclick="restaurarProducto(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')"><i class="bi bi-arrow-counterclockwise"></i> Restaurar</button>`;
+        const nombreJs = attrJs(p.nombre);
+        const botonesEscritorio = estadoSeleccionado !== "0" ? `
+            <div class="d-none d-md-inline-flex gap-1 flex-wrap justify-content-center">
+                <button class="btn btn-sm btn-outline-primary" title="Editar" onclick="abrirEditarProducto(${p.id})"><i class="bi bi-pencil"></i></button>
+                <button class="btn btn-sm btn-outline-info" title="Clonar (Copiar)" onclick="clonarProducto(${p.id})"><i class="bi bi-files"></i></button>
+                <button class="btn btn-sm btn-outline-warning" title="Merma" onclick="abrirModalMerma(${p.id}, '${nombreJs}')"><i class="bi bi-box-arrow-down-right"></i></button>
+                <button class="btn btn-sm btn-outline-danger" title="Desactivar" onclick="desactivarProducto(${p.id}, '${nombreJs}')"><i class="bi bi-trash"></i></button>
+            </div>
+            <div class="dropdown d-md-none">
+                <button class="btn btn-outline-secondary btn-catalogo-mas" type="button" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false" title="Más acciones">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow">
+                    <li><button class="dropdown-item py-2" type="button" onclick="abrirEditarProducto(${p.id})"><i class="bi bi-pencil me-2"></i>Editar</button></li>
+                    <li><button class="dropdown-item py-2" type="button" onclick="clonarProducto(${p.id})"><i class="bi bi-files me-2"></i>Clonar</button></li>
+                    <li><button class="dropdown-item py-2" type="button" onclick="abrirModalMerma(${p.id}, '${nombreJs}')"><i class="bi bi-box-arrow-down-right me-2"></i>Merma</button></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><button class="dropdown-item py-2 text-danger" type="button" onclick="desactivarProducto(${p.id}, '${nombreJs}')"><i class="bi bi-trash me-2"></i>Desactivar</button></li>
+                </ul>
+            </div>
+        ` : `
+            <button class="btn btn-sm btn-success fw-bold shadow-sm" title="Restaurar" onclick="restaurarProducto(${p.id}, '${nombreJs}')"><i class="bi bi-arrow-counterclockwise"></i> Restaurar</button>
+        `;
 
-        tbody.innerHTML += `<tr class="${claseFila}"><td class="text-muted align-middle">${p.codigo_barras || 'S/C'}</td><td class="align-middle"><div class="fw-bold lh-1">${p.nombre}</div>${htmlPromo}${alertaVencHTML}</td><td class="align-middle"><span class="badge bg-primary">${nombreCat}</span></td><td class="text-end text-muted align-middle">$ ${costoF}</td><td class="text-end fw-bold text-success align-middle">$ ${precioF}</td><td class="text-center align-middle"><span class="badge ${badgeClase} rounded-pill px-3">${textoStock}</span>${htmlLotes}</td><td class="text-center align-middle">${botonesAccion}</td></tr>`;
+        tbody.innerHTML += `<tr class="fila-catalogo ${claseFila}" data-id="${p.id}" onclick="if (window.innerWidth < 768) abrirEditarProducto(${p.id})"><td class="text-muted align-middle col-hide-xs">${htmlTxt(p.codigo_barras || 'S/C')}</td><td class="align-middle"><div class="fw-bold lh-1">${htmlTxt(p.nombre)}</div>${htmlPromo}${alertaVencHTML}</td><td class="align-middle col-hide-xs"><span class="badge bg-primary">${htmlTxt(nombreCat)}</span></td><td class="text-end text-muted align-middle col-hide-xs">$ ${costoF}</td><td class="text-end fw-bold text-success align-middle">$ ${precioF}</td><td class="text-center align-middle"><span class="badge ${badgeClase} rounded-pill px-3">${textoStock}</span>${htmlLotes}</td><td class="text-center align-middle" onclick="event.stopPropagation()">${botonesEscritorio}</td></tr>`;
     });
 }
 
@@ -814,13 +843,16 @@ async function abrirEditarProducto(id, pestana = 'precios') {
                     let color = m.tipo_movimiento.toLowerCase().includes('ingreso') ? 'text-success' : 'text-danger';
                     let signo = m.tipo_movimiento.toLowerCase().includes('ingreso') ? '+' : '-';
                     
-                    let detalle = m.motivo ? `<br><small class="text-muted fw-normal">${m.motivo}</small>` : '';
+                    let detalle = m.motivo ? `<br><small class="text-muted fw-normal">${htmlTxt(m.motivo)}</small>` : '';
+                    if (m.costo_perdido != null && Number(m.costo_perdido) > 0) {
+                        detalle += `<br><small class="text-danger">Pérdida $ ${Number(m.costo_perdido).toLocaleString('es-AR', {minimumFractionDigits: 2})}</small>`;
+                    }
 
                     tbHist.innerHTML += `<tr>
-                        <td class="text-muted">${m.fecha_hora}</td>
-                        <td class="fw-bold">${m.tipo_movimiento} ${detalle}</td>
+                        <td class="text-muted">${htmlTxt(m.fecha_hora)}</td>
+                        <td class="fw-bold">${htmlTxt(m.tipo_movimiento)} ${detalle}</td>
                         <td class="fw-bold ${color}">${signo}${m.cantidad}</td>
-                        <td class="small"><i class="bi bi-person-fill"></i> ${m.responsable || 'Sistema'}</td>
+                        <td class="small"><i class="bi bi-person-fill"></i> ${htmlTxt(m.responsable || 'Sistema')}</td>
                     </tr>`;
                 });
             } else {
@@ -929,6 +961,30 @@ async function restaurarProducto(id, n) { if ((await Swal.fire({ title: '¿Resta
 // ==========================================
 // SISTEMA DE MERMAS (RECUPERADO)
 // ==========================================
+let lotesMermaActuales = [];
+
+function actualizarCostoMermaEstimado() {
+    const caja = document.getElementById('mermaCostoEstimado');
+    if (!caja) return;
+    const loteId = parseInt(document.getElementById('mermaSelectLote').value);
+    const cantidad = parseFloat(document.getElementById('mermaCantidad').value) || 0;
+    const motivo = document.getElementById('mermaMotivo').value || '';
+    const lote = lotesMermaActuales.find(l => Number(l.lote_id) === loteId);
+    const costoUnit = lote ? (Number(lote.costo) || 0) : 0;
+
+    if (motivo.startsWith('Ajuste de Facturación')) {
+        caja.textContent = 'Ajuste de facturación: no suma pérdida (el CMV ya se cargó en la venta).';
+        caja.classList.remove('text-danger');
+        caja.classList.add('text-muted');
+        return;
+    }
+
+    const perdido = Math.max(0, cantidad) * costoUnit;
+    caja.textContent = `Pérdida estimada: $ ${perdido.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+    caja.classList.remove('text-muted');
+    caja.classList.add('text-danger');
+}
+
 async function abrirModalMerma(id, nombre) {
     try {
         const res = await apiFetch(`${obtenerBaseUrl()}/productos/ver/${id}`);
@@ -942,12 +998,15 @@ async function abrirModalMerma(id, nombre) {
             return Swal.fire('Sin stock', 'Este producto no tiene lotes con stock para descontar.', 'info');
         }
 
+        lotesMermaActuales = prod.lotes;
         prod.lotes.forEach(l => {
-            selectLote.innerHTML += `<option value="${l.lote_id}">Lote: ${l.lote || 'S/N'} - Disp: ${l.stock} un. (Venc: ${l.vence})</option>`;
+            const costoTxt = (Number(l.costo) || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+            selectLote.innerHTML += `<option value="${l.lote_id}">Lote: ${htmlTxt(l.lote || 'S/N')} - Disp: ${l.stock} (Costo $ ${costoTxt} · Venc: ${htmlTxt(l.vence)})</option>`;
         });
 
         document.getElementById('mermaCantidad').value = "1";
         document.getElementById('mermaObservaciones').value = "";
+        actualizarCostoMermaEstimado();
         
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalMerma')).show();
     } catch (e) {
@@ -963,20 +1022,27 @@ async function confirmarMerma() {
 
     if (cantidad <= 0 || !loteId) return Swal.fire('Error', 'Faltan datos válidos.', 'error');
 
-    const motivoCompleto = obs ? `${motivo} - Obs: ${obs}` : motivo;
-    const usuarioId = localStorage.getItem('usuario_id') || 1;
-
     try {
         const res = await apiFetch(`${obtenerBaseUrl()}/lotes/baja_manual`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lote_id: loteId, cantidad_a_bajar: cantidad, motivo: motivoCompleto, usuario_id: parseInt(usuarioId) })
+            body: JSON.stringify({
+                lote_id: loteId,
+                cantidad_a_bajar: cantidad,
+                motivo: motivo,
+                observaciones: obs || ''
+            })
         });
 
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
-        await Swal.fire('¡Merma Registrada!', 'El stock fue descontado y registrado en la auditoría.', 'success');
+        const perdido = Number(data.costo_perdido || 0);
+        const textoPlata = data.impacto_ganancia === false
+            ? 'Stock ajustado. Sin impacto en ganancia (ajuste de facturación).'
+            : `Stock descontado. Pérdida registrada: $ ${perdido.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+
+        await Swal.fire('¡Merma Registrada!', textoPlata, 'success');
         bootstrap.Modal.getInstance(document.getElementById('modalMerma')).hide();
         
         sessionStorage.setItem('paginaRetorno', paginaActualProd);

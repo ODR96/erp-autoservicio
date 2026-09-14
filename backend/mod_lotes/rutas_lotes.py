@@ -10,6 +10,29 @@ router = APIRouter()
 
 ZONA_AR = timezone(timedelta(hours=-3))
 
+
+def asegurar_tabla_mermas():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS registro_mermas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
+            producto_id INTEGER,
+            lote_id INTEGER,
+            cantidad REAL,
+            motivo TEXT,
+            costo_perdido REAL,
+            usuario_id INTEGER,
+            observaciones TEXT
+        )
+    ''')
+    conexion.commit()
+    conexion.close()
+
+
+asegurar_tabla_mermas()
+
 # --- MODELOS DE DATOS ---
 class LoteNuevo(BaseModel):
     producto_id: int
@@ -22,6 +45,7 @@ class BajaManual(BaseModel):
     lote_id: int
     cantidad_a_bajar: float
     motivo: str  # Ej: "Rotura", "Vencido", "Consumo interno"
+    observaciones: str = ""
     usuario_id: int = 1
 
 
@@ -86,42 +110,79 @@ def listar_lotes_activos():
 
 
 # --- 3. BAJA MANUAL DE STOCK ---
-@router.put("/baja_manual", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
-def dar_baja_manual(datos: BajaManual): # <-- Eliminado el background_tasks inútil
+@router.put("/baja_manual")
+def dar_baja_manual(datos: BajaManual, payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        cursor.execute("SELECT cantidad_disponible, producto_id FROM lotes_stock WHERE id = ?", (datos.lote_id,))
+        if datos.cantidad_a_bajar <= 0:
+            conexion.close()
+            return {"error": "La cantidad a dar de baja tiene que ser mayor a cero."}
+
+        cursor.execute(
+            "SELECT cantidad_disponible, producto_id, IFNULL(costo_real_ingreso, 0) FROM lotes_stock WHERE id = ?",
+            (datos.lote_id,),
+        )
         resultado = cursor.fetchone()
         
         if not resultado:
+            conexion.close()
             return {"error": "Ese lote no existe."}
             
         stock_actual = resultado[0]
         producto_id = resultado[1]
+        costo_unitario = resultado[2] or 0.0
         
         if datos.cantidad_a_bajar > stock_actual:
+            conexion.close()
             return {"error": f"No podés dar de baja {datos.cantidad_a_bajar}. Solo hay {stock_actual} en este lote."}
+
+        if costo_unitario <= 0:
+            cursor.execute("SELECT IFNULL(costo_sin_iva, 0) FROM productos WHERE id = ?", (producto_id,))
+            fila_costo = cursor.fetchone()
+            costo_unitario = (fila_costo[0] or 0.0) if fila_costo else 0.0
+
+        # El ajuste por ventas previas al ingreso ya pagó CMV en la venta. No se vuelve a perder.
+        es_ajuste_facturacion = (datos.motivo or "").startswith("Ajuste de Facturación")
+        costo_perdido = 0.0 if es_ajuste_facturacion else round(datos.cantidad_a_bajar * costo_unitario, 2)
+
+        try:
+            usuario_id = int(payload.get("sub") or datos.usuario_id or 1)
+        except (TypeError, ValueError):
+            usuario_id = datos.usuario_id or 1
             
         nuevo_stock = stock_actual - datos.cantidad_a_bajar
         
         cursor.execute("UPDATE lotes_stock SET cantidad_disponible = ? WHERE id = ?", (nuevo_stock, datos.lote_id))
+        if nuevo_stock <= 0:
+            cursor.execute("UPDATE lotes_stock SET estado_lote = 'Agotado' WHERE id = ?", (datos.lote_id,))
         
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        motivo_auditoria = datos.motivo
+        if datos.observaciones:
+            motivo_auditoria = f"{datos.motivo} - Obs: {datos.observaciones}"
         
         cursor.execute('''
             INSERT INTO movimientos_stock 
             (producto_id, lote_id, cantidad, tipo_movimiento, motivo, usuario_id, fecha_hora)
             VALUES (?, ?, ?, 'Baja Manual / Merma', ?, ?, ?)
-        ''', (producto_id, datos.lote_id, datos.cantidad_a_bajar, datos.motivo, datos.usuario_id, fecha_actual))
+        ''', (producto_id, datos.lote_id, datos.cantidad_a_bajar, motivo_auditoria, usuario_id, fecha_actual))
+
+        cursor.execute('''
+            INSERT INTO registro_mermas
+            (fecha_hora, producto_id, lote_id, cantidad, motivo, costo_perdido, usuario_id, observaciones)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (fecha_actual, producto_id, datos.lote_id, datos.cantidad_a_bajar, datos.motivo, costo_perdido, usuario_id, datos.observaciones or None))
         
         conexion.commit()
         conexion.close()
         
         return {
-            "mensaje": "Stock ajustado y registrado en auditoría.", 
+            "mensaje": "Stock ajustado y pérdida registrada.",
             "motivo_registrado": datos.motivo,
-            "stock_restante_en_lote": nuevo_stock
+            "stock_restante_en_lote": nuevo_stock,
+            "costo_perdido": costo_perdido,
+            "impacto_ganancia": not es_ajuste_facturacion
         }
     except Exception as e:
         if conexion:

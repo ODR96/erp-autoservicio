@@ -44,11 +44,14 @@ async function cargarMeticasFinancieras() {
             const gananciaNeta = rf['4_GANANCIA_NETA_PURA'];
             const sueldosComprometidos = rf['6_sueldos_comprometidos'] || 0;
             const pisoMes = (rf['7_piso_operativo_mes'] != null) ? rf['7_piso_operativo_mes'] : (gastos + sueldosComprometidos);
+            const mermas = rf['8_mermas_del_mes'] || 0;
 
             // 1. Llenamos las cajas de texto de arriba (hechos: la ganancia neta NO mete proyección)
             document.getElementById('dash-ingresos-mes').innerText = formatiarDinero(ingresos);
             document.getElementById('dash-cmv').innerText = formatiarDinero(cmv);
             document.getElementById('dash-gastos').innerText = formatiarDinero(gastos);
+            const cajaMermas = document.getElementById('dash-mermas');
+            if (cajaMermas) cajaMermas.innerText = formatiarDinero(mermas);
             document.getElementById('dash-ganancia').innerText = formatiarDinero(gananciaNeta);
             document.getElementById('dash-rentabilidad').innerText = rf['5_rentabilidad_del_mes'];
 

@@ -86,7 +86,7 @@ function inyectarLayout() {
 
     const navbarHTML = `
         <div class="top-navbar d-print-none">
-            <button class="btn-hamburguesa d-md-none me-3" onclick="toggleMenu()" title="Abrir Menú">
+            <button type="button" class="btn-hamburguesa" onclick="toggleMenu()" title="Abrir Menú" aria-label="Abrir menú">
                 <i class="bi bi-list"></i>
             </button>
             
@@ -96,13 +96,13 @@ function inyectarLayout() {
                 <div id="cajaDolar" class="d-none d-md-flex align-items-center gap-2 px-3 py-1 bg-light border rounded-pill text-success fw-bold small">
                     <span class="spinner-border spinner-border-sm text-success" role="status"></span>
                 </div>
-                <button class="btn btn-light position-relative p-1 border shadow-sm rounded-circle d-flex justify-content-center align-items-center" style="width: 35px; height: 35px;">
+                <button class="btn btn-light position-relative p-1 border shadow-sm rounded-circle d-flex justify-content-center align-items-center" style="width: 44px; height: 44px;">
                     <i class="bi bi-bell text-secondary"></i>
                     <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle"></span>
                 </button>
                 <div class="dropdown">
-                    <div class="d-flex align-items-center gap-2 border-start ps-3" data-bs-toggle="dropdown" style="cursor: pointer;" title="Opciones de cuenta">
-                        <div class="text-end lh-1">
+                    <div class="d-flex align-items-center gap-2 border-start ps-3" data-bs-toggle="dropdown" style="cursor: pointer; min-height: 44px;" title="Opciones de cuenta">
+                        <div class="text-end lh-1 navbar-user-nombre">
                             <strong class="d-block text-dark">${nombre}</strong>
                             <small class="text-muted">${rol}</small>
                         </div>
@@ -128,6 +128,10 @@ function inyectarLayout() {
     document.querySelectorAll('.sidebar-menu .menu-item').forEach(link => {
         const href = link.getAttribute('href');
         if (href !== '#' && urlActual.includes(href)) link.classList.add('active');
+        link.addEventListener('click', () => {
+            const sidebar = document.getElementById('sidebarMenu');
+            if (sidebar && sidebar.classList.contains('mostrar')) toggleMenu();
+        });
     });
 }
 
@@ -158,9 +162,24 @@ function cerrarSesionGlobal() {
     window.location.href = 'index.html';
 }
 
-const style = document.createElement('style');
-style.innerHTML = `@media (max-width: 768px) { .btn-hamburguesa { display: block !important; } .titulo-modulo-desktop, .cotizacion-dolar { display: none !important; } .sidebar { position: fixed; left: -260px; top: 0; height: 100vh; z-index: 1050; transition: left 0.3s; } .sidebar.mostrar { left: 0; } .sidebar-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 1040; } .sidebar-backdrop.mostrar { display: block; } }`;
-document.head.appendChild(style);
+const styleLayoutMovil = document.createElement('style');
+styleLayoutMovil.innerHTML = `
+.btn-hamburguesa { display: none; background: transparent; border: none; font-size: 1.5rem; color: #1b365d; cursor: pointer; min-width: 44px; min-height: 44px; }
+@media (max-width: 767.98px) {
+    .btn-hamburguesa { display: flex !important; align-items: center; justify-content: center; }
+    .titulo-modulo-desktop, .cotizacion-dolar, .navbar-user-nombre { display: none !important; }
+    .sidebar { position: fixed; left: -260px; top: 0; height: 100vh; z-index: 1050; transition: left 0.3s; }
+    .sidebar.mostrar { left: 0; }
+    .sidebar-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 1040; }
+    .sidebar-backdrop.mostrar { display: block; }
+}`;
+document.head.appendChild(styleLayoutMovil);
+
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const sidebar = document.getElementById('sidebarMenu');
+    if (sidebar && sidebar.classList.contains('mostrar')) toggleMenu();
+});
 
 document.addEventListener("DOMContentLoaded", () => {
     inyectarLayout();

@@ -14,13 +14,15 @@ HITOS Y ARQUITECTURA ACTUAL:
 
 VERSIÓN:
 - Release Electron / badge: v1.0.30
-- Cache JS reciente (layout/config/POS): ?v=1.0.33 — no es release de tienda.
+- Cache JS/CSS reciente (Productos + Dashboard merma): ?v=1.0.35 — no es release de tienda.
 
 HITOS RECIENTES (ya no son tareas):
 - Dashboard: piso operativo del mes (ganancia bruta vs gastos reales + sueldos).
 - Sangría de caja (retiro físico, sin impacto en rentabilidad).
 - Faltantes: estados PENDIENTE / PEDIDO / RECIBIDO, selección, Excel, vista previa PDF, cantidad editable.
 - WhatsApp Contabo: POST /enviar validado. Dueño = teléfono de Configuración (Cierre Z detallado + cada retiro de caja). Grupo de compras = whatsapp_grupo_compras (digest de faltantes del turno al cerrar, agrupados por nombre). Docker corralón parado, restart=no.
+- Ola 1 UX pulgar: chrome admin + catálogo Productos (tap editar, menú ⋮, modal fullscreen) + Dashboard (viewport, scroll, KPIs). Probar en browser vs VPS; Electron 1.0.30 no trae este CSS.
+- Merma: baja lote + movimientos_stock + registro_mermas.costo_perdido (costo del lote; fallback costo_sin_iva). Resta en ganancia neta como línea 8, no en CMV ni gastos/cheques. Ajuste de facturación: costo_perdido = 0. Usuario del JWT.
 
 TAREAS ACTIVAS:
 (ninguna bloqueante; el siguiente corte se elige de DIFERIDO)
@@ -33,7 +35,7 @@ PROVEEDORES (hecho en este corte):
 DIFERIDO:
 - Frente HTTP: Nginx reverse proxy 80→127.0.0.1:8000; obtenerBaseUrl() sin :8000 (mismo origen); uvicorn --host 127.0.0.1; UFW sin 8000. Hoy layout.js pega a IP:8000 — el puerto tiene que seguir abierto hasta ese cambio. UFW 3000 ya cerrado.
 - Versionar el bot: producción es bot-whatsapp/bot.js (PM2), no el index.js del repo. Un git pull no actualiza Node.
-- Responsive / UX pulgar de Proveedores y Faltantes.
+- Responsive / UX pulgar de Proveedores, Faltantes y Gastos (Ola 2). Ola 1 (Productos + Dashboard + chrome) ya está.
 - Interfaz móvil aislada de conteo cíclico en góndola.
 - Clover Flex, Escudo Financiero, tesorería de cheques (no mezclar cheques/préstamos en gastos_operativos).
 

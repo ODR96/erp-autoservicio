@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.0/dist/JsBarcode.all.min.js"></script>
 
-    <link rel="stylesheet" href="css/estilos.css">
+    <link rel="stylesheet" href="css/estilos.css?v=1.0.34">
 </head>
 
 <body>
@@ -23,22 +23,22 @@
 
             <div id="layout-navbar-placeholder"></div>
             <div class="content-area">
-                <div class="d-flex justify-content-between align-items-center mb-3 d-print-none">
-                    <h3 class="fw-bold mb-0"><i class="bi bi-boxes text-primary"></i> Gestión de Productos</h3>
-                    <button class="btn btn-outline-success fw-bold" onclick="forzarDescargaRapida()">
-                        <i class="bi bi-arrow-clockwise"></i> Bajar Novedades Nube
-                    </button>
-                    <div>
-                        <button class="btn btn-outline-success fw-bold shadow-sm me-2" onclick="abrirModalExportar()">
+                <div class="toolbar-productos d-flex justify-content-between align-items-center mb-3 d-print-none gap-2">
+                    <h3 class="toolbar-titulo fw-bold mb-0"><i class="bi bi-boxes text-primary"></i> Gestión de Productos</h3>
+                    <div class="toolbar-acciones">
+                        <button class="btn btn-primary fw-bold shadow-sm btn-nuevo-producto" data-bs-toggle="modal"
+                            data-bs-target="#modalNuevoProducto">
+                            <i class="bi bi-plus-lg"></i> NUEVO PRODUCTO
+                        </button>
+                        <button class="btn btn-outline-success fw-bold shadow-sm" onclick="abrirModalExportar()">
                             <i class="bi bi-file-earmark-excel"></i> EXPORTAR
                         </button>
-                        <button class="btn btn-outline-primary fw-bold shadow-sm me-2"
+                        <button class="btn btn-outline-primary fw-bold shadow-sm"
                             onclick="gestionarCategoriasUI()">
                             <i class="bi bi-tags"></i> RUBROS
                         </button>
-                        <button class="btn btn-primary fw-bold shadow-sm" data-bs-toggle="modal"
-                            data-bs-target="#modalNuevoProducto">
-                            <i class="bi bi-plus-lg"></i> NUEVO PRODUCTO
+                        <button class="btn btn-outline-success fw-bold" onclick="forzarDescargaRapida()">
+                            <i class="bi bi-arrow-clockwise"></i> Bajar Novedades Nube
                         </button>
                     </div>
                 </div>
@@ -54,7 +54,6 @@
                             <button class="nav-link fw-bold" onclick="cambiarPestana('cat-pos', event)">
                                 <i class="bi bi-grid-3x3-gap"></i> Categorías POS
                             </button>
-                        </li>
                         </li>
                         <li class="nav-item">
                             <button class="nav-link fw-bold text-success" onclick="cambiarPestana('combos', event)">
@@ -108,12 +107,12 @@
                                 <table class="table table-hover table-custom border align-middle">
                                     <thead>
                                         <tr>
-                                            <th>Código</th>
+                                            <th class="col-hide-xs">Código</th>
                                             <th>Producto</th>
-                                            <th>Rubro</th>
-                                            <th class="text-end">Costo Neto</th>
+                                            <th class="col-hide-xs">Rubro</th>
+                                            <th class="col-hide-xs text-end">Costo Neto</th>
                                             <th class="text-end">Precio Final</th>
-                                            <th class="text-center">Stock Físico</th>
+                                            <th class="text-center">Stock</th>
                                             <th class="text-center">Acciones</th>
                                         </tr>
                                     </thead>
@@ -271,7 +270,7 @@
     <div id="hojaImpresionLimpia" class="d-none"></div>
 
     <div class="modal fade" id="modalNuevoProducto" data-bs-backdrop="static">
-        <div class="modal-dialog modal-xl">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen-sm-down">
             <div class="modal-content border-primary">
                 <div class="modal-header bg-primary text-white">
                     <h5 class="modal-title fw-bold"><i class="bi bi-box-seam"></i> Alta / Edición de Producto</h5>
@@ -321,7 +320,7 @@
                         </div>
                     </div>
 
-                    <ul class="nav nav-pills mb-3 mt-4" id="abmTabs">
+                    <ul class="nav nav-pills mb-3 mt-4 nav-scroll-x" id="abmTabs">
                         <li class="nav-item"><button class="nav-link active py-1 px-3"
                                 onclick="cambiarPestanaAbm('precios')"><i class="bi bi-currency-dollar"></i> Precios,
                                 Costos y Stock</button></li>
@@ -585,22 +584,22 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body p-4">
-                    <p class="mb-3 text-muted">Ajuste de stock sin ingreso de dinero. El costo se registrará como
-                        pérdida contable.</p>
+                    <p class="mb-3 text-muted">Ajuste de stock sin ingreso de dinero. El costo del lote se registra como
+                        pérdida del mes (no entra a caja ni a cheques).</p>
                     <div class="row g-3 mb-3">
                         <div class="col-md-12">
                             <label class="form-label fw-bold small">Seleccione el Lote afectado</label>
-                            <select id="mermaSelectLote" class="form-select form-select-sm"></select>
+                            <select id="mermaSelectLote" class="form-select form-select-sm" onchange="actualizarCostoMermaEstimado()"></select>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label fw-bold small">Cant. a descontar</label>
                             <input id="mermaCantidad" type="number"
                                 class="form-control form-control-sm text-center fw-bold text-danger" value="1" min="0.1"
-                                step="0.1">
+                                step="0.1" oninput="actualizarCostoMermaEstimado()">
                         </div>
                         <div class="col-md-8">
                             <label class="form-label fw-bold small">Motivo de la baja</label>
-                            <select id="mermaMotivo" class="form-select form-select-sm">
+                            <select id="mermaMotivo" class="form-select form-select-sm" onchange="actualizarCostoMermaEstimado()">
                                 <option value="Rotura en local">Rotura en Góndola/Depósito</option>
                                 <option value="Producto Vencido">Producto Vencido / Mal estado</option>
                                 <option value="Consumo Interno">Consumo Interno / Uso propio</option>
@@ -615,6 +614,7 @@
                         <input id="mermaObservaciones" type="text" class="form-control form-control-sm"
                             placeholder="Ej: Se cayó la caja al cobrar...">
                     </div>
+                    <div id="mermaCostoEstimado" class="fw-bold text-danger">Pérdida estimada: $ 0,00</div>
                 </div>
                 <div class="modal-footer border-0 p-3 pt-0 mt-3">
                     <button class="btn btn-warning w-100 fw-bold shadow-sm" onclick="confirmarMerma()">CONFIRMAR BAJA DE
@@ -627,8 +627,8 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
-    <script src="js/app_productos.js?v=1.0.29"></script>
-    <script src="js/layout.js?v=1.0.33"></script>
+    <script src="js/app_productos.js?v=1.0.35"></script>
+    <script src="js/layout.js?v=1.0.34"></script>
 
 </body>
 

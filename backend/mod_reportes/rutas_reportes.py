@@ -210,8 +210,19 @@ def calcular_ganancia_neta(mes: str = None):
         sueldos_comprometidos = _calcular_sueldos_comprometidos(cursor, mes)
         piso_operativo_mes = round(gastos + sueldos_comprometidos, 2)
 
+        # 3b. MERMAS: pérdida de mercadería (no es CMV de lo vendido ni gasto de caja/cheques)
+        mermas = 0.0
+        try:
+            cursor.execute('''
+                SELECT IFNULL(SUM(costo_perdido), 0) FROM registro_mermas
+                WHERE strftime('%Y-%m', fecha_hora) = ?
+            ''', (mes,))
+            mermas = cursor.fetchone()[0] or 0.0
+        except sqlite3.OperationalError:
+            mermas = 0.0
+
         # 4. MATEMÁTICA PURA DE NEGOCIOS (hechos: no mezcla proyección)
-        ganancia_neta = ingresos - costos_mercaderia - gastos
+        ganancia_neta = ingresos - costos_mercaderia - gastos - mermas
         
         # Sacamos el porcentaje de rentabilidad
         margen_porcentaje = (ganancia_neta / ingresos * 100) if ingresos > 0 else 0
@@ -227,7 +238,8 @@ def calcular_ganancia_neta(mes: str = None):
                 "4_GANANCIA_NETA_PURA": round(ganancia_neta, 2),
                 "5_rentabilidad_del_mes": f"{round(margen_porcentaje, 2)}%",
                 "6_sueldos_comprometidos": sueldos_comprometidos,
-                "7_piso_operativo_mes": piso_operativo_mes
+                "7_piso_operativo_mes": piso_operativo_mes,
+                "8_mermas_del_mes": round(mermas, 2)
             }
         }
     except Exception as e:

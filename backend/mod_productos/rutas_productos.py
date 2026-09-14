@@ -836,13 +836,27 @@ def obtener_historial_producto(producto_id: int):
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        cursor.execute('''
-            SELECT m.fecha_hora, m.tipo_movimiento, m.cantidad, m.motivo, u.nombre_completo as responsable
-            FROM movimientos_stock m
-            LEFT JOIN usuarios u ON m.usuario_id = u.id
-            WHERE m.producto_id = ? 
-            ORDER BY m.fecha_hora DESC LIMIT 10
-        ''', (producto_id,))
+        try:
+            cursor.execute('''
+                SELECT m.fecha_hora, m.tipo_movimiento, m.cantidad, m.motivo, u.nombre_completo as responsable,
+                       r.costo_perdido
+                FROM movimientos_stock m
+                LEFT JOIN usuarios u ON m.usuario_id = u.id
+                LEFT JOIN registro_mermas r
+                       ON r.producto_id = m.producto_id
+                      AND r.lote_id = m.lote_id
+                      AND r.fecha_hora = m.fecha_hora
+                WHERE m.producto_id = ? 
+                ORDER BY m.fecha_hora DESC LIMIT 10
+            ''', (producto_id,))
+        except sqlite3.OperationalError:
+            cursor.execute('''
+                SELECT m.fecha_hora, m.tipo_movimiento, m.cantidad, m.motivo, u.nombre_completo as responsable
+                FROM movimientos_stock m
+                LEFT JOIN usuarios u ON m.usuario_id = u.id
+                WHERE m.producto_id = ? 
+                ORDER BY m.fecha_hora DESC LIMIT 10
+            ''', (producto_id,))
         movimientos = [dict(m) for m in cursor.fetchall()]
         return {"movimientos": movimientos}
     except Exception as e:

@@ -52,7 +52,7 @@
 .cotizacion-dolar { background-color: #f8f9fa; border: 1px solid #dee2e6; padding: 5px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; color: #198754; display: flex; align-items: center; gap: 8px; }
 
 /* Menú lateral en modo Celular / Tablet */
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
     .sidebar { position: fixed; left: -260px; top: 0; height: 100vh; z-index: 1050; box-shadow: 5px 0 15px rgba(0,0,0,0.2); }
     .sidebar.mostrar { left: 0; }
     
@@ -60,10 +60,134 @@
     .sidebar-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 1040; }
     .sidebar-backdrop.mostrar { display: block; }
     
-    .btn-hamburguesa { display: block !important; }
+    .btn-hamburguesa { display: flex !important; }
     .titulo-modulo-desktop { display: none !important; }
     .cotizacion-dolar { display: none; } /* Ocultamos el dólar en celu para ahorrar espacio */
 }
 
 /* Ocultar hamburguesa en PC */
 .btn-hamburguesa { display: none; background: transparent; border: none; font-size: 1.5rem; color: #1b365d; cursor: pointer; padding: 0; margin-right: 15px; }
+
+.toolbar-acciones { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.toolbar-acciones .btn-nuevo-producto { order: 10; }
+
+/* =========================================
+   OLA 1 — UX pulgar (admin, < 768px)
+   Escritorio queda igual. POS Electron no se toca acá.
+========================================= */
+@media (max-width: 767.98px) {
+    html { -webkit-text-size-adjust: 100%; }
+
+    .content-area { padding: 12px !important; }
+
+    .btn-hamburguesa {
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        min-width: 44px;
+        min-height: 44px;
+        margin-right: 8px;
+        font-size: 1.75rem;
+    }
+
+    .menu-item {
+        min-height: 48px;
+        padding: 14px 20px;
+        font-size: 1.05rem;
+    }
+
+    .top-navbar { padding: 0 12px; height: 56px; }
+    .navbar-user-nombre { display: none !important; }
+
+    /* Evitar zoom iOS al enfocar inputs */
+    .form-control, .form-select, .input-group-text {
+        font-size: 16px !important;
+    }
+    .content-area .form-control,
+    .content-area .form-select,
+    .content-area .btn:not(.btn-catalogo-mas):not(.dropdown-item) {
+        min-height: 44px;
+    }
+
+    .nav-tabs {
+        display: flex;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 0 8px;
+        scrollbar-width: thin;
+    }
+    .nav-tabs .nav-item { flex-shrink: 0; }
+    .nav-tabs .nav-link { padding: 12px 14px; white-space: nowrap; }
+
+    .nav-scroll-x {
+        display: flex;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        gap: 6px;
+        padding-bottom: 4px;
+    }
+    .nav-scroll-x .nav-item { flex-shrink: 0; }
+    .nav-scroll-x .nav-link { white-space: nowrap; min-height: 44px; }
+
+    .modal-dialog {
+        margin: 0;
+        max-width: 100%;
+        height: 100%;
+    }
+    .modal-dialog.modal-dialog-centered {
+        min-height: 100%;
+        align-items: stretch;
+    }
+    .modal-content {
+        min-height: 100%;
+        border-radius: 0 !important;
+        border: none;
+    }
+    .modal-body { padding: 1rem !important; }
+    .modal-footer {
+        flex-direction: column-reverse;
+        align-items: stretch !important;
+        gap: 8px;
+    }
+    .modal-footer .btn { width: 100%; }
+
+    .col-hide-xs { display: none !important; }
+
+    .toolbar-productos {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 10px !important;
+    }
+    .toolbar-productos .toolbar-titulo { font-size: 1.15rem; }
+    .toolbar-acciones {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+    }
+    .toolbar-acciones .btn { width: 100%; }
+    .toolbar-acciones .btn-nuevo-producto { order: -1; }
+
+    .fila-catalogo { cursor: pointer; }
+    .btn-catalogo-mas {
+        min-width: 44px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #tab-catalogo .table-responsive { overflow: visible; }
+
+    #paginacionProductos .btn-group {
+        display: flex;
+        width: 100%;
+        flex-wrap: wrap;
+    }
+    #paginacionProductos .btn {
+        flex: 1 1 auto;
+        min-height: 44px;
+    }
+}
