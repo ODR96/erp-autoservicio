@@ -497,7 +497,11 @@
                     <label class="form-label fw-bold small">¿Qué producto pidieron y no hay?</label>
                     <input type="text" id="inputFaltanteNombre" class="form-control mb-3 border-info"
                         placeholder="Ej: Levadura Calsa, Hielo..."
-                        onkeypress="if(event.key === 'Enter') guardarFaltante()">
+                        onkeypress="if(event.key === 'Enter') document.getElementById('inputFaltanteCant').focus()">
+                    <label class="form-label fw-bold small">Cantidad</label>
+                    <input type="number" id="inputFaltanteCant" class="form-control mb-3 border-info"
+                        value="1" min="0.1" step="0.1"
+                        onkeypress="if(event.key === 'Enter') document.getElementById('inputFaltanteObs').focus()">
                     <label class="form-label fw-bold small">Observaciones (Opcional)</label>
                     <input type="text" id="inputFaltanteObs" class="form-control"
                         placeholder="Ej: Piden mucho la marca de medio kilo"
@@ -899,8 +903,8 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <!-- ===== ARCHIVOS JS SEPARADOS ===== -->
-    <script src="js/layout.js?v=1.0.29"></script>
-    <script src="js/app_pos.js?v=1.0.29"></script>
+    <script src="js/layout.js?v=1.0.32"></script>
+    <script src="js/app_pos.js?v=1.0.31"></script>
 
 </body>
 

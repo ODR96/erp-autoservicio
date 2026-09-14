@@ -32,7 +32,7 @@ function obtenerBaseUrl() {
     }
 
     if (rol === 'ENCARGADO') {
-        const zonasProhibidas = ['admin_cajas.html', 'admin_cheques.html', 'admin_reportes.html', 'admin_config.html', 'admin_rrhh.html'];
+        const zonasProhibidas = ['admin_cajas.html', 'admin_cheques.html', 'admin_reportes.html', 'admin_config.html', 'admin_rrhh.html', 'admin_dashboard.html', 'admin_gastos.html'];
         if (zonasProhibidas.some(zona => rutaActual.includes(zona))) {
             alert("ACCESO RESTRINGIDO: Esta sección es exclusiva del Administrador.");
             window.location.href = "admin_productos.html";
@@ -59,7 +59,7 @@ function inyectarLayout() {
             </div>
             
             <div class="sidebar-menu flex-grow-1" style="overflow-y: auto;">
-                <a href="admin_dashboard.html" class="menu-item"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                ${esAdmin ? `<a href="admin_dashboard.html" class="menu-item"><i class="bi bi-speedometer2"></i> Dashboard</a>` : ''}
                 <a href="pos.html" class="menu-item"><i class="bi bi-display"></i> Abrir POS (Caja)</a>
                 <a href="admin_productos.html" class="menu-item"><i class="bi bi-box-seam"></i> Productos & Stock</a>
                 <a href="admin_carteleria.html" class="menu-item"><i class="bi bi-megaphone"></i> Cartelería</a>

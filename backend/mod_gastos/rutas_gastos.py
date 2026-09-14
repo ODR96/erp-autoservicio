@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone, timedelta
@@ -90,7 +90,7 @@ class NuevoGasto(BaseModel):
 # =================================================================
 # 1. RUTAS BLINDADAS
 # =================================================================
-@router.post("/categorias", status_code=status.HTTP_201_CREATED, dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.post("/categorias", status_code=status.HTTP_201_CREATED, dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def crear_categoria(cat: NuevaCategoria, db: sqlite3.Connection = Depends(get_db)):
     try:
         db.execute("INSERT INTO categorias_gasto (nombre, tipo_categoria) VALUES (?, ?)", (cat.nombre, cat.tipo_categoria))
@@ -114,7 +114,7 @@ def listar_categorias(incluir_inactivas: bool = False, db: sqlite3.Connection = 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/categorias/{categoria_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.put("/categorias/{categoria_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def editar_categoria(categoria_id: int, cat: EditarCategoria, db: sqlite3.Connection = Depends(get_db)):
     try:
         existente = db.execute("SELECT id FROM categorias_gasto WHERE id = ?", (categoria_id,)).fetchone()
@@ -133,7 +133,7 @@ def editar_categoria(categoria_id: int, cat: EditarCategoria, db: sqlite3.Connec
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/categorias/{categoria_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.delete("/categorias/{categoria_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def eliminar_categoria(categoria_id: int, db: sqlite3.Connection = Depends(get_db)):
     try:
         existente = db.execute("SELECT id FROM categorias_gasto WHERE id = ?", (categoria_id,)).fetchone()
@@ -159,8 +159,16 @@ def eliminar_categoria(categoria_id: int, db: sqlite3.Connection = Depends(get_d
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+def _alerta_gasto_alto(monto: float, detalle: str):
+    from backend.whatsapp_puente import enviar_whatsapp
+    enviar_whatsapp(
+        f"Gasto operativo alto\n"
+        f"Monto: ${monto:,.2f}\n"
+        f"Detalle: {detalle or 'Sin detalle'}"
+    )
+
 @router.post("/registrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def registrar_gasto_operativo(gasto: NuevoGasto, db: sqlite3.Connection = Depends(get_db)):
+def registrar_gasto_operativo(gasto: NuevoGasto, background_tasks: BackgroundTasks, db: sqlite3.Connection = Depends(get_db)):
     try:
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
@@ -185,6 +193,8 @@ def registrar_gasto_operativo(gasto: NuevoGasto, db: sqlite3.Connection = Depend
             ''', (fecha_actual, gasto.usuario_id, gasto.monto, f"Gasto: {gasto.descripcion_detalle}", turno['id'], turno['caja_id']))
             
         db.commit()
+        if gasto.monto > 50000:
+            background_tasks.add_task(_alerta_gasto_alto, gasto.monto, gasto.descripcion_detalle)
         return {"mensaje": "Gasto y retiro registrados."}
     except HTTPException:
         raise
@@ -193,7 +203,7 @@ def registrar_gasto_operativo(gasto: NuevoGasto, db: sqlite3.Connection = Depend
         logger.error(f"Error registrando gasto: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/historial", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/historial", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def obtener_historial_gastos(limite: int = 50, db: sqlite3.Connection = Depends(get_db)):
     try:
         cursor = db.execute('''
@@ -207,7 +217,7 @@ def obtener_historial_gastos(limite: int = 50, db: sqlite3.Connection = Depends(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/resumen_mensual", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/resumen_mensual", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def resumen_gastos_del_mes(db: sqlite3.Connection = Depends(get_db)):
     try:
         mes_actual = datetime.now(ZONA_AR).strftime("%Y-%m")

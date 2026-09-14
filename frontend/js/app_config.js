@@ -155,3 +155,22 @@ async function actualizarSistema() {
         Swal.fire('Error', 'No se pudo contactar al servidor para actualizar.', 'error');
     }
 }
+
+async function probarWhatsapp() {
+    Swal.fire({ title: 'Contactando al puente...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/config/probar_whatsapp`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.detalle || 'No se pudo probar.'));
+        }
+        if (data.ok) {
+            Swal.fire('Pedido enviado', data.detalle || 'El puente Node aceptó el aviso.', 'success');
+        } else {
+            Swal.fire('No salió', data.detalle || 'Node no respondió. Revisá el servicio en el puerto 3000 y el teléfono guardado.', 'warning');
+        }
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}

@@ -2906,6 +2906,7 @@ const modalFaltantes = new bootstrap.Modal(document.getElementById('modalFaltant
 
 function abrirModalFaltantes() {
     document.getElementById('inputFaltanteNombre').value = '';
+    document.getElementById('inputFaltanteCant').value = '1';
     document.getElementById('inputFaltanteObs').value = '';
     modalFaltantes.show();
     setTimeout(() => document.getElementById('inputFaltanteNombre').focus(), 500);
@@ -2914,8 +2915,12 @@ function abrirModalFaltantes() {
 async function guardarFaltante() {
     const nombre = document.getElementById('inputFaltanteNombre').value.trim();
     const obs = document.getElementById('inputFaltanteObs').value.trim();
+    const cantidad = parseFloat(document.getElementById('inputFaltanteCant').value);
 
     if (!nombre) return Swal.fire('Atención', 'Tenés que escribir el nombre del producto que falta.', 'warning');
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
+        return Swal.fire('Atención', 'La cantidad tiene que ser mayor a cero.', 'warning');
+    }
 
     Swal.fire({ title: 'Anotando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
@@ -2926,7 +2931,7 @@ async function guardarFaltante() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 descripcion: nombre,
-                cantidad: 1.0,
+                cantidad: cantidad,
                 notas: obs,
                 usuario_nombre: empleadoLogueado ? empleadoLogueado.nombre : "Caja Principal"
             })
@@ -2943,7 +2948,7 @@ async function guardarFaltante() {
     } catch (e) {
         // Plan B: Si realmente se corta internet, ahí sí lo guardamos offline
         let faltantesOffline = JSON.parse(localStorage.getItem('faltantes_offline')) || [];
-        faltantesOffline.push({ nombre, obs, fecha: new Date().toISOString() });
+        faltantesOffline.push({ nombre, obs, cantidad, fecha: new Date().toISOString() });
         localStorage.setItem('faltantes_offline', JSON.stringify(faltantesOffline));
 
         modalFaltantes.hide();

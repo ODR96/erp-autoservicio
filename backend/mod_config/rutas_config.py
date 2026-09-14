@@ -123,6 +123,12 @@ def subir_logo_empresa(archivo: UploadFile = File(...)):
         if conexion:
             conexion.close()
 
+@router.post("/probar_whatsapp", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def probar_whatsapp():
+    from backend.whatsapp_puente import enviar_whatsapp
+    resultado = enviar_whatsapp("ERPetto: prueba de aviso WhatsApp. Si leés esto, el puente Node está vivo.")
+    return resultado
+
 # --- 4. LEER LA CONFIGURACIÓN ---
 # Esta ruta la usa el POS para imprimir tickets, así que el cajero NECESITA poder leerla
 @router.get("/leer", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])

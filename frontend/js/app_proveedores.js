@@ -347,10 +347,79 @@ function dibujarTablaFactura() {
 actualizarTotalVista();
 }
 
+function cambiarModoIngreso(modo) {
+    const esDeuda = modo === 'deuda';
+    document.getElementById('modoIngresoDeuda')?.classList.toggle('active', esDeuda);
+    document.getElementById('modoIngresoStock')?.classList.toggle('active', !esDeuda);
+    document.getElementById('panelDeudaRapida')?.classList.toggle('d-none', !esDeuda);
+    document.getElementById('panelIngresoStock')?.classList.toggle('d-none', esDeuda);
+    const ayuda = document.getElementById('ayudaModoIngreso');
+    if (ayuda) {
+        ayuda.textContent = esDeuda
+            ? 'Anota factura o remito y el total. No toca stock ni precios.'
+            : 'Escaneá cada producto para actualizar stock, costo y precio.';
+    }
+}
+
 function limpiarFactura() {
     facturaActualItems = [];
     document.getElementById('inputNumFactura').value = '';
+    const extra = document.getElementById('inputCargosExtra');
+    if (extra) extra.value = '0';
     dibujarTablaFactura();
+}
+
+async function confirmarDeudaRapida() {
+    const provId = document.getElementById('selectProvIngreso').value;
+    const numFactura = document.getElementById('inputNumFactura').value.trim();
+    const condicion = document.getElementById('selectCondicionPago').value;
+    const total = parseFloat(document.getElementById('inputTotalDeudaRapida').value);
+    const observaciones = document.getElementById('inputObsDeudaRapida').value.trim();
+
+    if (!provId) return Swal.fire('Atención', 'Seleccioná un proveedor.', 'warning');
+    if (!numFactura) return Swal.fire('Atención', 'Ingresá el N° de factura o remito.', 'warning');
+    if (!Number.isFinite(total) || total <= 0) return Swal.fire('Atención', 'Ingresá un total mayor a cero.', 'warning');
+
+    const confirm = await Swal.fire({
+        title: '¿Guardar deuda?',
+        text: condicion === 'Cuenta Corriente'
+            ? `Se suma $${total.toFixed(2)} al saldo del proveedor. El stock no cambia.`
+            : `Queda registrada como Contado por $${total.toFixed(2)}. El stock no cambia.`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Guardar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#1b365d'
+    });
+    if (!confirm.isConfirmed) return;
+
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/proveedores/deuda_rapida`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                proveedor_id: parseInt(provId),
+                numero_factura: numFactura,
+                condicion_pago: condicion,
+                total_factura: total,
+                observaciones
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo guardar.'));
+        }
+        if (data.error) throw new Error(data.error);
+
+        document.getElementById('inputNumFactura').value = '';
+        document.getElementById('inputTotalDeudaRapida').value = '';
+        document.getElementById('inputObsDeudaRapida').value = '';
+        await cargarProveedores();
+        Swal.fire('Deuda registrada', data.mensaje || 'Listo. El stock no se tocó.', 'success');
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
 }
 
 async function confirmarIngresoMercaderia() {
@@ -475,9 +544,13 @@ async function registrarPagoProveedor() {
         });
         const data = await res.json();
 
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo registrar el pago.'));
+        }
         if (data.error) throw new Error(data.error);
 
-Swal.fire('¡Éxito!', 'Pago registrado y deuda actualizada.', 'success');
+        Swal.fire('¡Éxito!', 'Pago registrado y deuda actualizada.', 'success');
         
         // Limpiamos los inputs
         document.getElementById('montoPagoProv').value = '';
@@ -489,7 +562,7 @@ Swal.fire('¡Éxito!', 'Pago registrado y deuda actualizada.', 'success');
         // 2. ACTUALIZACIÓN VISUAL: Buscamos el saldo fresco y actualizamos el cartel grandote de la derecha
         const provActualizado = proveedoresGlobales.find(p => p.id === provSeleccionadoParaPago);
         if (provActualizado) {
-            document.getElementById('montoProvDeuda').innerText = '$ ' + parseFloat(provActualizado.saldo_deuda || 0).toFixed(2);
+            document.getElementById('montoProvDeuda').innerText = '$ ' + parseFloat(provActualizado.saldo_deudor || 0).toFixed(2);
         }
         
     } catch (e) {
@@ -792,85 +865,532 @@ function exportarComprasAExcel(proveedorNombre) {
 // ==========================================
 // 4. MÓDULO DE FALTANTES Y PEDIDOS
 // ==========================================
+let faltantesCache = [];
+let alertasStockCache = [];
+let filtroFaltantes = 'ACTIVOS';
+let seleccionFaltantes = new Set();
+let seleccionAlertas = new Set();
 
-// Cargamos la lista cada vez que tocan la pestaña
-document.querySelector('[onclick="cambiarPestanaProv(\'pedidos\', event)"]').addEventListener('click', cargarTableroPedidos);
+document.getElementById('tabBtnPedidos')?.addEventListener('click', cargarTableroPedidos);
+
+function escapeHtmlPedidos(valor) {
+    return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function fechaHoyAR() {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+}
+
+function formatearCantidadPedido(valor) {
+    const n = parseFloat(valor);
+    if (!Number.isFinite(n)) return '1';
+    return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '');
+}
+
+function etiquetaEstadoFaltante(estado) {
+    if (estado === 'PEDIDO') return '<span class="badge bg-primary">Pedido</span>';
+    if (estado === 'RECIBIDO') return '<span class="badge bg-success">Recibido</span>';
+    return '<span class="badge bg-warning text-dark">Pendiente</span>';
+}
+
+function faltantesVisibles() {
+    return faltantesCache.filter(f => {
+        const estado = f.estado || 'PENDIENTE';
+        if (filtroFaltantes === 'ACTIVOS') return estado === 'PENDIENTE' || estado === 'PEDIDO';
+        return estado === filtroFaltantes;
+    });
+}
+
+function aplicarFiltroFaltantes(vista) {
+    filtroFaltantes = vista;
+    document.querySelectorAll('.filtros-faltantes .btn').forEach(btn => btn.classList.remove('active'));
+    document.getElementById('filtroFaltantes' + vista)?.classList.add('active');
+    dibujarFaltantesCaja();
+}
 
 async function cargarTableroPedidos() {
     try {
-        // EL ARREGLO: Agregamos /reportes/ a las rutas
         const resFaltantes = await fetch(`${obtenerBaseUrl()}/reportes/faltantes_pendientes`);
         const dataFaltantes = await resFaltantes.json();
-        dibujarFaltantesCaja(dataFaltantes.faltantes || []);
+        faltantesCache = dataFaltantes.faltantes || [];
 
         const resAlertas = await fetch(`${obtenerBaseUrl()}/reportes/alertas`);
         const dataAlertas = await resAlertas.json();
-        dibujarAlertasStock(dataAlertas.alertas_stock_critico || []);
-        
+        alertasStockCache = dataAlertas.alertas_stock_critico || [];
+
+        const idsVivos = new Set(faltantesCache.map(f => Number(f.id)));
+        seleccionFaltantes.forEach(id => { if (!idsVivos.has(id)) seleccionFaltantes.delete(id); });
+        const alertasVivas = new Set(alertasStockCache.map(p => Number(p.producto_id)));
+        seleccionAlertas.forEach(id => { if (!alertasVivas.has(id)) seleccionAlertas.delete(id); });
+
+        dibujarFaltantesCaja();
+        dibujarAlertasStock();
+        actualizarContadoresFiltro();
     } catch (e) {
         console.error("Error cargando pedidos:", e);
+        Swal.fire('Error', 'No se pudo cargar el tablero de pedidos.', 'error');
     }
 }
 
-function dibujarFaltantesCaja(lista) {
+function dibujarFaltantesCaja() {
     const tbody = document.getElementById('tablaFaltantesCaja');
-    tbody.innerHTML = '';
-    
+    if (!tbody) return;
+    const lista = faltantesVisibles();
+    const badge = document.getElementById('badgeCountFaltantes');
+    if (badge) badge.textContent = String(lista.length);
+
     if (lista.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-success py-4 fw-bold"><i class="bi bi-check-circle fs-4 d-block mb-2"></i> No hay urgencias de mostrador.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">
+            <i class="bi bi-check-circle fs-4 d-block mb-2 text-success"></i>
+            No hay ítems en este filtro.
+        </td></tr>`;
+        const chkTodos = document.getElementById('chkTodosFaltantes');
+        if (chkTodos) chkTodos.checked = false;
+        actualizarResumenSeleccion();
         return;
     }
 
-    lista.forEach(f => {
-        let obsHtml = f.notas ? `<small class="text-muted">${f.notas}</small>` : '-';
-        tbody.innerHTML += `
-            <tr>
-                <td class="fw-bold text-primary">${f.descripcion_producto} <br><small class="text-muted fw-normal">Cant: ${f.cantidad_pedida}</small></td>
-                <td>${obsHtml}</td>
+    tbody.innerHTML = lista.map(f => {
+        const id = Number(f.id);
+        const estado = f.estado || 'PENDIENTE';
+        const claseFila = estado === 'PEDIDO' ? 'fila-faltante-pedido' : (estado === 'RECIBIDO' ? 'fila-faltante-recibido' : '');
+        const quien = f.usuario_anoto ? `<div class="small text-muted">Por ${escapeHtmlPedidos(f.usuario_anoto)}</div>` : '';
+        const obs = f.notas ? escapeHtmlPedidos(f.notas) : '<span class="text-muted">—</span>';
+        return `
+            <tr class="${claseFila}" onclick="toggleFilaFaltante(event, ${id})">
                 <td class="text-center">
-                    <button class="btn btn-sm btn-outline-success" onclick="marcarFaltanteResuelto(${f.rowid})" title="Marcar como Pedido/Resuelto">
-                        <i class="bi bi-check-lg"></i>
-                    </button>
-                    <small>Pedido por: ${f.usuario_anoto}</small>
+                    <input class="form-check-input chk-faltante" type="checkbox" value="${id}"
+                        ${seleccionFaltantes.has(id) ? 'checked' : ''}
+                        onclick="event.stopPropagation()"
+                        onchange="toggleSeleccionFaltante(${id}, this.checked)">
                 </td>
-            </tr>
-        `;
-    });
+                <td class="text-start fw-bold">${escapeHtmlPedidos(f.descripcion_producto)}${quien}</td>
+                <td class="text-center" onclick="event.stopPropagation()">
+                    <input type="number" class="form-control form-control-sm input-cant-faltante"
+                        min="0.1" step="0.1" value="${formatearCantidadPedido(f.cantidad_pedida)}"
+                        title="Editar cantidad"
+                        onkeydown="if(event.key === 'Enter') { event.preventDefault(); this.blur(); }"
+                        onchange="guardarCantidadFaltante(${id}, this)"
+                        onblur="guardarCantidadFaltante(${id}, this)">
+                </td>
+                <td class="small">${obs}</td>
+                <td>${etiquetaEstadoFaltante(estado)}</td>
+                <td class="text-center">
+                    <button type="button" class="btn btn-sm btn-outline-danger py-0" title="Quitar de la lista"
+                        onclick="event.stopPropagation(); quitarFaltante(${id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>`;
+    }).join('');
+
+    const visiblesIds = lista.map(f => Number(f.id));
+    const chkTodos = document.getElementById('chkTodosFaltantes');
+    if (chkTodos) {
+        chkTodos.checked = visiblesIds.length > 0 && visiblesIds.every(id => seleccionFaltantes.has(id));
+    }
+    actualizarResumenSeleccion();
 }
 
-function dibujarAlertasStock(lista) {
+function dibujarAlertasStock() {
     const tbody = document.getElementById('tablaFaltantesSistema');
-    tbody.innerHTML = '';
-    
+    if (!tbody) return;
+    const lista = alertasStockCache;
+
     if (lista.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-success py-4 fw-bold"><i class="bi bi-box-seam fs-4 d-block mb-2"></i> Stock en niveles óptimos.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4">
+            <i class="bi bi-box-seam fs-4 d-block mb-2 text-success"></i>
+            Stock en niveles óptimos.
+        </td></tr>`;
+        const chkTodas = document.getElementById('chkTodasAlertas');
+        if (chkTodas) chkTodas.checked = false;
+        actualizarResumenSeleccion();
         return;
     }
 
-    lista.forEach(p => {
-        // Buscamos el nombre comercial del proveedor para mostrarlo lindo
-        let provSugerido = proveedoresGlobales.find(prov => prov.id === p.proveedor_habitual_id);
-        let nombreProv = provSugerido ? provSugerido.nombre_comercial : 'Sin Asignar';
-
-        tbody.innerHTML += `
-            <tr>
-                <td class="text-start fw-bold">${p.nombre}</td>
-                <td class="text-danger fw-bold fs-6">${p.stock_actual}</td> <!-- EL ARREGLO ESTÁ ACÁ -->
+    tbody.innerHTML = lista.map(p => {
+        const id = Number(p.producto_id);
+        const provSugerido = proveedoresGlobales.find(prov => prov.id === p.proveedor_habitual_id);
+        const nombreProv = provSugerido ? provSugerido.nombre_comercial : 'Sin asignar';
+        return `
+            <tr onclick="toggleFilaAlerta(event, ${id})">
+                <td class="text-center">
+                    <input class="form-check-input chk-alerta" type="checkbox" value="${id}"
+                        ${seleccionAlertas.has(id) ? 'checked' : ''}
+                        onclick="event.stopPropagation()"
+                        onchange="toggleSeleccionAlerta(${id}, this.checked)">
+                </td>
+                <td class="text-start fw-bold">${escapeHtmlPedidos(p.nombre)}</td>
+                <td class="text-danger fw-bold">${p.stock_actual}</td>
                 <td class="text-muted">${p.stock_minimo_alerta}</td>
-                <td><span class="badge bg-secondary">${nombreProv}</span></td>
-            </tr>
-        `;
-    });
+                <td><span class="badge bg-secondary">${escapeHtmlPedidos(nombreProv)}</span></td>
+            </tr>`;
+    }).join('');
+
+    const ids = lista.map(p => Number(p.producto_id));
+    const chkTodas = document.getElementById('chkTodasAlertas');
+    if (chkTodas) {
+        chkTodas.checked = ids.length > 0 && ids.every(id => seleccionAlertas.has(id));
+    }
+    actualizarResumenSeleccion();
 }
 
-async function marcarFaltanteResuelto(id) {
-    try {
-        // EL ARREGLO: Agregamos /reportes/
-        await fetch(`${obtenerBaseUrl()}/reportes/resolver_faltante/${id}`, { method: 'DELETE' });
-        cargarTableroPedidos(); 
-    } catch (e) {
-        Swal.fire('Error', 'No se pudo actualizar.', 'error');
+function toggleFilaFaltante(evento, id) {
+    if (evento.target.closest('button, a, input')) return;
+    const chk = document.querySelector(`.chk-faltante[value="${id}"]`);
+    if (!chk) return;
+    chk.checked = !chk.checked;
+    toggleSeleccionFaltante(id, chk.checked);
+}
+
+function toggleFilaAlerta(evento, id) {
+    if (evento.target.closest('button, a, input')) return;
+    const chk = document.querySelector(`.chk-alerta[value="${id}"]`);
+    if (!chk) return;
+    chk.checked = !chk.checked;
+    toggleSeleccionAlerta(id, chk.checked);
+}
+
+function toggleSeleccionFaltante(id, checked) {
+    if (checked) seleccionFaltantes.add(Number(id));
+    else seleccionFaltantes.delete(Number(id));
+    const visiblesIds = faltantesVisibles().map(f => Number(f.id));
+    const chkTodos = document.getElementById('chkTodosFaltantes');
+    if (chkTodos) chkTodos.checked = visiblesIds.length > 0 && visiblesIds.every(i => seleccionFaltantes.has(i));
+    actualizarResumenSeleccion();
+}
+
+function toggleSeleccionAlerta(id, checked) {
+    if (checked) seleccionAlertas.add(Number(id));
+    else seleccionAlertas.delete(Number(id));
+    const ids = alertasStockCache.map(p => Number(p.producto_id));
+    const chkTodas = document.getElementById('chkTodasAlertas');
+    if (chkTodas) chkTodas.checked = ids.length > 0 && ids.every(i => seleccionAlertas.has(i));
+    actualizarResumenSeleccion();
+}
+
+function toggleTodosFaltantes(checked) {
+    faltantesVisibles().forEach(f => {
+        const id = Number(f.id);
+        if (checked) seleccionFaltantes.add(id);
+        else seleccionFaltantes.delete(id);
+    });
+    dibujarFaltantesCaja();
+}
+
+function toggleTodasAlertas(checked) {
+    alertasStockCache.forEach(p => {
+        const id = Number(p.producto_id);
+        if (checked) seleccionAlertas.add(id);
+        else seleccionAlertas.delete(id);
+    });
+    dibujarAlertasStock();
+}
+
+function actualizarResumenSeleccion() {
+    const el = document.getElementById('resumenSeleccionFaltantes');
+    if (!el) return;
+    const nFalt = seleccionFaltantes.size;
+    const nAlert = seleccionAlertas.size;
+    if (nFalt === 0 && nAlert === 0) {
+        el.textContent = 'Ningún ítem seleccionado. Excel y la vista previa usan la selección; si no hay, usan lo visible.';
+        return;
     }
+    const partes = [];
+    if (nFalt) partes.push(`${nFalt} de caja`);
+    if (nAlert) partes.push(`${nAlert} de stock mínimo`);
+    el.textContent = `Seleccionados: ${partes.join(' · ')}.`;
+}
+
+async function guardarCantidadFaltante(id, input) {
+    const item = faltantesCache.find(f => Number(f.id) === Number(id));
+    const cantidad = parseFloat(input.value);
+    const anterior = item ? parseFloat(item.cantidad_pedida) : NaN;
+
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
+        input.value = formatearCantidadPedido(anterior);
+        return Swal.fire('Atención', 'La cantidad tiene que ser mayor a cero.', 'warning');
+    }
+    if (Number.isFinite(anterior) && cantidad === anterior) return;
+
+    input.disabled = true;
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/reportes/faltantes/cantidad`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: Number(id), cantidad })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo guardar la cantidad.'));
+        }
+        if (item) item.cantidad_pedida = cantidad;
+        input.value = formatearCantidadPedido(cantidad);
+    } catch (e) {
+        input.value = formatearCantidadPedido(anterior);
+        Swal.fire('Error', e.message, 'error');
+    } finally {
+        input.disabled = false;
+    }
+}
+
+function actualizarContadoresFiltro() {
+    const nPend = faltantesCache.filter(f => (f.estado || 'PENDIENTE') === 'PENDIENTE').length;
+    const nPed = faltantesCache.filter(f => f.estado === 'PEDIDO').length;
+    const nRec = faltantesCache.filter(f => f.estado === 'RECIBIDO').length;
+    const nActivos = nPend + nPed;
+    const setLabel = (id, texto, n) => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = `${texto} <span class="badge rounded-pill bg-white text-secondary border ms-1">${n}</span>`;
+    };
+    setLabel('filtroFaltantesACTIVOS', 'En curso', nActivos);
+    setLabel('filtroFaltantesPENDIENTE', 'Pendientes', nPend);
+    setLabel('filtroFaltantesPEDIDO', 'Pedidos', nPed);
+    setLabel('filtroFaltantesRECIBIDO', 'Recibidos', nRec);
+}
+
+async function marcarSeleccionFaltantes(estado) {
+    const ids = seleccionFaltantes.size > 0
+        ? Array.from(seleccionFaltantes)
+        : faltantesVisibles().map(f => Number(f.id));
+
+    if (ids.length === 0) {
+        return Swal.fire('Atención', 'No hay productos para actualizar en este filtro.', 'info');
+    }
+
+    const titulos = {
+        PEDIDO: 'Marcar como pedido',
+        RECIBIDO: 'Marcar como recibido',
+        PENDIENTE: 'Volver a pendiente'
+    };
+    const confirm = await Swal.fire({
+        title: titulos[estado] || 'Actualizar estado',
+        text: seleccionFaltantes.size > 0
+            ? `Se actualizan ${ids.length} ítem(s) seleccionados.`
+            : `No hay selección: se actualizan los ${ids.length} ítem(s) visibles.`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Confirmar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#1b365d'
+    });
+    if (!confirm.isConfirmed) return;
+
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/reportes/faltantes/estado`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids, estado })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo actualizar.'));
+        }
+        seleccionFaltantes.clear();
+        await cargarTableroPedidos();
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Lista actualizada', showConfirmButton: false, timer: 1400 });
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
+async function quitarFaltante(id) {
+    const confirm = await Swal.fire({
+        title: '¿Quitar de la lista?',
+        text: 'Se borra el anotado de caja. No afecta el stock.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Quitar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#dc3545'
+    });
+    if (!confirm.isConfirmed) return;
+
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/reportes/resolver_faltante/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('No se pudo quitar.');
+        seleccionFaltantes.delete(Number(id));
+        await cargarTableroPedidos();
+    } catch (e) {
+        Swal.fire('Error', e.message || 'No se pudo actualizar.', 'error');
+    }
+}
+
+async function pasarAlertasALista() {
+    const seleccionadas = alertasStockCache.filter(p => seleccionAlertas.has(Number(p.producto_id)));
+    if (seleccionadas.length === 0) {
+        return Swal.fire('Atención', 'Seleccioná alertas de stock para pasarlas a la lista de caja.', 'info');
+    }
+
+    try {
+        for (const p of seleccionadas) {
+            const provSugerido = proveedoresGlobales.find(prov => prov.id === p.proveedor_habitual_id);
+            const nombreProv = provSugerido ? provSugerido.nombre_comercial : 'Sin asignar';
+            const res = await fetch(`${obtenerBaseUrl()}/reportes/registrar_faltante`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    descripcion: p.nombre,
+                    cantidad: 1.0,
+                    notas: `Stock ${p.stock_actual} / mín. ${p.stock_minimo_alerta} · ${nombreProv}`,
+                    usuario_nombre: 'Sistema (stock mínimo)'
+                })
+            });
+            if (!res.ok) throw new Error('No se pudo pasar una alerta a la lista.');
+        }
+        seleccionAlertas.clear();
+        await cargarTableroPedidos();
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Pasadas a la lista', showConfirmButton: false, timer: 1400 });
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
+function recolectarItemsPedido() {
+    const haySeleccion = seleccionFaltantes.size > 0 || seleccionAlertas.size > 0;
+    const faltantes = (haySeleccion
+        ? faltantesCache.filter(f => seleccionFaltantes.has(Number(f.id)))
+        : faltantesVisibles()
+    ).map(f => ({
+        producto: f.descripcion_producto || '',
+        cantidad: formatearCantidadPedido(f.cantidad_pedida),
+        observacion: f.notas || '',
+        pedidoPor: f.usuario_anoto || '',
+        estado: f.estado || 'PENDIENTE',
+        origen: 'Caja',
+        proveedor: ''
+    }));
+
+    const alertas = (haySeleccion
+        ? alertasStockCache.filter(p => seleccionAlertas.has(Number(p.producto_id)))
+        : []
+    ).map(p => {
+        const provSugerido = proveedoresGlobales.find(prov => prov.id === p.proveedor_habitual_id);
+        return {
+            producto: p.nombre || '',
+            cantidad: '1',
+            observacion: `Disp. ${p.stock_actual} / mín. ${p.stock_minimo_alerta}`,
+            pedidoPor: 'Stock mínimo',
+            estado: 'PENDIENTE',
+            origen: 'Stock',
+            proveedor: provSugerido ? provSugerido.nombre_comercial : 'Sin asignar'
+        };
+    });
+
+    return faltantes.concat(alertas);
+}
+
+function csvCeldaPedido(valor) {
+    const texto = String(valor ?? '').replace(/"/g, '""');
+    return `"${texto}"`;
+}
+
+function exportarPedidoExcel() {
+    const items = recolectarItemsPedido();
+    if (items.length === 0) return Swal.fire('Aviso', 'No hay productos para exportar.', 'info');
+
+    let csv = '\uFEFF';
+    csv += 'Producto;Cantidad;Observacion;Pedido por;Estado;Origen;Proveedor\n';
+    items.forEach(item => {
+        csv += [
+            csvCeldaPedido(item.producto),
+            csvCeldaPedido(item.cantidad),
+            csvCeldaPedido(item.observacion),
+            csvCeldaPedido(item.pedidoPor),
+            csvCeldaPedido(item.estado),
+            csvCeldaPedido(item.origen),
+            csvCeldaPedido(item.proveedor)
+        ].join(';') + '\n';
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Pedido_faltantes_${fechaHoyAR()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function htmlPedidoFaltantes(items) {
+    const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: 'Autoservicio 20 de Junio' };
+    const nombreLocal = config.nombre_negocio || 'Autoservicio 20 de Junio';
+    const filas = items.map(item => `
+        <tr>
+            <td>${escapeHtmlPedidos(item.producto)}</td>
+            <td style="text-align:center;">${escapeHtmlPedidos(item.cantidad)}</td>
+            <td>${escapeHtmlPedidos(item.observacion || '—')}</td>
+            <td>${escapeHtmlPedidos(item.pedidoPor || '—')}</td>
+            <td>${escapeHtmlPedidos(item.estado)}</td>
+            <td>${escapeHtmlPedidos(item.proveedor || item.origen)}</td>
+        </tr>`).join('');
+
+    return `
+        <h2>Pedido de faltantes</h2>
+        <div class="meta">${escapeHtmlPedidos(nombreLocal)} · ${fechaHoyAR()} · ${items.length} ítem(s)</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>Cant.</th>
+                    <th>Obs.</th>
+                    <th>Pedido por</th>
+                    <th>Estado</th>
+                    <th>Proveedor / origen</th>
+                </tr>
+            </thead>
+            <tbody>${filas}</tbody>
+        </table>`;
+}
+
+function exportarPedidoPdf() {
+    const items = recolectarItemsPedido();
+    if (items.length === 0) return Swal.fire('Aviso', 'No hay productos para exportar.', 'info');
+
+    const hoja = document.getElementById('previewPedidoHoja');
+    const modalEl = document.getElementById('modalPreviewPedido');
+    if (!hoja || !modalEl) return Swal.fire('Error', 'No se encontró la vista previa.', 'error');
+
+    hoja.innerHTML = htmlPedidoFaltantes(items);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+function imprimirPedidoDesdePreview() {
+    const hoja = document.getElementById('previewPedidoHoja');
+    if (!hoja || !hoja.innerHTML.trim()) {
+        return Swal.fire('Aviso', 'No hay vista previa para imprimir.', 'info');
+    }
+
+    const win = window.open('', '_blank', 'width=900,height=700');
+    if (!win) return Swal.fire('Aviso', 'El navegador bloqueó la ventana de impresión.', 'info');
+
+    win.document.write(`
+        <html>
+        <head>
+            <title>Pedido de faltantes</title>
+            <style>
+                body { font-family: 'Segoe UI', sans-serif; color: #212529; padding: 28px; }
+                h2 { margin: 0 0 4px; color: #1b365d; }
+                .meta { color: #6c757d; margin-bottom: 18px; font-size: 13px; }
+                table { width: 100%; border-collapse: collapse; font-size: 13px; }
+                th { background: #f8f9fa; text-align: left; padding: 8px; border-bottom: 2px solid #1b365d; text-transform: uppercase; font-size: 11px; letter-spacing: .03em; }
+                td { padding: 8px; border-bottom: 1px solid #e9ecef; vertical-align: top; }
+            </style>
+        </head>
+        <body>
+            ${hoja.innerHTML}
+        </body>
+        </html>
+    `);
+    win.document.close();
+    setTimeout(() => win.print(), 300);
 }
 
 // ARRANQUE INICIAL

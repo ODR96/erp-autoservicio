@@ -1,11 +1,10 @@
-from fastapi import APIRouter, Depends # <-- Agregamos Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List
-from datetime import datetime, timezone, timedelta # <-- Agregamos ZONA_AR
+from datetime import datetime, timezone, timedelta
 import sqlite3
-import os
 from backend.database import obtener_conexion
-from backend.mod_usuarios.rutas_usuarios import VerificarRol # <-- EL PATOVICA
+from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3)) # <-- LA HORA ARGENTINA
@@ -36,6 +35,13 @@ class PagoProveedor(BaseModel):
     proveedor_id: int
     monto_pagado: float
     metodo_pago: str
+    observaciones: str = ""
+
+class DeudaRapida(BaseModel):
+    proveedor_id: int
+    numero_factura: str
+    condicion_pago: str
+    total_factura: float
     observaciones: str = ""
 
 # --- 1. GESTIÓN DE PROVEEDORES (ABM COMPLETO) ---
@@ -163,18 +169,26 @@ def registrar_pago_proveedor(pago: PagoProveedor):
         cursor.execute("UPDATE proveedores_ctacte SET saldo_deudor = saldo_deudor - ? WHERE proveedor_id = ?", 
                        (pago.monto_pagado, pago.proveedor_id))
 
-        # 3. Si es efectivo de caja, registramos el retiro
+        # 3. Efectivo de caja: o mueve el cajón, o no se graba el pago
         if "CAJA" in pago.metodo_pago.upper():
             cursor.execute("SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO' ORDER BY id DESC LIMIT 1")
             turno = cursor.fetchone()
-            if turno:
-                cursor.execute('''
-                    INSERT INTO movimientos_caja (turno_id, tipo_movimiento, monto, motivo)
-                    VALUES (?, 'RETIRO', ?, ?)
-                ''', (turno[0], pago.monto_pagado, f"Pago a Proveedor ID {pago.proveedor_id}"))
+            if not turno:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No hay caja abierta. Abrí un turno para pagar en efectivo de la registradora."
+                )
+            cursor.execute('''
+                INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+                VALUES (?, ?, 'RETIRO', ?, ?, ?)
+            ''', (fecha_actual, 1, pago.monto_pagado, f"Pago a proveedor #{pago.proveedor_id}", turno[0]))
 
         conexion.commit()
         return {"mensaje": "Pago realizado con éxito"}
+    except HTTPException:
+        if conexion:
+            conexion.rollback()
+        raise
     except Exception as e:
             if conexion:
                 conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
@@ -191,6 +205,69 @@ def registrar_pago_proveedor(pago: PagoProveedor):
     finally:
         conexion.close()
 
+# --- DEUDA RÁPIDA (solo saldo + historial, sin stock) ---
+@router.post("/deuda_rapida", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def registrar_deuda_rapida(deuda: DeudaRapida):
+    if deuda.total_factura <= 0:
+        raise HTTPException(status_code=400, detail="El total tiene que ser mayor a cero.")
+    if not deuda.numero_factura.strip():
+        raise HTTPException(status_code=400, detail="Falta el número de factura o remito.")
+
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute("SELECT id FROM proveedores WHERE id = ? AND IFNULL(activo, 1) = 1", (deuda.proveedor_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="El proveedor no existe o está inactivo.")
+
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d")
+        nota = (deuda.observaciones or "").strip() or "Carga rápida (sin detalle de ítems)"
+
+        cursor.execute('''
+            INSERT INTO compras_cabecera (proveedor_id, numero_factura, fecha_compra, total_factura, condicion_pago)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (deuda.proveedor_id, deuda.numero_factura.strip(), fecha_actual, deuda.total_factura, deuda.condicion_pago))
+        compra_id = cursor.lastrowid
+
+        cursor.execute('''
+            INSERT INTO compras_detalle
+                (compra_id, producto_id, descripcion_historica, cantidad_comprada, costo_unitario, fecha_vencimiento, numero_lote_proveedor)
+            VALUES (?, NULL, ?, 1, ?, '2099-12-31', 'DEUDA-RAPIDA')
+        ''', (compra_id, nota, deuda.total_factura))
+
+        if deuda.condicion_pago == "Cuenta Corriente":
+            cursor.execute("SELECT id FROM proveedores_ctacte WHERE proveedor_id = ?", (deuda.proveedor_id,))
+            if cursor.fetchone():
+                cursor.execute(
+                    "UPDATE proveedores_ctacte SET saldo_deudor = saldo_deudor + ? WHERE proveedor_id = ?",
+                    (deuda.total_factura, deuda.proveedor_id)
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO proveedores_ctacte (proveedor_id, saldo_deudor) VALUES (?, ?)",
+                    (deuda.proveedor_id, deuda.total_factura)
+                )
+
+        conexion.commit()
+        return {
+            "mensaje": "Deuda registrada. No se tocó el stock.",
+            "id": compra_id,
+            "total": deuda.total_factura
+        }
+    except HTTPException:
+        conexion.rollback()
+        raise
+    except Exception as e:
+        conexion.rollback()
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+        return {"error": mensaje_error}
+    finally:
+        conexion.close()
+
 # --- 2. INGRESO DE MERCADERÍA (CON ACTUALIZACIÓN DE SALDO) ---
 @router.post("/cargar_factura", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def ingresar_mercaderia(factura: NuevaFacturaCompra):
@@ -199,7 +276,7 @@ def ingresar_mercaderia(factura: NuevaFacturaCompra):
     cursor = conexion.cursor()
     
     try:
-        fecha_actual = datetime.now().strftime("%Y-%m-%d")
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d")
         total_acumulado = 0.0
         
         # 1. Creamos la cabecera de la compra
@@ -382,6 +459,11 @@ def migrar_proveedores():
     cursor = conexion.cursor()
     try:
         cursor.execute("ALTER TABLE proveedores ADD COLUMN observaciones TEXT DEFAULT ''")
+        conexion.commit()
+    except:
+        pass
+    try:
+        cursor.execute("ALTER TABLE movimientos_caja ADD COLUMN turno_id INTEGER")
         conexion.commit()
     except:
         pass # Si ya existe, no hace nada

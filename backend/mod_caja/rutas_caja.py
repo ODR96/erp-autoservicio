@@ -33,7 +33,14 @@ router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
 
 def disparar_alerta_cierre(turno_id, cajero, ventas, declarado, diferencia):
-    pass # ACÁ VA TU N8N LUEGO
+    from backend.whatsapp_puente import enviar_whatsapp
+    enviar_whatsapp(
+        f"Cierre Z #{turno_id}\n"
+        f"Cajero: {cajero}\n"
+        f"Ventas efectivo: ${ventas:,.2f}\n"
+        f"Declarado: ${declarado:,.2f}\n"
+        f"Diferencia: ${diferencia:,.2f}"
+    )
 
 class AperturaCaja(BaseModel):
     caja_id: int = 1
@@ -164,8 +171,20 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
             SET fecha_hora_cierre = ?, monto_final_sistema = ?, monto_final_declarado = ?, diferencia = ?, estado_turno = 'CERRADO'
             WHERE id = ?
         ''', (fecha_cierre, monto_esperado_sistema, cierre.monto_final_declarado, diferencia, cierre.turno_id))
+
+        cursor.execute("SELECT nombre_completo FROM usuarios WHERE id = ?", (turno['usuario_id'],))
+        fila_cajero = cursor.fetchone()
+        nombre_cajero = fila_cajero['nombre_completo'] if fila_cajero else f"Usuario #{turno['usuario_id']}"
         
         conexion.commit()
+        background_tasks.add_task(
+            disparar_alerta_cierre,
+            cierre.turno_id,
+            nombre_cajero,
+            ventas_efectivo,
+            cierre.monto_final_declarado,
+            diferencia
+        )
         return {
             "mensaje": "¡Cierre Z realizado con éxito!",
             "resumen": {
@@ -236,7 +255,7 @@ def sacar_informe_x(turno_id: int):
     finally:
         if conexion: conexion.close()
     
-@router.get("/monitor_vivo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/monitor_vivo", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def monitor_cajas_vivo():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -412,7 +431,7 @@ def listar_todas_las_cajas():
     return {"cajas": cajas}
 
 # --- 1. AUDITORÍA DE TURNO ARREGLADA (CON NOMBRE DE CAJERO) ---
-@router.get("/auditoria/{turno_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/auditoria/{turno_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def auditar_turno(turno_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -484,7 +503,7 @@ def auditar_turno(turno_id: int):
         if conexion: conexion.close()
 
 # --- 2. RUTA NUEVA: BUSCAR TURNOS POR FECHA ---
-@router.get("/turnos_por_fecha", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/turnos_por_fecha", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def obtener_turnos_por_fecha(fecha: str):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row

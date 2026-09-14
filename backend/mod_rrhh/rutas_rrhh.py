@@ -388,7 +388,7 @@ def listar_tarifas(usuario_id: int):
         conexion.close()
 
 
-@router.get("/tarifa_vigente/{usuario_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/tarifa_vigente/{usuario_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def obtener_tarifa_vigente(usuario_id: int):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -406,7 +406,7 @@ def obtener_tarifa_vigente(usuario_id: int):
 # =================================================================
 # 5. ASISTENCIA (partes de trabajo)
 # =================================================================
-@router.post("/asistencia", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.post("/asistencia", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def registrar_asistencia(parte: ParteTrabajoNuevo):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -447,7 +447,7 @@ def registrar_asistencia(parte: ParteTrabajoNuevo):
         conexion.close()
 
 
-@router.get("/asistencia/{usuario_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/asistencia/{usuario_id}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def listar_asistencia(usuario_id: int, desde: Optional[str] = None, hasta: Optional[str] = None):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row

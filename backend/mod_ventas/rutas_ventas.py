@@ -21,7 +21,7 @@ def asegurar_columnas_multi_caja():
 
 asegurar_columnas_multi_caja()
 
-@router.get("/por_fecha", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/por_fecha", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def obtener_ventas_por_fecha(fecha: str = Query(..., description="Formato YYYY-MM-DD")):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row

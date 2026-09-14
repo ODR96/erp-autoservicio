@@ -7,7 +7,7 @@ from backend.mod_usuarios.rutas_usuarios import VerificarRol
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
 
-@router.get("/datos", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/datos", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def obtener_datos_dashboard():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row

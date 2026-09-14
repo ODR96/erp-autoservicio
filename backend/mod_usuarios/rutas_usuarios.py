@@ -183,7 +183,7 @@ def autorizar_accion(request: Request, req: AutorizacionRequest):
     raise HTTPException(status_code=401, detail="PIN incorrecto o sin privilegios de Encargado.")
 
 
-@router.get("/listar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/listar", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def listar_usuarios():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row

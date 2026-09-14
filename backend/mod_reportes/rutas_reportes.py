@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
+from typing import List, Literal
 import sqlite3
 from backend.database import obtener_conexion
-from fastapi import Depends
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
 
 router = APIRouter()
@@ -100,8 +100,15 @@ def asegurar_tablas_reportes():
 
     cursor.execute("PRAGMA table_info(productos_solicitados_faltantes)")
     columnas = [c[1] for c in cursor.fetchall()]
-    if 'usuario_anoto' not in columnas:
-        cursor.execute("ALTER TABLE productos_solicitados_faltantes ADD COLUMN usuario_anoto TEXT DEFAULT 'Desconocido'")
+    nuevas = {
+        'usuario_anoto': "TEXT DEFAULT 'Desconocido'",
+        'estado': "TEXT DEFAULT 'PENDIENTE'",
+        'fecha_pedido': 'TEXT',
+        'fecha_recibido': 'TEXT',
+    }
+    for col, ddl in nuevas.items():
+        if col not in columnas:
+            cursor.execute(f"ALTER TABLE productos_solicitados_faltantes ADD COLUMN {col} {ddl}")
 
     conexion.commit()
     conexion.close()
@@ -115,6 +122,14 @@ class ProductoFaltante(BaseModel):
     notas: str = ""
     usuario_nombre: str = "Desconocido" # <-- NUEVO: Atrapamos al responsable
 
+class CambioEstadoFaltantes(BaseModel):
+    ids: List[int]
+    estado: Literal['PENDIENTE', 'PEDIDO', 'RECIBIDO']
+
+class CambioCantidadFaltante(BaseModel):
+    id: int
+    cantidad: float
+
 # --- 1. ALERTAS DEL DASHBOARD (Para ver a la mañana) ---
 @router.get("/alertas", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def obtener_alertas_dashboard():
@@ -124,7 +139,7 @@ def obtener_alertas_dashboard():
     try:
         # EL ARREGLO: Agregamos p.proveedor_habitual_id a la consulta SELECT
         cursor.execute('''
-            SELECT p.nombre, p.stock_minimo_alerta, p.proveedor_habitual_id,
+            SELECT p.id as producto_id, p.nombre, p.stock_minimo_alerta, p.proveedor_habitual_id,
                    IFNULL((SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo'), 0) as stock_actual
             FROM productos p
             WHERE stock_actual <= p.stock_minimo_alerta 
@@ -231,24 +246,21 @@ def calcular_ganancia_neta(mes: str = None):
     
 @router.post("/registrar_faltante", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_pedido_no_encontrado(p: ProductoFaltante):
+    if p.cantidad <= 0:
+        raise HTTPException(status_code=400, detail="La cantidad tiene que ser mayor a cero.")
     conexion = obtener_conexion()
     cursor = conexion.cursor()
-    
-    # 2. CREAMOS LA COLUMNA SI NO EXISTE (Migración automática silenciosa)
     try:
-        cursor.execute("ALTER TABLE productos_solicitados_faltantes ADD COLUMN usuario_anoto TEXT DEFAULT 'Desconocido'")
-    except:
-        pass # Si ya existe la columna, ignora el error
-
-    # 3. GUARDAMOS CON EL DATO DEL EMPLEADO
-    cursor.execute('''
-        INSERT INTO productos_solicitados_faltantes (descripcion_producto, cantidad_pedida, notas, usuario_anoto) 
-        VALUES (?, ?, ?, ?)
-    ''', (p.descripcion, p.cantidad, p.notas, p.usuario_nombre))
-    
-    conexion.commit()
-    conexion.close()
-    return {"mensaje": "Anotado."}
+        cursor.execute('''
+            INSERT INTO productos_solicitados_faltantes
+                (descripcion_producto, cantidad_pedida, notas, usuario_anoto, estado)
+            VALUES (?, ?, ?, ?, 'PENDIENTE')
+        ''', (p.descripcion, p.cantidad, p.notas, p.usuario_nombre))
+        nuevo_id = cursor.lastrowid
+        conexion.commit()
+        return {"mensaje": "Anotado.", "id": nuevo_id}
+    finally:
+        conexion.close()
 
 @router.get("/faltantes_pendientes", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def obtener_faltantes_pendientes():
@@ -256,12 +268,84 @@ def obtener_faltantes_pendientes():
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # Ahora traemos también quién lo anotó
-        cursor.execute("SELECT rowid, descripcion_producto, cantidad_pedida, notas, usuario_anoto FROM productos_solicitados_faltantes ORDER BY rowid DESC")
+        cursor.execute('''
+            SELECT id,
+                   descripcion_producto,
+                   cantidad_pedida,
+                   notas,
+                   usuario_anoto,
+                   fecha_hora,
+                   IFNULL(estado, 'PENDIENTE') AS estado,
+                   fecha_pedido,
+                   fecha_recibido
+            FROM productos_solicitados_faltantes
+            ORDER BY CASE IFNULL(estado, 'PENDIENTE')
+                        WHEN 'PENDIENTE' THEN 0
+                        WHEN 'PEDIDO' THEN 1
+                        ELSE 2
+                     END,
+                     id DESC
+        ''')
         faltantes = [dict(row) for row in cursor.fetchall()]
         return {"faltantes": faltantes}
     except Exception as e:
         return {"error": str(e)}
+    finally:
+        conexion.close()
+
+@router.patch("/faltantes/estado", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def cambiar_estado_faltantes(cambio: CambioEstadoFaltantes):
+    ids = list(dict.fromkeys([i for i in cambio.ids if i]))
+    if not ids:
+        raise HTTPException(status_code=400, detail="Seleccioná al menos un producto.")
+
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        ahora = _ahora_ar().strftime("%Y-%m-%d %H:%M:%S")
+        placeholders = ",".join("?" * len(ids))
+        if cambio.estado == "PEDIDO":
+            cursor.execute(
+                f'''UPDATE productos_solicitados_faltantes
+                    SET estado = 'PEDIDO', fecha_pedido = ?
+                    WHERE id IN ({placeholders})''',
+                [ahora, *ids]
+            )
+        elif cambio.estado == "RECIBIDO":
+            cursor.execute(
+                f'''UPDATE productos_solicitados_faltantes
+                    SET estado = 'RECIBIDO', fecha_recibido = ?
+                    WHERE id IN ({placeholders})''',
+                [ahora, *ids]
+            )
+        else:
+            cursor.execute(
+                f'''UPDATE productos_solicitados_faltantes
+                    SET estado = 'PENDIENTE', fecha_pedido = NULL, fecha_recibido = NULL
+                    WHERE id IN ({placeholders})''',
+                ids
+            )
+        conexion.commit()
+        return {"mensaje": "Estado actualizado.", "actualizados": cursor.rowcount, "estado": cambio.estado}
+    finally:
+        conexion.close()
+
+@router.patch("/faltantes/cantidad", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def cambiar_cantidad_faltante(cambio: CambioCantidadFaltante):
+    if cambio.cantidad <= 0:
+        raise HTTPException(status_code=400, detail="La cantidad tiene que ser mayor a cero.")
+
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        cursor.execute(
+            "UPDATE productos_solicitados_faltantes SET cantidad_pedida = ? WHERE id = ?",
+            (cambio.cantidad, cambio.id)
+        )
+        conexion.commit()
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="El faltante ya no existe.")
+        return {"mensaje": "Cantidad actualizada.", "id": cambio.id, "cantidad": cambio.cantidad}
     finally:
         conexion.close()
 
@@ -270,14 +354,16 @@ def borrar_faltante_resuelto(faltante_id: int):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        cursor.execute("DELETE FROM productos_solicitados_faltantes WHERE rowid = ?", (faltante_id,))
+        cursor.execute("DELETE FROM productos_solicitados_faltantes WHERE id = ?", (faltante_id,))
         conexion.commit()
-        return {"mensaje": "Resuelto"}
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="El faltante ya no existe.")
+        return {"mensaje": "Quitado de la lista"}
     finally:
         conexion.close()
 
 # --- 2. RANKING DE PRODUCTOS (Top Ventas) ---
-@router.get("/ranking_ventas", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/ranking_ventas", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -313,7 +399,7 @@ def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
     return [dict(r) for r in ranking]
 
 # --- 3. BAJA ROTACIÓN (Los "Clavos" que no se mueven) ---
-@router.get("/baja_rotacion", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/baja_rotacion", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def productos_sin_salida():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -344,7 +430,7 @@ def productos_sin_salida():
     finally:
         conexion.close()
 
-@router.get("/ventas_por_pago", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/ventas_por_pago", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def ventas_por_metodo():
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
@@ -405,7 +491,7 @@ class LanzarOferta(BaseModel):
     porcentaje_descuento: float # Ej: 20 para un 20% OFF
     motivo: str # "Vencimiento Cercano" o "Baja Rotación"
 
-@router.post("/lanzar_oferta", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.post("/lanzar_oferta", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def crear_oferta_urgente(oferta: LanzarOferta):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
@@ -451,7 +537,7 @@ def crear_oferta_urgente(oferta: LanzarOferta):
             return {"error": mensaje_error}
         
         
-@router.get("/detalle_ventas_hora", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+@router.get("/detalle_ventas_hora", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def detalle_ventas_por_hora(hora: str):
     # MAGIA: .zfill(2) transforma un "8" en "08", o deja el "11" como "11"
     hora_corta = hora.split(":")[0].zfill(2)

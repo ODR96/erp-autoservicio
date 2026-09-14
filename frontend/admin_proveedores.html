@@ -8,6 +8,53 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="css/estilos.css">
+    <style>
+        .filtros-faltantes .btn.active {
+            background: #1b365d;
+            border-color: #1b365d;
+            color: #fff;
+        }
+        .wrap-tabla-pedidos {
+            max-height: 480px;
+            overflow: auto;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+        }
+        .wrap-tabla-pedidos thead th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: #f8f9fa;
+        }
+        tr.fila-faltante-pedido { background: #f8fbff; }
+        tr.fila-faltante-recibido td { color: #6c757d; }
+        .tabla-pedidos-clickable tbody tr { cursor: pointer; }
+        .input-cant-faltante {
+            width: 72px;
+            text-align: center;
+            font-weight: 700;
+            margin: 0 auto;
+        }
+        #previewPedidoHoja {
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 28px;
+        }
+        #previewPedidoHoja h2 { margin: 0 0 4px; color: #1b365d; font-size: 1.4rem; }
+        #previewPedidoHoja .meta { color: #6c757d; margin-bottom: 18px; font-size: 13px; }
+        #previewPedidoHoja table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        #previewPedidoHoja th {
+            background: #f8f9fa;
+            text-align: left;
+            padding: 8px;
+            border-bottom: 2px solid #1b365d;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: .03em;
+        }
+        #previewPedidoHoja td { padding: 8px; border-bottom: 1px solid #e9ecef; vertical-align: top; }
+    </style>
 </head>
 
 <body>
@@ -31,8 +78,9 @@
                                 class="bi bi-truck"></i> Ingreso de Facturas</button></li>
                     <li class="nav-item"><button class="nav-link" onclick="cambiarPestanaProv('ctacte', event)"><i
                                 class="bi bi-wallet2"></i> Cta. Cte. y Pagos</button></li>
-                    <li class="nav-item"><button class="nav-link" onclick="cambiarPestanaProv('pedidos', event)"><i
-                                class="bi bi-cart-x"></i> Faltantes y Pedidos</button></li>
+                    <li class="nav-item"><button class="nav-link" id="tabBtnPedidos"
+                            onclick="cambiarPestanaProv('pedidos', event)"><i class="bi bi-cart-x"></i> Faltantes y
+                            Pedidos</button></li>
                 </ul>
 
                 <div class="tab-content p-4">
@@ -70,6 +118,18 @@
                     </div>
 
                     <div class="tab-pane" id="tab-prov-ingreso">
+                        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                            <div class="btn-group filtros-faltantes flex-wrap" role="group" aria-label="Modo de carga">
+                                <button type="button" class="btn btn-outline-secondary btn-sm fw-bold active"
+                                    id="modoIngresoDeuda" onclick="cambiarModoIngreso('deuda')">Deuda rápida</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm fw-bold"
+                                    id="modoIngresoStock" onclick="cambiarModoIngreso('stock')">Ingreso de
+                                    mercadería</button>
+                            </div>
+                            <p class="small text-muted mb-0" id="ayudaModoIngreso">Anota factura o remito y el total.
+                                No toca stock ni precios.</p>
+                        </div>
+
                         <div class="row g-3 mb-3 pb-3 border-bottom">
                             <div class="col-md-4">
                                 <label class="form-label fw-bold small text-primary">1. Seleccionar Proveedor</label>
@@ -89,6 +149,32 @@
                             </div>
                         </div>
 
+                        <div id="panelDeudaRapida">
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label fw-bold small">Total de la factura</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text fw-bold">$</span>
+                                        <input type="number" id="inputTotalDeudaRapida"
+                                            class="form-control form-control-lg fw-bold text-end" placeholder="0.00"
+                                            min="0.01" step="0.01">
+                                    </div>
+                                </div>
+                                <div class="col-md-8">
+                                    <label class="form-label fw-bold small">Observación (opcional)</label>
+                                    <input type="text" id="inputObsDeudaRapida" class="form-control"
+                                        placeholder="Ej: Remito del camión, sin cargar ítems">
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-end">
+                                <button type="button" class="btn btn-primary btn-lg fw-bold shadow-sm"
+                                    onclick="confirmarDeudaRapida()">
+                                    <i class="bi bi-journal-plus"></i> GUARDAR DEUDA
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="panelIngresoStock" class="d-none">
                         <div class="row g-3 mb-3">
                             <div class="col-md-8">
                                 <div class="input-group">
@@ -145,6 +231,7 @@
                                 </button>
                             </div>
                         </div>
+                        </div>
                     </div>
 
                     <div class="tab-pane" id="tab-prov-ctacte">
@@ -193,6 +280,7 @@
                                                 <option value="Transferencia">Transferencia Bancaria</option>
                                                 <option value="Cheque">Emisión de Cheque</option>
                                             </select>
+                                            <div class="form-text">Efectivo de caja requiere un turno abierto. Si no hay caja, usá Bolsillo o Transferencia.</div>
                                         </div>
                                     </div>
 
@@ -238,23 +326,75 @@
 
 
                     <div class="tab-pane" id="tab-prov-pedidos">
+                        <div
+                            class="d-flex flex-column flex-xl-row justify-content-between align-items-xl-center gap-3 mb-3">
+                            <div class="btn-group filtros-faltantes flex-wrap" role="group" aria-label="Filtro de faltantes">
+                                <button type="button" class="btn btn-outline-secondary btn-sm fw-bold active"
+                                    id="filtroFaltantesACTIVOS" onclick="aplicarFiltroFaltantes('ACTIVOS')">En
+                                    curso</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm fw-bold"
+                                    id="filtroFaltantesPENDIENTE"
+                                    onclick="aplicarFiltroFaltantes('PENDIENTE')">Pendientes</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm fw-bold"
+                                    id="filtroFaltantesPEDIDO"
+                                    onclick="aplicarFiltroFaltantes('PEDIDO')">Pedidos</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm fw-bold"
+                                    id="filtroFaltantesRECIBIDO"
+                                    onclick="aplicarFiltroFaltantes('RECIBIDO')">Recibidos</button>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2">
+                                <button type="button" class="btn btn-primary btn-sm fw-bold"
+                                    onclick="marcarSeleccionFaltantes('PEDIDO')">
+                                    <i class="bi bi-send-check"></i> Marcar pedido
+                                </button>
+                                <button type="button" class="btn btn-success btn-sm fw-bold"
+                                    onclick="marcarSeleccionFaltantes('RECIBIDO')">
+                                    <i class="bi bi-box-seam"></i> Marcar recibido
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm fw-bold"
+                                    onclick="marcarSeleccionFaltantes('PENDIENTE')">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Pendiente
+                                </button>
+                                <button type="button" class="btn btn-outline-success btn-sm fw-bold"
+                                    onclick="exportarPedidoExcel()">
+                                    <i class="bi bi-file-earmark-excel"></i> Excel
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm fw-bold"
+                                    onclick="exportarPedidoPdf()">
+                                    <i class="bi bi-file-earmark-pdf"></i> Vista previa
+                                </button>
+                            </div>
+                        </div>
+                        <p class="small text-muted mb-3" id="resumenSeleccionFaltantes">Ningún ítem seleccionado. Excel y
+                            la vista previa usan la selección; si no hay, usan lo visible.</p>
+
                         <div class="row g-4">
-                            <!-- Columna Izquierda: Lo que piden en el mostrador -->
-                            <div class="col-md-6 border-end">
-                                <h5 class="fw-bold text-info mb-3"><i class="bi bi-person-raised-hand"></i> Anotados en
-                                    Caja (Urgencias)</h5>
-                                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
-                                    <table class="table table-hover align-middle">
-                                        <thead class="table-light sticky-top">
+                            <div class="col-lg-7">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <h5 class="fw-bold mb-0"><i class="bi bi-person-raised-hand text-primary"></i>
+                                        Anotados en caja</h5>
+                                    <span class="badge bg-light text-secondary border" id="badgeCountFaltantes">0</span>
+                                </div>
+                                <div class="wrap-tabla-pedidos">
+                                    <table class="table table-hover table-custom align-middle mb-0 tabla-pedidos-clickable">
+                                        <thead>
                                             <tr>
-                                                <th>Producto / Pedido</th>
+                                                <th style="width: 42px;" class="text-center">
+                                                    <input class="form-check-input" type="checkbox"
+                                                        id="chkTodosFaltantes"
+                                                        onchange="toggleTodosFaltantes(this.checked)"
+                                                        title="Seleccionar visibles">
+                                                </th>
+                                                <th class="text-start">Producto</th>
+                                                <th class="text-center" style="width: 70px;">Cant.</th>
                                                 <th>Obs.</th>
-                                                <th class="text-center"><i class="bi bi-check2-all"></i></th>
+                                                <th>Estado</th>
+                                                <th style="width: 44px;"></th>
                                             </tr>
                                         </thead>
                                         <tbody id="tablaFaltantesCaja">
                                             <tr>
-                                                <td colspan="3" class="text-muted text-center py-4">Cargando
+                                                <td colspan="6" class="text-muted text-center py-4">Cargando
                                                     faltantes...</td>
                                             </tr>
                                         </tbody>
@@ -262,24 +402,35 @@
                                 </div>
                             </div>
 
-                            <!-- Columna Derecha: Alertas automáticas de tu base de datos -->
-                            <div class="col-md-6">
-                                <h5 class="fw-bold text-danger mb-3"><i class="bi bi-exclamation-triangle"></i> Alertas
-                                    de Stock Mínimo</h5>
-                                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
-                                    <table class="table table-sm table-hover align-middle text-center">
-                                        <thead class="table-light sticky-top">
+                            <div class="col-lg-5">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <h5 class="fw-bold mb-0"><i class="bi bi-exclamation-triangle text-danger"></i>
+                                        Stock mínimo</h5>
+                                    <button type="button" class="btn btn-outline-primary btn-sm fw-bold"
+                                        onclick="pasarAlertasALista()">
+                                        <i class="bi bi-plus-lg"></i> Agregar a la lista
+                                    </button>
+                                </div>
+                                <div class="wrap-tabla-pedidos">
+                                    <table class="table table-hover table-custom align-middle mb-0 tabla-pedidos-clickable">
+                                        <thead>
                                             <tr>
+                                                <th style="width: 42px;" class="text-center">
+                                                    <input class="form-check-input" type="checkbox"
+                                                        id="chkTodasAlertas"
+                                                        onchange="toggleTodasAlertas(this.checked)"
+                                                        title="Seleccionar alertas">
+                                                </th>
                                                 <th class="text-start">Producto</th>
                                                 <th>Disp.</th>
-                                                <th>Mínimo</th>
-                                                <th>Prov. Sugerido</th>
+                                                <th>Mín.</th>
+                                                <th>Proveedor</th>
                                             </tr>
                                         </thead>
                                         <tbody id="tablaFaltantesSistema">
                                             <tr>
-                                                <td colspan="4" class="text-muted text-center py-4">Cargando alertas...
-                                                </td>
+                                                <td colspan="5" class="text-muted text-center py-4">Cargando
+                                                    alertas...</td>
                                             </tr>
                                         </tbody>
                                     </table>
@@ -331,6 +482,26 @@
         </div>
     </div>
 
+    <div class="modal fade" id="modalPreviewPedido" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header text-white" style="background:#1b365d;">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-file-earmark-pdf me-2"></i>Vista previa del pedido</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body bg-light">
+                    <div id="previewPedidoHoja"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary fw-bold" data-bs-dismiss="modal">Cerrar</button>
+                    <button type="button" class="btn btn-primary fw-bold" onclick="imprimirPedidoDesdePreview()">
+                        <i class="bi bi-printer"></i> Imprimir
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
@@ -339,7 +510,8 @@
         function cambiarPestanaProv(id, evento) {
             document.querySelectorAll('#proveedoresTabs .nav-link').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
-            evento.target.classList.add('active');
+            const boton = evento.currentTarget || evento.target.closest('button') || evento.target;
+            boton.classList.add('active');
             document.getElementById('tab-prov-' + id).classList.add('active');
         }
 
@@ -354,8 +526,8 @@
             }
         }
     </script>
-    <script src="js/layout.js?v=1.0.29"></script>
-    <script src="js/app_proveedores.js?v=1.0.29"></script>
+    <script src="js/layout.js?v=1.0.32"></script>
+    <script src="js/app_proveedores.js?v=1.0.32"></script>
 </body>
 
 </html>
