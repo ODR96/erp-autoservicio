@@ -57,8 +57,21 @@
                                                 <i class="bi bi-whatsapp"></i> Probar
                                             </button>
                                         </div>
-                                        <small class="text-muted">Ahí llegan Cierre Z y gastos altos. Guardá antes de
+                                        <small class="text-muted">Ahí llegan Cierre Z y cada retiro de caja. Guardá antes de
                                             probar si lo acabás de cambiar.</small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold small">Grupo WhatsApp (faltantes)</label>
+                                        <div class="input-group">
+                                            <input type="text" id="confGrupoCompras" class="form-control"
+                                                placeholder="Ej: 120363...@g.us">
+                                            <button type="button" class="btn btn-outline-success fw-bold"
+                                                onclick="probarWhatsappGrupo()">
+                                                <i class="bi bi-whatsapp"></i> Probar grupo
+                                            </button>
+                                        </div>
+                                        <small class="text-muted">Mandá <code>!id</code> en el grupo con el bot. El digest
+                                            de faltantes del Cierre Z llega acá, no a tu número.</small>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label fw-bold small">Dirección Comercial</label>
@@ -147,8 +160,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="js/layout.js?v=1.0.32"></script>
-    <script src="js/app_config.js?v=1.0.32"></script>
+    <script src="js/layout.js?v=1.0.33"></script>
+    <script src="js/app_config.js?v=1.0.33"></script>
 </body>
 
 </html>

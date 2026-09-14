@@ -178,6 +178,8 @@ def registrar_gasto_operativo(gasto: NuevoGasto, background_tasks: BackgroundTas
         ''', (fecha_actual, gasto.categoria_id, gasto.descripcion_detalle, gasto.monto, gasto.metodo_pago, gasto.origen_fondos, gasto.usuario_id, gasto.turno_id))
         
         # EL ARREGLO DEL RETIRO DEL POS
+        retiro_de_caja = False
+        turno_retiro = None
         if "CAJA_DIARIA" in gasto.origen_fondos.upper() or "EFECTIVO" in gasto.metodo_pago.upper():
             turno = db.execute("SELECT id, caja_id FROM turnos_caja WHERE estado_turno = 'ABIERTO' AND id = ?", (gasto.turno_id,)).fetchone()
             if not turno:
@@ -191,9 +193,20 @@ def registrar_gasto_operativo(gasto: NuevoGasto, background_tasks: BackgroundTas
                 INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id, caja_id)
                 VALUES (?, ?, 'RETIRO', ?, ?, ?, ?)
             ''', (fecha_actual, gasto.usuario_id, gasto.monto, f"Gasto: {gasto.descripcion_detalle}", turno['id'], turno['caja_id']))
+            retiro_de_caja = True
+            turno_retiro = turno['id']
             
         db.commit()
-        if gasto.monto > 50000:
+        from backend.whatsapp_puente import avisar_retiro, nombre_usuario
+        if retiro_de_caja:
+            background_tasks.add_task(
+                avisar_retiro,
+                gasto.monto,
+                f"Gasto: {gasto.descripcion_detalle or 'Sin detalle'}",
+                nombre_usuario(gasto.usuario_id),
+                turno_retiro,
+            )
+        elif gasto.monto > 50000:
             background_tasks.add_task(_alerta_gasto_alto, gasto.monto, gasto.descripcion_detalle)
         return {"mensaje": "Gasto y retiro registrados."}
     except HTTPException:

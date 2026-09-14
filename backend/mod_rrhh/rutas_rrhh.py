@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Optional, Literal, List
 from datetime import date, datetime, timezone, timedelta
@@ -479,7 +479,7 @@ def listar_asistencia(usuario_id: int, desde: Optional[str] = None, hasta: Optio
 # 6. CUENTA CORRIENTE DEL EMPLEADO (adelantos y consumo de mercadería)
 # =================================================================
 @router.post("/cuenta_empleado/adelanto", dependencies=[Depends(VerificarRol(["ADMIN"]))])
-def registrar_adelanto(adelanto: AdelantoNuevo):
+def registrar_adelanto(adelanto: AdelantoNuevo, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
@@ -509,6 +509,14 @@ def registrar_adelanto(adelanto: AdelantoNuevo):
         ''', (adelanto.usuario_id, fecha_actual, adelanto.monto, adelanto.detalle, adelanto.usuario_registro))
 
         conexion.commit()
+        from backend.whatsapp_puente import avisar_retiro, nombre_usuario
+        background_tasks.add_task(
+            avisar_retiro,
+            adelanto.monto,
+            f"[ADELANTO DE SUELDO] {adelanto.detalle}",
+            nombre_usuario(adelanto.usuario_registro),
+            adelanto.turno_id,
+        )
         return {"mensaje": f"Adelanto de ${adelanto.monto} registrado. Se descontará en la próxima liquidación."}
     except Exception as e:
         conexion.rollback()

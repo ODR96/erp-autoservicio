@@ -253,9 +253,9 @@ def registrar_pedido_no_encontrado(p: ProductoFaltante):
     try:
         cursor.execute('''
             INSERT INTO productos_solicitados_faltantes
-                (descripcion_producto, cantidad_pedida, notas, usuario_anoto, estado)
-            VALUES (?, ?, ?, ?, 'PENDIENTE')
-        ''', (p.descripcion, p.cantidad, p.notas, p.usuario_nombre))
+                (descripcion_producto, cantidad_pedida, notas, usuario_anoto, estado, fecha_hora)
+            VALUES (?, ?, ?, ?, 'PENDIENTE', ?)
+        ''', (p.descripcion, p.cantidad, p.notas, p.usuario_nombre, _ahora_ar().strftime("%Y-%m-%d %H:%M:%S")))
         nuevo_id = cursor.lastrowid
         conexion.commit()
         return {"mensaje": "Anotado.", "id": nuevo_id}

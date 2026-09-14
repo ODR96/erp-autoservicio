@@ -32,15 +32,31 @@ asegurar_tabla_cajas_fisicas()
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
 
-def disparar_alerta_cierre(turno_id, cajero, ventas, declarado, diferencia):
-    from backend.whatsapp_puente import enviar_whatsapp
-    enviar_whatsapp(
-        f"Cierre Z #{turno_id}\n"
-        f"Cajero: {cajero}\n"
-        f"Ventas efectivo: ${ventas:,.2f}\n"
-        f"Declarado: ${declarado:,.2f}\n"
-        f"Diferencia: ${diferencia:,.2f}"
+def _sumar_transferencias(cursor, turno_id):
+    cursor.execute(
+        "SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%TRANSFERENCIA%' AND turno_id = ? AND estado = 'COMPLETADA'",
+        (turno_id,),
     )
+    return cursor.fetchone()[0] or 0.0
+
+
+def _detalle_retiros_turno(cursor, turno_id):
+    cursor.execute(
+        '''
+        SELECT monto, IFNULL(observaciones, '') AS obs
+        FROM movimientos_caja
+        WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?
+        ORDER BY id ASC
+        ''',
+        (turno_id,),
+    )
+    return [{"monto": row["monto"] or 0, "obs": row["obs"] or ""} for row in cursor.fetchall()]
+
+
+def disparar_avisos_cierre(payload_z, fecha_apertura, fecha_cierre, cajero, turno_id):
+    from backend.whatsapp_puente import avisar_cierre_z, avisar_faltantes_del_turno
+    avisar_cierre_z(payload_z)
+    avisar_faltantes_del_turno(turno_id, fecha_apertura, fecha_cierre, cajero)
 
 class AperturaCaja(BaseModel):
     caja_id: int = 1
@@ -102,7 +118,7 @@ def abrir_turno(apertura: AperturaCaja):
         if conexion: conexion.close()
 
 @router.post("/movimiento", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def registrar_movimiento(mov: MovimientoCaja):
+def registrar_movimiento(mov: MovimientoCaja, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
@@ -126,6 +142,15 @@ def registrar_movimiento(mov: MovimientoCaja):
         ''', (fecha_actual, mov.usuario_id, tipo_mayuscula, mov.monto, observacion_final, mov.turno_id))
         
         conexion.commit()
+        if tipo_mayuscula == 'RETIRO':
+            from backend.whatsapp_puente import avisar_retiro, nombre_usuario
+            background_tasks.add_task(
+                avisar_retiro,
+                mov.monto,
+                observacion_final or "Retiro",
+                nombre_usuario(mov.usuario_id),
+                mov.turno_id,
+            )
         return {"mensaje": f"¡{tipo_mayuscula} de ${mov.monto} registrado correctamente!"}
     except Exception as e:
         if conexion: conexion.rollback()
@@ -156,6 +181,7 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         
         cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
         ventas_fiados = cursor.fetchone()[0] or 0.0
+        ventas_transferencia = _sumar_transferencias(cursor, cierre.turno_id)
         
         cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (cierre.turno_id,))
         total_retiros = cursor.fetchone()[0] or 0.0
@@ -175,15 +201,33 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         cursor.execute("SELECT nombre_completo FROM usuarios WHERE id = ?", (turno['usuario_id'],))
         fila_cajero = cursor.fetchone()
         nombre_cajero = fila_cajero['nombre_completo'] if fila_cajero else f"Usuario #{turno['usuario_id']}"
+        detalle_retiros = _detalle_retiros_turno(cursor, cierre.turno_id)
+        fecha_apertura = turno['fecha_hora_apertura']
         
         conexion.commit()
+        payload_z = {
+            "turno_id": cierre.turno_id,
+            "cajero": nombre_cajero,
+            "fondo_inicial": turno['monto_inicial'],
+            "ventas_efectivo": ventas_efectivo,
+            "ventas_tarjeta": ventas_tarjeta,
+            "ventas_transferencia": ventas_transferencia,
+            "ventas_virtual": ventas_virtual,
+            "ventas_fiados": ventas_fiados,
+            "ingresos": total_ingresos,
+            "retiros": total_retiros,
+            "detalle_retiros": detalle_retiros,
+            "esperado": monto_esperado_sistema,
+            "declarado": cierre.monto_final_declarado,
+            "diferencia": diferencia,
+        }
         background_tasks.add_task(
-            disparar_alerta_cierre,
-            cierre.turno_id,
+            disparar_avisos_cierre,
+            payload_z,
+            fecha_apertura,
+            fecha_cierre,
             nombre_cajero,
-            ventas_efectivo,
-            cierre.monto_final_declarado,
-            diferencia
+            cierre.turno_id,
         )
         return {
             "mensaje": "¡Cierre Z realizado con éxito!",
@@ -192,6 +236,7 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
                 "ventas_en_efectivo": ventas_efectivo,
                 "ventas_tarjeta": ventas_tarjeta,
                 "ventas_virtual": ventas_virtual,
+                "ventas_transferencia": ventas_transferencia,
                 "ventas_fiados": ventas_fiados,
                 "ingresos_extras": total_ingresos,
                 "retiros_y_gastos": total_retiros,
@@ -229,6 +274,7 @@ def sacar_informe_x(turno_id: int):
         
         cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado = 'COMPLETADA'", (turno_id,))
         v_fiados = cursor.fetchone()[0] or 0.0
+        v_transferencia = _sumar_transferencias(cursor, turno_id)
         
         cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (turno_id,))
         retiros = cursor.fetchone()[0] or 0.0
@@ -244,6 +290,7 @@ def sacar_informe_x(turno_id: int):
                 "ventas_en_efectivo": v_efectivo,
                 "ventas_tarjeta": v_tarjeta,
                 "ventas_virtual": v_virtual,
+                "ventas_transferencia": v_transferencia,
                 "ventas_fiados": v_fiados,
                 "ingresos_extras": ingresos,
                 "retiros_y_gastos": retiros,

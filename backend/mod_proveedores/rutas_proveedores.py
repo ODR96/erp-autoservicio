@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import List
 from datetime import datetime, timezone, timedelta
@@ -142,7 +142,7 @@ def reactivar_proveedor(prov_id: int):
 # --- REGISTRAR PAGO Y DESCONTAR DEUDA ---
 # --- REGISTRAR PAGO Y DESCONTAR DEUDA ---
 @router.post("/pagar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
-def registrar_pago_proveedor(pago: PagoProveedor):
+def registrar_pago_proveedor(pago: PagoProveedor, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
@@ -170,6 +170,7 @@ def registrar_pago_proveedor(pago: PagoProveedor):
                        (pago.monto_pagado, pago.proveedor_id))
 
         # 3. Efectivo de caja: o mueve el cajón, o no se graba el pago
+        retiro_caja = None
         if "CAJA" in pago.metodo_pago.upper():
             cursor.execute("SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO' ORDER BY id DESC LIMIT 1")
             turno = cursor.fetchone()
@@ -182,8 +183,18 @@ def registrar_pago_proveedor(pago: PagoProveedor):
                 INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
                 VALUES (?, ?, 'RETIRO', ?, ?, ?)
             ''', (fecha_actual, 1, pago.monto_pagado, f"Pago a proveedor #{pago.proveedor_id}", turno[0]))
+            retiro_caja = turno[0]
 
         conexion.commit()
+        if retiro_caja is not None:
+            from backend.whatsapp_puente import avisar_retiro, nombre_usuario
+            background_tasks.add_task(
+                avisar_retiro,
+                pago.monto_pagado,
+                f"Pago a proveedor #{pago.proveedor_id}",
+                nombre_usuario(1),
+                retiro_caja,
+            )
         return {"mensaje": "Pago realizado con éxito"}
     except HTTPException:
         if conexion:

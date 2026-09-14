@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Query, Depends, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
@@ -278,7 +278,7 @@ class AnularVentaRequest(BaseModel):
     turno_id: int
 
 @router.put("/anular/{venta_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
-def anular_venta(venta_id: int, peticion: AnularVentaRequest):
+def anular_venta(venta_id: int, peticion: AnularVentaRequest, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
@@ -303,6 +303,8 @@ def anular_venta(venta_id: int, peticion: AnularVentaRequest):
         total_venta = venta[3]
         cliente_id = venta[4]
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        retiro_anulado = None
+        motivo_retiro = ""
 
         if metodo_pago in ['FIADO', 'CUENTA CORRIENTE'] and cliente_id:
             cursor.execute("UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor - ? WHERE id = ?", (total_venta, cliente_id))
@@ -317,6 +319,8 @@ def anular_venta(venta_id: int, peticion: AnularVentaRequest):
                 INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id) 
                 VALUES (?, ?, 'RETIRO', ?, ?, ?)
             ''', (fecha_actual, peticion.usuario_id, total_venta, f"Anulación Efectivo Ticket #{venta_id}", peticion.turno_id))
+            retiro_anulado = total_venta
+            motivo_retiro = f"Anulación Efectivo Ticket #{venta_id}"
 
         elif metodo_pago == 'MIXTO':
             try:
@@ -327,10 +331,21 @@ def anular_venta(venta_id: int, peticion: AnularVentaRequest):
                         INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id) 
                         VALUES (?, ?, 'RETIRO', ?, ?, ?)
                     ''', (fecha_actual, peticion.usuario_id, efvo[0], f"Anulación Efectivo Mixto #{venta_id}", peticion.turno_id))
+                    retiro_anulado = efvo[0]
+                    motivo_retiro = f"Anulación Efectivo Mixto #{venta_id}"
             except: pass
 
         cursor.execute("UPDATE ventas_cabecera SET estado = 'ANULADA' WHERE id = ?", (venta_id,))
         conexion.commit()
+        if retiro_anulado:
+            from backend.whatsapp_puente import avisar_retiro, nombre_usuario
+            background_tasks.add_task(
+                avisar_retiro,
+                retiro_anulado,
+                motivo_retiro,
+                nombre_usuario(peticion.usuario_id),
+                peticion.turno_id,
+            )
         return {"mensaje": "Venta anulada, stock devuelto y caja actualizada."}
     except Exception as e:
         if conexion: conexion.rollback()

@@ -62,6 +62,7 @@ async function cargarConfiguracionActual() {
         document.getElementById('confCuit').value = config.cuit || '';
         document.getElementById('confIva').value = config.condicion_iva || 'Responsable Inscripto';
         document.getElementById('confTel').value = config.telefono || '';
+        document.getElementById('confGrupoCompras').value = config.whatsapp_grupo_compras || '';
         document.getElementById('confDir').value = config.direccion || '';
         document.getElementById('confImpresora').value = config.impresora_por_defecto || '80mm';
         document.getElementById('confMsj').value = config.mensaje_ticket || '';
@@ -82,6 +83,7 @@ async function guardarConfiguracion(event) {
     formData.append('cuit', document.getElementById('confCuit').value);
     formData.append('condicion_iva', document.getElementById('confIva').value);
     formData.append('telefono', document.getElementById('confTel').value);
+    formData.append('whatsapp_grupo_compras', document.getElementById('confGrupoCompras').value);
     formData.append('direccion', document.getElementById('confDir').value);
     formData.append('impresora_por_defecto', document.getElementById('confImpresora').value);
     formData.append('mensaje_ticket', document.getElementById('confMsj').value);
@@ -169,6 +171,25 @@ async function probarWhatsapp() {
             Swal.fire('Pedido enviado', data.detalle || 'El puente Node aceptó el aviso.', 'success');
         } else {
             Swal.fire('No salió', data.detalle || 'Node no respondió. Revisá el servicio en el puerto 3000 y el teléfono guardado.', 'warning');
+        }
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
+async function probarWhatsappGrupo() {
+    Swal.fire({ title: 'Contactando al grupo...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/config/probar_whatsapp_grupo`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.detalle || 'No se pudo probar el grupo.'));
+        }
+        if (data.ok) {
+            Swal.fire('Pedido enviado', data.detalle || 'El puente Node aceptó el aviso al grupo.', 'success');
+        } else {
+            Swal.fire('No salió', data.detalle || 'Guardá el ID del grupo (...@g.us) y el puente en el 3000.', 'warning');
         }
     } catch (e) {
         Swal.fire('Error', e.message, 'error');

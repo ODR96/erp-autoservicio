@@ -37,6 +37,8 @@ def asegurar_tabla_configuracion():
     except: pass
     try: cursor.execute("ALTER TABLE configuracion_local ADD COLUMN tope_maximo_descuento_sueldo_pct REAL DEFAULT 50.0")
     except: pass
+    try: cursor.execute("ALTER TABLE configuracion_local ADD COLUMN whatsapp_grupo_compras TEXT DEFAULT ''")
+    except: pass
 
     cursor.execute("INSERT OR IGNORE INTO configuracion_local (id) VALUES (1)")
     conexion.commit()
@@ -54,7 +56,8 @@ def actualizar_configuracion(
     cuit: str = Form(...),
     condicion_iva: str = Form(...),
     impresora_por_defecto: str = Form(...),
-    tope_maximo_descuento_sueldo_pct: float = Form(50.0)
+    tope_maximo_descuento_sueldo_pct: float = Form(50.0),
+    whatsapp_grupo_compras: str = Form(""),
 ):
     if tope_maximo_descuento_sueldo_pct < 0 or tope_maximo_descuento_sueldo_pct > 100:
         return {"error": "El tope de descuento de sueldo debe ser un porcentaje entre 0 y 100."}
@@ -64,9 +67,9 @@ def actualizar_configuracion(
     try:
         cursor.execute('''
             UPDATE configuracion_local 
-            SET nombre_negocio = ?, direccion = ?, telefono = ?, mensaje_ticket = ?, cuit = ?, condicion_iva = ?, impresora_por_defecto = ?, tope_maximo_descuento_sueldo_pct = ?
+            SET nombre_negocio = ?, direccion = ?, telefono = ?, mensaje_ticket = ?, cuit = ?, condicion_iva = ?, impresora_por_defecto = ?, tope_maximo_descuento_sueldo_pct = ?, whatsapp_grupo_compras = ?
             WHERE id = 1
-        ''', (nombre_negocio, direccion, telefono, mensaje_ticket, cuit, condicion_iva, impresora_por_defecto, tope_maximo_descuento_sueldo_pct))
+        ''', (nombre_negocio, direccion, telefono, mensaje_ticket, cuit, condicion_iva, impresora_por_defecto, tope_maximo_descuento_sueldo_pct, (whatsapp_grupo_compras or "").strip()))
         conexion.commit()
         return {"mensaje": "¡Configuración del negocio guardada con éxito!"}
     except Exception as e:
@@ -128,6 +131,17 @@ def probar_whatsapp():
     from backend.whatsapp_puente import enviar_whatsapp
     resultado = enviar_whatsapp("ERPetto: prueba de aviso WhatsApp. Si leés esto, el puente Node está vivo.")
     return resultado
+
+@router.post("/probar_whatsapp_grupo", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def probar_whatsapp_grupo():
+    from backend.whatsapp_puente import enviar_whatsapp, destino_grupo_compras
+    destino = destino_grupo_compras()
+    if not destino:
+        return {"ok": False, "detalle": "Falta el grupo de compras en Configuración. Guardá el ID (...@g.us) y volvé a probar."}
+    return enviar_whatsapp(
+        "ERPetto: prueba al grupo de compras. Si leés esto, los faltantes del Cierre Z van a llegar acá.",
+        numero=destino,
+    )
 
 # --- 4. LEER LA CONFIGURACIÓN ---
 # Esta ruta la usa el POS para imprimir tickets, así que el cajero NECESITA poder leerla

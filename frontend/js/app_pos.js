@@ -2073,11 +2073,12 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
     // Mapeo ampliado (agregamos más opciones para atrapar los fiados)
     const fondoIni = d.fondo_inicial ?? 0;
     const vEfectivo = d.ventas_en_efectivo ?? d.efectivo ?? 0;
-    const vTransf = d.ventas_virtual ?? d.transferencias ?? 0;
+    const vTransf = d.ventas_transferencia ?? 0;
+    const vBilletera = d.ventas_virtual ?? 0;
     const vTarjetas = d.ventas_tarjeta ?? d.tarjetas ?? 0;
     const vFiados = d.ventas_fiados ?? d.fiados ?? d.ventas_cta_cte ?? d.cta_cte ?? 0;
 
-    const vTotales = vEfectivo + vTransf + vTarjetas + vFiados;
+    const vTotales = vEfectivo + vTransf + vBilletera + vTarjetas + vFiados;
     const ingresos = d.ingresos_extras ?? 0;
     const retiros = d.retiros_y_gastos ?? 0;
 
@@ -2108,7 +2109,8 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
 
     <div class="center bold" style="margin-bottom: 6px;">--- VENTAS DEL TURNO ---</div>
     <div class="fila"><span>Efectivo:</span> <span>$${vEfectivo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
-    <div class="fila"><span>Virtual / Billeteras:</span> <span>$${vTransf.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
+    <div class="fila"><span>Transferencia / QR:</span> <span>$${vTransf.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
+    <div class="fila"><span>Virtual / Billeteras:</span> <span>$${vBilletera.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
     <div class="fila"><span>Tarjetas (POS):</span> <span>$${vTarjetas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
     <div class="fila"><span>Fiados (Cta. Cte.):</span> <span>$${vFiados.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
     <div class="divisor"></div>
