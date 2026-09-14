@@ -9,6 +9,7 @@ const app = express();
 app.use(express.json());
 
 let listo = false;
+const gruposVistos = new Map();
 
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -32,11 +33,11 @@ client.on('disconnected', (razon) => {
     console.log('WhatsApp desconectado:', razon);
 });
 
-client.on('message', async (message) => {
-    if (message.body === '!id') {
-        const chat = await message.getChat();
-        message.reply(`El ID de este chat/grupo es:\n${chat.id._serialized}`);
-        console.log(`ID capturado: ${chat.id._serialized}`);
+client.on('message', (message) => {
+    const from = message.from || '';
+    console.log(`MSG from=${from} author=${message.author || '-'} body=${String(message.body || '').slice(0, 80)}`);
+    if (from.endsWith('@g.us')) {
+        gruposVistos.set(from, { nombre: '', id: from });
     }
 });
 
@@ -62,19 +63,28 @@ app.get('/salud', (_req, res) => {
     res.status(listo ? 200 : 503).send({ listo });
 });
 
+app.get('/grupos', (_req, res) => {
+    if (!listo) return res.status(503).send({ error: 'WhatsApp no conectado' });
+    const grupos = Array.from(gruposVistos.values());
+    res.send({
+        cantidad: grupos.length,
+        grupos,
+        nota: grupos.length
+            ? 'IDs vistos desde que arrancó el bot.'
+            : 'Que alguien (no el celular del bot) escriba en el grupo y repetí este curl.'
+    });
+});
+
 app.post('/enviar', exigirToken, (req, res) => {
     const destino = normalizarDestino(req.body.destino || req.body.numero);
     const mensaje = (req.body.mensaje || '').trim();
-
     if (!destino || !mensaje) {
         return res.status(400).send({ error: 'Faltan datos' });
     }
     if (!listo) {
         return res.status(503).send({ error: 'WhatsApp no conectado' });
     }
-
     res.status(202).send({ status: 'Aceptado' });
-
     client.sendMessage(destino, mensaje)
         .then(() => console.log(`Mensaje enviado a ${destino}`))
         .catch((error) => console.error('Error enviando mensaje:', error));
