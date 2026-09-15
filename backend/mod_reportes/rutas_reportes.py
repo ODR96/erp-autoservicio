@@ -192,12 +192,12 @@ def calcular_ganancia_neta(mes: str = None):
         ''', (mes,))
         ingresos = cursor.fetchone()[0] or 0.0
 
-        # 2. COSTO DE MERCADERÍA VENDIDA (CMV) - Lo que te costó a vos comprar esa mercadería
+        # 2. CMV: costo del lote al momento de vender. Ventas viejas (NULL) usan el maestro.
         cursor.execute('''
-            SELECT SUM(v.cantidad * p.costo_sin_iva) 
+            SELECT SUM(v.cantidad * COALESCE(v.costo_unitario_historico, p.costo_sin_iva, 0))
             FROM ventas_detalle v
             JOIN ventas_cabecera c ON v.venta_id = c.id
-            JOIN productos p ON v.producto_id = p.id
+            LEFT JOIN productos p ON v.producto_id = p.id
             WHERE strftime('%Y-%m', c.fecha_hora) = ?
             AND c.estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
         ''', (mes,))

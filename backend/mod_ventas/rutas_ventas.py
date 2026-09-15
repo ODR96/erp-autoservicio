@@ -16,10 +16,67 @@ def asegurar_columnas_multi_caja():
     except: pass
     try: cursor.execute("ALTER TABLE movimientos_caja ADD COLUMN turno_id INTEGER DEFAULT 0")
     except: pass
+    # NULL a propósito: las ventas viejas caen al costo maestro. DEFAULT 0 mentiría CMV=0.
+    try: cursor.execute("ALTER TABLE ventas_detalle ADD COLUMN costo_unitario_historico REAL")
+    except: pass
     conexion.commit()
     conexion.close()
 
 asegurar_columnas_multi_caja()
+
+
+def _costo_unitario_lote(costo_lote, costo_fallback) -> float:
+    c = float(costo_lote or 0)
+    if c > 0:
+        return c
+    return float(costo_fallback or 0)
+
+
+def descontar_stock_fifo(cursor, producto_id, cantidad, venta_id, cajero_nombre, fecha_iso, costo_fallback) -> float:
+    """Descuenta lotes por vencimiento. Devuelve el costo total de esa mercadería (no el precio de góndola)."""
+    restante = float(cantidad)
+    costo_total = 0.0
+    cursor.execute(
+        """SELECT id, cantidad_disponible, IFNULL(costo_real_ingreso, 0) as costo
+           FROM lotes_stock
+           WHERE producto_id = ? AND cantidad_disponible > 0 AND estado_lote = 'Activo'
+           ORDER BY fecha_vencimiento ASC""",
+        (producto_id,),
+    )
+    for lote in cursor.fetchall():
+        if restante <= 0:
+            break
+        descuento = min(lote["cantidad_disponible"], restante)
+        cursor.execute(
+            "UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible - ? WHERE id = ?",
+            (descuento, lote["id"]),
+        )
+        cursor.execute(
+            """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo)
+               VALUES (?, ?, ?, 'VENTA_AUTOMATICA', ?)""",
+            (producto_id, lote["id"], descuento, f"Ticket #{venta_id} ({cajero_nombre})"),
+        )
+        costo_total += descuento * _costo_unitario_lote(lote["costo"], costo_fallback)
+        restante -= descuento
+
+    if restante > 0:
+        costo_faltante = _costo_unitario_lote(0, costo_fallback)
+        cursor.execute(
+            """INSERT INTO lotes_stock
+               (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento,
+                cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
+               VALUES (?, 'VENTA_SIN_STOCK', ?, '2099-12-31', 0, ?, ?, 'Activo')""",
+            (producto_id, fecha_iso[:10], -restante, costo_faltante),
+        )
+        nuevo_lote = cursor.lastrowid
+        cursor.execute(
+            """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo)
+               VALUES (?, ?, ?, 'VENTA_FALTANTE_STOCK', ?)""",
+            (producto_id, nuevo_lote, restante, f"Ticket #{venta_id} ({cajero_nombre})"),
+        )
+        costo_total += restante * costo_faltante
+
+    return round(costo_total, 4)
 
 @router.get("/por_fecha", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def obtener_ventas_por_fecha(fecha: str = Query(..., description="Formato YYYY-MM-DD")):
@@ -92,7 +149,10 @@ def registrar_venta(venta: NuevaVenta):
         venta_id = cursor.lastrowid
         
         for item in venta.items:
-            cursor.execute("SELECT precio_venta_final, nombre FROM productos WHERE id = ?", (item.producto_id,))
+            cursor.execute(
+                "SELECT precio_venta_final, nombre, IFNULL(costo_sin_iva, 0) as costo_sin_iva FROM productos WHERE id = ?",
+                (item.producto_id,),
+            )
             prod_info = cursor.fetchone()
             if not prod_info:
                 subtotal_item = item.precio_unitario * item.cantidad
@@ -100,22 +160,17 @@ def registrar_venta(venta: NuevaVenta):
                 nombre_mostrar = item.nombre_fantasma if item.nombre_fantasma else "Artículo Varios"
                 cursor.execute('''
                     INSERT INTO ventas_detalle 
-                    (venta_id, producto_id, descripcion_historica, cantidad, precio_unitario_historico, subtotal)
-                    VALUES (?, 0, ?, ?, ?, ?)
+                    (venta_id, producto_id, descripcion_historica, cantidad, precio_unitario_historico, subtotal, costo_unitario_historico)
+                    VALUES (?, 0, ?, ?, ?, ?, 0)
                 ''', (venta_id, nombre_mostrar, item.cantidad, item.precio_unitario, subtotal_item))
                 continue
                 
             precio_standard = prod_info['precio_venta_final']
+            costo_fallback = prod_info['costo_sin_iva']
             ahorro_esta_linea = (precio_standard - item.precio_unitario) * item.cantidad
             if ahorro_esta_linea > 0: ahorro_por_promos += ahorro_esta_linea
             subtotal_item = item.precio_unitario * item.cantidad
             total_venta += subtotal_item
-            
-            cursor.execute('''
-                INSERT INTO ventas_detalle 
-                (venta_id, producto_id, descripcion_historica, cantidad, precio_unitario_historico, subtotal)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (venta_id, item.producto_id, prod_info['nombre'], item.cantidad, item.precio_unitario, subtotal_item))
             
             cursor.execute("SELECT producto_hijo_id, cantidad_hijo FROM productos_combos WHERE producto_padre_id = ?", (item.producto_id,))
             componentes = cursor.fetchall()
@@ -125,27 +180,31 @@ def registrar_venta(venta: NuevaVenta):
                 for comp in componentes: items_a_descontar.append({"id": comp['producto_hijo_id'], "cant": item.cantidad * comp['cantidad_hijo']})
             else:
                 items_a_descontar.append({"id": item.producto_id, "cant": item.cantidad})
-                
+
+            costo_total_linea = 0.0
             for desc in items_a_descontar:
-                producto_desc_id = desc["id"]
-                cantidad_por_descontar = desc["cant"]
-                
-                cursor.execute("SELECT id, cantidad_disponible FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible > 0 AND estado_lote = 'Activo' ORDER BY fecha_vencimiento ASC", (producto_desc_id,))
-                lotes = cursor.fetchall()
-                for lote in lotes:
-                    if cantidad_por_descontar <= 0: break
-                    descuento = min(lote['cantidad_disponible'], cantidad_por_descontar)
-                    cursor.execute("UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible - ? WHERE id = ?", (descuento, lote['id']))
-                    cursor.execute("INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo) VALUES (?, ?, ?, 'VENTA_AUTOMATICA', ?)", (producto_desc_id, lote['id'], descuento, f"Ticket #{venta_id} ({venta.cajero_nombre})"))
-                    cantidad_por_descontar -= descuento
-                    
-                if cantidad_por_descontar > 0:
-                    cursor.execute('''
-                        INSERT INTO lotes_stock (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento, cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote) 
-                        VALUES (?, 'VENTA_SIN_STOCK', ?, '2099-12-31', 0, ?, ?, 'Activo')
-                    ''', (producto_desc_id, fecha_actual[:10], -cantidad_por_descontar, precio_standard))
-                    nuevo_lote_negativo = cursor.lastrowid
-                    cursor.execute("INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo) VALUES (?, ?, ?, 'VENTA_FALTANTE_STOCK', ?)", (producto_desc_id, nuevo_lote_negativo, cantidad_por_descontar, f"Ticket #{venta_id} ({venta.cajero_nombre})"))
+                cursor.execute(
+                    "SELECT IFNULL(costo_sin_iva, 0) FROM productos WHERE id = ?",
+                    (desc["id"],),
+                )
+                fila_hijo = cursor.fetchone()
+                costo_hijo = fila_hijo[0] if fila_hijo else costo_fallback
+                costo_total_linea += descontar_stock_fifo(
+                    cursor,
+                    desc["id"],
+                    desc["cant"],
+                    venta_id,
+                    venta.cajero_nombre,
+                    fecha_actual,
+                    costo_hijo,
+                )
+
+            costo_unitario = round(costo_total_linea / item.cantidad, 4) if item.cantidad else 0.0
+            cursor.execute('''
+                INSERT INTO ventas_detalle 
+                (venta_id, producto_id, descripcion_historica, cantidad, precio_unitario_historico, subtotal, costo_unitario_historico)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (venta_id, item.producto_id, prod_info['nombre'], item.cantidad, item.precio_unitario, subtotal_item, costo_unitario))
         
         total_con_descuento = total_venta + venta.descuento_recargo_global
         

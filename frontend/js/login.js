@@ -1,15 +1,23 @@
 function obtenerBaseUrl() {
     const protocolo = window.location.protocol;
-    const dominio = window.location.hostname;
+    const host = window.location.hostname;
+    const puerto = window.location.port;
 
-    // Si estás en la compu programando/probando localmente:
-    if (dominio === 'localhost' || dominio === '127.0.0.1') {
-        return 'http://localhost:8000'; 
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return 'http://localhost:8000';
     }
-    
-    // Si la app corre en el mostrador (Electron usa 'file:') o desde la web remota:
-    // Apunta directo a tu Contabo para tener tiempo real absoluto
-    return 'http://185.249.225.63:8000';
+
+    // Electron (file://): el instalador 1.0.30 no pasa por Nginx. Sigue :8000 hasta un release nuevo.
+    if (protocolo === 'file:' || !host) {
+        return 'http://185.249.225.63:8000';
+    }
+
+    if (puerto === '8000') {
+        return `${protocolo}//${host}:8000`;
+    }
+
+    const extra = (puerto && puerto !== '80' && puerto !== '443') ? `:${puerto}` : '';
+    return `${protocolo}//${host}${extra}`;
 }
 
 async function intentarAcceso() {

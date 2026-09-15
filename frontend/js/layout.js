@@ -4,11 +4,27 @@
 const APP_VERSION = "v1.0.30"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
 
 function obtenerBaseUrl() {
-    const dominio = window.location.hostname;
-    if (dominio === 'localhost' || dominio === '127.0.0.1') {
+    const protocolo = window.location.protocol;
+    const host = window.location.hostname;
+    const puerto = window.location.port;
+
+    if (host === 'localhost' || host === '127.0.0.1') {
         return 'http://localhost:8000';
     }
-    return 'http://185.249.225.63:8000';
+
+    // Electron (file://): el instalador 1.0.30 no pasa por Nginx. Sigue :8000 hasta un release nuevo.
+    if (protocolo === 'file:' || !host) {
+        return 'http://185.249.225.63:8000';
+    }
+
+    // Hoy el admin se abre en :8000. No romper el git pull antes de levantar Nginx.
+    if (puerto === '8000') {
+        return `${protocolo}//${host}:8000`;
+    }
+
+    // Puerto 80/443 o vacío: mismo origen (Nginx → uvicorn).
+    const extra = (puerto && puerto !== '80' && puerto !== '443') ? `:${puerto}` : '';
+    return `${protocolo}//${host}${extra}`;
 }
 
 // ========================================================

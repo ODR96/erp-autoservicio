@@ -9,38 +9,44 @@ El sistema NO es exclusivo para un rubro. Debe ser modular. La misma base de có
 HITOS Y ARQUITECTURA ACTUAL:
 1. Puente Node/Python (Puerto 3000): WhatsApp asíncrono. FastAPI dispara-y-olvida POST http://127.0.0.1:3000/enviar con {destino, mensaje}. Node (pm2 whatsapp-bot, bot-whatsapp/bot.js) escucha solo 127.0.0.1. NUNCA librerías WhatsApp en Python. n8n quedó viejo. El 3000 NO es de Docker.
 2. Autorización Remota: tokens seguros en SQLite con polling de estado.
-3. apiFetch Blindada: "Failed to fetch" detona modo offline silencioso.
+3. apiFetch Blindada: "Failed to fetch" detona modo offline silencioso. POS offline = localStorage (catálogo, ventas_offline); la verdad está en Contabo, no en la PC de caja.
 4. Fechas de negocio: zona Argentina (UTC-3), no date('now') UTC ni toISOString() a ciegas.
 
 VERSIÓN:
-- Release Electron / badge: v1.0.30
-- Cache JS/CSS reciente (POS pago proveedor / Proveedores): ?v=1.0.40 — no es release de tienda.
+- Release Electron / badge: v1.0.30 (file:// pega a http://185.249.225.63:8000)
+- Cache JS/CSS reciente: layout/login ?v=1.0.41 — no es release de tienda.
+- Admin hoy: http://185.249.225.63:8000
+
+SAVE STATE (2026-09-15):
+- GitHub main al armar este corte: d756df4 (pago proveedor ≠ gasto). Este commit suma CMV + frente HTTP JS + Nginx conf.
+- Se sigue vendiendo sin stock (VENTA_SIN_STOCK). El CMV no bloquea el POS.
+- facturar_afip en /ventas/cobrar es STUB: CAE SIMULADO. No es factura fiscal.
+- Encargado: sin dashboard / RRHH / gastos / monitor de cajas. POS, productos, clientes, proveedores sí.
 
 HITOS RECIENTES (ya no son tareas):
 - Dashboard: piso operativo del mes (ganancia bruta vs gastos reales + sueldos).
 - Sangría de caja (retiro físico, sin impacto en rentabilidad).
-- Faltantes: estados PENDIENTE / PEDIDO / RECIBIDO, selección, Excel, vista previa PDF, cantidad editable.
-- WhatsApp Contabo: POST /enviar validado. Dueño = teléfono de Configuración (Cierre Z detallado + cada retiro de caja). Grupo de compras = whatsapp_grupo_compras (digest de faltantes del turno al cerrar, agrupados por nombre). Docker corralón parado, restart=no.
-- Ola 1 UX pulgar: chrome admin + catálogo Productos (tap editar, menú ⋮, modal fullscreen) + Dashboard (viewport, scroll, KPIs). Probar en browser vs VPS; Electron 1.0.30 no trae este CSS.
-- Merma: baja lote + movimientos_stock + registro_mermas.costo_perdido (costo del lote; fallback costo_sin_iva). Resta en ganancia neta como línea 8, no en CMV ni gastos/cheques. Ajuste de facturación: costo_perdido = 0. Usuario del JWT.
-- Faltantes: alta desde Proveedores, WhatsApp al grupo (mismo recorte que PDF, fire-and-forget), hoja de cotización impresa. Neteo VENTA_SIN_STOCK al cargar factura (misma función que al abrir el producto). Pestañas Pendientes / Pedidos / Recibidos (sin En curso). La selección no cruza de pestaña. Recibidos es historial: sin tilde masivo; volver a pendiente o tacho.
-- Ola 2 UX pulgar: Proveedores directorio + Faltantes (toolbar apilada, 44px, ID/CUIT/Obs/Estado ocultos en xs). Gastos sigue en diferido.
-- Corte 1 tesorería: POS retiro → Pago a proveedor llama /proveedores/pagar (caja + saldo, sin gastos_operativos). Categorías con "proveedor" y no-OPERATIVO fuera del selector de gasto. Contado/factura preguntan origen de la plata (caja vs bolsillo).
+- WhatsApp Contabo: Cierre Z detallado + cada retiro al dueño; faltantes del turno al grupo whatsapp_grupo_compras. Docker corralón parado, restart=no.
+- Ola 1 UX pulgar: chrome + Productos + Dashboard. Probar en browser vs VPS; Electron 1.0.30 no trae este CSS.
+- Merma: registro_mermas.costo_perdido (lote; fallback costo_sin_iva). Resta en ganancia neta línea 8. Ajuste de facturación: costo_perdido = 0.
+- Faltantes: Pendientes / Pedidos / Recibidos. Alta, WhatsApp, cotización, neteo al cargar factura. Selección no cruza pestaña. Recibidos = historial.
+- Ola 2 pulgar: Proveedores + Faltantes. Gastos no.
+- Corte 1 tesorería: POS F10 → Pago a proveedor = POST /proveedores/pagar (caja + saldo, SIN gastos_operativos). Categorías con "proveedor" fuera del gasto. Contado pregunta origen de la plata.
+- CMV: ventas_detalle.costo_unitario_historico al cobrar (FIFO lote / fallback costo_sin_iva). ganancia_neta usa eso; NULL = maestro. VENTA_SIN_STOCK ya no guarda precio de venta como costo. Remito depósito todavía no.
+- Frente HTTP (JS listo): obtenerBaseUrl() mismo origen en 80/443; en :8000 no cambia. Electron file:// sigue :8000. Conf: deploy/nginx-erpetto.conf. git pull NO instala Nginx ni cierra UFW.
 
-TAREAS ACTIVAS:
-(ninguna bloqueante; el siguiente corte se elige de DIFERIDO)
+COLA (prioridad):
+1. En el VPS: git pull, hard refresh, probar :8000 (una venta + F10 pago proveedor).
+2. Nginx 80 en PARALELO al :8000 (copiar deploy/nginx-erpetto.conf). NO uvicorn 127.0.0.1. NO cerrar UFW 8000.
+3. AFIP REAL (prioridad de negocio): WSAA + homologación + CAE de verdad en el ticket + qué hacer si AFIP cae. El toggle del POS ya existe; el backend no. No es un corte de un día.
+4. Reportes (menú href=#). El dato (merma, ganancia) ya está.
+5. Electron 1.0.31 que abra http://IP/ (o HTTPS) → recién ahí uvicorn --host 127.0.0.1 y UFW sin 8000.
+6. CMV en remito depósito; Gastos pulgar; conteo cíclico (post-HTTPS); tesorería de cheques (NO mezclar cheques/préstamos en gastos_operativos).
 
-PROVEEDORES (hecho en este corte):
-- Deuda rápida vs ingreso de mercadería.
-- Pago efectivo de caja bloqueado si no hay turno abierto.
-- Encargado: sin dashboard / RRHH / gastos / monitor de cajas (menú + URL). GET /dashboard/datos solo ADMIN. POS, productos, clientes y proveedores sí. /caja/abrir, /cerrar, /movimiento siguen.
-
-DIFERIDO:
-- Frente HTTP: Nginx reverse proxy 80→127.0.0.1:8000; obtenerBaseUrl() sin :8000 (mismo origen); uvicorn --host 127.0.0.1; UFW sin 8000. Hoy layout.js pega a IP:8000 — el puerto tiene que seguir abierto hasta ese cambio. UFW 3000 ya cerrado.
-- Versionar el bot: producción es bot-whatsapp/bot.js (PM2), no el index.js del repo. Un git pull no actualiza Node.
-- Responsive / UX pulgar de Gastos (resto Ola 2). Ola 1 (Productos + Dashboard) y Proveedores/Faltantes ya están.
-- Interfaz móvil aislada de conteo cíclico en góndola.
-- Clover Flex, Escudo Financiero, tesorería de cheques (no mezclar cheques/préstamos en gastos_operativos).
+DIFERIDO TÉCNICO:
+- Versionar el bot: producción es PM2 bot-whatsapp/bot.js; un git pull no actualiza Node.
+- UFW 3000 cerrado. UFW 8000 abierto hasta Electron nuevo.
+- HTTPS / cámara / certbot: después de Nginx estable.
 
 REGLA MAESTRA (HARD RULE):
 Antes de generar o modificar una sola línea de código, SIEMPRE pide al usuario que referencie (usando @) los archivos exactos que necesitas leer. No supongas nombres de variables, no escribas código a ciegas, no hagas parches rápidos. Calidad corporativa siempre.

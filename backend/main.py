@@ -67,7 +67,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="ERP Autoservicio 20 de Junio", lifespan=lifespan)
 
 # Creamos el limitador que identifica a los usuarios por su dirección IP
-limiter = Limiter(key_func=get_remote_address)
+# Detrás de Nginx todos llegarían como 127.0.0.1. Solo confiamos X-Forwarded-For
+# si el peer es local (el proxy). Con :8000 público un header spoofeado no cuenta.
+def _ip_cliente(request):
+    peer = get_remote_address(request)
+    if peer in ("127.0.0.1", "::1"):
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return peer
+
+limiter = Limiter(key_func=_ip_cliente)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
