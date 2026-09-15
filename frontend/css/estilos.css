@@ -190,4 +190,41 @@
         flex: 1 1 auto;
         min-height: 44px;
     }
+
+    /* Ola 2 — Proveedores / Faltantes */
+    .tab-content { padding: 12px !important; }
+    .toolbar-directorio {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+    .toolbar-directorio .input-group { width: 100% !important; }
+    .toolbar-directorio .btn { width: 100%; }
+
+    #tab-prov-pedidos [aria-label="Filtro de faltantes"] {
+        display: flex;
+        flex-wrap: nowrap !important;
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    #tab-prov-pedidos [aria-label="Filtro de faltantes"] .btn {
+        flex: 1 1 auto;
+        min-height: 44px;
+        white-space: nowrap;
+    }
+    #tab-prov-pedidos .acciones-faltantes .btn {
+        flex: 1 1 calc(50% - 4px);
+        min-height: 44px;
+    }
+    .wrap-tabla-pedidos { max-height: min(70vh, 560px); }
+    .chk-faltante, .chk-alerta, #chkTodosFaltantes, #chkTodasAlertas {
+        width: 1.25rem;
+        height: 1.25rem;
+    }
+    .input-cant-faltante { min-height: 44px; width: 4.5rem; }
+    #tab-prov-pedidos .bg-light.border.rounded .btn { min-height: 44px; }
+    #tab-prov-directorio td .btn {
+        min-width: 40px;
+        min-height: 40px;
+    }
 }

@@ -97,9 +97,9 @@ function dibujarTablaDirectorio(lista) {
 
         tbody.innerHTML += `
             <tr class="${claseFila}">
-                <td class="text-muted fw-bold align-middle">#${p.id}</td>
+                <td class="text-muted fw-bold align-middle col-hide-xs">#${p.id}</td>
                 <td class="fw-bold text-start align-middle">${p.nombre_comercial} ${iconoNota} ${!esActivo ? '<span class="badge bg-secondary ms-2">INACTIVO</span>' : ''}</td>
-                <td class="align-middle">${p.cuit || '-'}</td>
+                <td class="align-middle col-hide-xs">${p.cuit || '-'}</td>
                 <td class="align-middle"><i class="bi bi-whatsapp text-success"></i> ${p.telefono_vendedor || '-'}</td>
                 <td class="fw-bold align-middle ${saldo > 0 ? 'text-danger' : 'text-success'}">$ ${saldo.toFixed(2)}</td>
                 <td class="align-middle">${botones}</td>
@@ -867,7 +867,7 @@ function exportarComprasAExcel(proveedorNombre) {
 // ==========================================
 let faltantesCache = [];
 let alertasStockCache = [];
-let filtroFaltantes = 'ACTIVOS';
+let filtroFaltantes = 'PENDIENTE';
 let seleccionFaltantes = new Set();
 let seleccionAlertas = new Set();
 
@@ -901,16 +901,47 @@ function etiquetaEstadoFaltante(estado) {
 function faltantesVisibles() {
     return faltantesCache.filter(f => {
         const estado = f.estado || 'PENDIENTE';
-        if (filtroFaltantes === 'ACTIVOS') return estado === 'PENDIENTE' || estado === 'PEDIDO';
         return estado === filtroFaltantes;
     });
 }
 
+function idsFaltantesVisibles() {
+    return faltantesVisibles().map(f => Number(f.id));
+}
+
+function idsFaltantesParaAccion() {
+    const visibles = new Set(idsFaltantesVisibles());
+    const seleccionVisible = Array.from(seleccionFaltantes).filter(id => visibles.has(id));
+    if (seleccionVisible.length > 0) return seleccionVisible;
+    return Array.from(visibles);
+}
+
+function esFiltroRecibidos() {
+    return filtroFaltantes === 'RECIBIDO';
+}
+
 function aplicarFiltroFaltantes(vista) {
     filtroFaltantes = vista;
-    document.querySelectorAll('.filtros-faltantes .btn').forEach(btn => btn.classList.remove('active'));
+    seleccionFaltantes.clear();
+    document.querySelectorAll('[aria-label="Filtro de faltantes"] .btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById('filtroFaltantes' + vista)?.classList.add('active');
     dibujarFaltantesCaja();
+    actualizarAccionesFaltantes();
+}
+
+function actualizarAccionesFaltantes() {
+    const recibidos = esFiltroRecibidos();
+    const mostrar = (id, si) => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('d-none', !si);
+    };
+    mostrar('btnFaltantesMarcarPedido', !recibidos);
+    mostrar('btnFaltantesMarcarRecibido', !recibidos);
+    mostrar('btnFaltantesWhatsapp', !recibidos);
+    mostrar('btnFaltantesCotizacion', !recibidos);
+    mostrar('btnFaltantesVolverPendiente', !recibidos);
+    mostrar('btnFaltantesExcel', !recibidos);
+    mostrar('btnFaltantesPdf', !recibidos);
 }
 
 async function cargarTableroPedidos() {
@@ -931,6 +962,7 @@ async function cargarTableroPedidos() {
         dibujarFaltantesCaja();
         dibujarAlertasStock();
         actualizarContadoresFiltro();
+        actualizarAccionesFaltantes();
     } catch (e) {
         console.error("Error cargando pedidos:", e);
         Swal.fire('Error', 'No se pudo cargar el tablero de pedidos.', 'error');
@@ -943,14 +975,22 @@ function dibujarFaltantesCaja() {
     const lista = faltantesVisibles();
     const badge = document.getElementById('badgeCountFaltantes');
     if (badge) badge.textContent = String(lista.length);
+    const recibidos = esFiltroRecibidos();
+    const chkTodos = document.getElementById('chkTodosFaltantes');
+    if (chkTodos) {
+        chkTodos.closest('th')?.classList.toggle('d-none', recibidos);
+        chkTodos.disabled = recibidos;
+        if (recibidos) chkTodos.checked = false;
+    }
 
     if (lista.length === 0) {
+        const vacio = recibidos
+            ? 'No hay recibidos. Cuando llega la mercadería, marcala desde Pedidos.'
+            : 'No hay ítems en este filtro.';
         tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">
             <i class="bi bi-check-circle fs-4 d-block mb-2 text-success"></i>
-            No hay ítems en este filtro.
+            ${vacio}
         </td></tr>`;
-        const chkTodos = document.getElementById('chkTodosFaltantes');
-        if (chkTodos) chkTodos.checked = false;
         actualizarResumenSeleccion();
         return;
     }
@@ -961,37 +1001,58 @@ function dibujarFaltantesCaja() {
         const claseFila = estado === 'PEDIDO' ? 'fila-faltante-pedido' : (estado === 'RECIBIDO' ? 'fila-faltante-recibido' : '');
         const quien = f.usuario_anoto ? `<div class="small text-muted">Por ${escapeHtmlPedidos(f.usuario_anoto)}</div>` : '';
         const obs = f.notas ? escapeHtmlPedidos(f.notas) : '<span class="text-muted">—</span>';
-        return `
-            <tr class="${claseFila}" onclick="toggleFilaFaltante(event, ${id})">
+        const cuando = f.fecha_recibido || f.fecha_pedido || f.fecha_hora || '';
+        const colCheck = recibidos ? '' : `
                 <td class="text-center">
                     <input class="form-check-input chk-faltante" type="checkbox" value="${id}"
                         ${seleccionFaltantes.has(id) ? 'checked' : ''}
                         onclick="event.stopPropagation()"
                         onchange="toggleSeleccionFaltante(${id}, this.checked)">
-                </td>
-                <td class="text-start fw-bold">${escapeHtmlPedidos(f.descripcion_producto)}${quien}</td>
-                <td class="text-center" onclick="event.stopPropagation()">
+                </td>`;
+        const colEstado = recibidos
+            ? `<td class="small text-muted col-hide-xs">${escapeHtmlPedidos(cuando)}<div>${etiquetaEstadoFaltante(estado)}</div></td>`
+            : `<td class="col-hide-xs">${etiquetaEstadoFaltante(estado)}</td>`;
+        const clickFila = recibidos ? '' : `onclick="toggleFilaFaltante(event, ${id})"`;
+        const cantCell = recibidos
+            ? `<td class="text-center fw-bold">${formatearCantidadPedido(f.cantidad_pedida)}</td>`
+            : `<td class="text-center" onclick="event.stopPropagation()">
                     <input type="number" class="form-control form-control-sm input-cant-faltante"
                         min="0.1" step="0.1" value="${formatearCantidadPedido(f.cantidad_pedida)}"
                         title="Editar cantidad"
                         onkeydown="if(event.key === 'Enter') { event.preventDefault(); this.blur(); }"
                         onchange="guardarCantidadFaltante(${id}, this)"
                         onblur="guardarCantidadFaltante(${id}, this)">
-                </td>
-                <td class="small">${obs}</td>
-                <td>${etiquetaEstadoFaltante(estado)}</td>
+                </td>`;
+        const colAccion = recibidos ? `
+                <td class="text-center text-nowrap">
+                    <button type="button" class="btn btn-sm btn-outline-secondary py-0" title="Volver a pendiente"
+                        onclick="event.stopPropagation(); devolverFaltanteAPendiente(${id})">
+                        <i class="bi bi-arrow-counterclockwise"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger py-0" title="Borrar del historial"
+                        onclick="event.stopPropagation(); quitarFaltante(${id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>` : `
                 <td class="text-center">
                     <button type="button" class="btn btn-sm btn-outline-danger py-0" title="Quitar de la lista"
                         onclick="event.stopPropagation(); quitarFaltante(${id})">
                         <i class="bi bi-trash"></i>
                     </button>
-                </td>
+                </td>`;
+        return `
+            <tr class="${claseFila}" ${clickFila}>
+                ${colCheck}
+                <td class="text-start fw-bold">${escapeHtmlPedidos(f.descripcion_producto)}${quien}</td>
+                ${cantCell}
+                <td class="small col-hide-xs">${obs}</td>
+                ${colEstado}
+                ${colAccion}
             </tr>`;
     }).join('');
 
-    const visiblesIds = lista.map(f => Number(f.id));
-    const chkTodos = document.getElementById('chkTodosFaltantes');
-    if (chkTodos) {
+    if (!recibidos && chkTodos) {
+        const visiblesIds = lista.map(f => Number(f.id));
         chkTodos.checked = visiblesIds.length > 0 && visiblesIds.every(id => seleccionFaltantes.has(id));
     }
     actualizarResumenSeleccion();
@@ -1028,7 +1089,7 @@ function dibujarAlertasStock() {
                 <td class="text-start fw-bold">${escapeHtmlPedidos(p.nombre)}</td>
                 <td class="text-danger fw-bold">${p.stock_actual}</td>
                 <td class="text-muted">${p.stock_minimo_alerta}</td>
-                <td><span class="badge bg-secondary">${escapeHtmlPedidos(nombreProv)}</span></td>
+                <td class="col-hide-xs"><span class="badge bg-secondary">${escapeHtmlPedidos(nombreProv)}</span></td>
             </tr>`;
     }).join('');
 
@@ -1075,6 +1136,7 @@ function toggleSeleccionAlerta(id, checked) {
 }
 
 function toggleTodosFaltantes(checked) {
+    if (esFiltroRecibidos()) return;
     faltantesVisibles().forEach(f => {
         const id = Number(f.id);
         if (checked) seleccionFaltantes.add(id);
@@ -1098,7 +1160,9 @@ function actualizarResumenSeleccion() {
     const nFalt = seleccionFaltantes.size;
     const nAlert = seleccionAlertas.size;
     if (nFalt === 0 && nAlert === 0) {
-        el.textContent = 'Ningún ítem seleccionado. Excel, WhatsApp y las hojas usan la selección; si no hay, usan lo visible.';
+        el.textContent = esFiltroRecibidos()
+            ? 'Recibidos es historial: ya llegó. El tacho borra el renglón. Pendiente los saca de acá si el camión no era.'
+            : 'Ningún ítem tildado en esta pestaña. Excel, WhatsApp y las hojas usan lo tildado; si no hay tilde, lo visible.';
         return;
     }
     const partes = [];
@@ -1144,21 +1208,18 @@ function actualizarContadoresFiltro() {
     const nPend = faltantesCache.filter(f => (f.estado || 'PENDIENTE') === 'PENDIENTE').length;
     const nPed = faltantesCache.filter(f => f.estado === 'PEDIDO').length;
     const nRec = faltantesCache.filter(f => f.estado === 'RECIBIDO').length;
-    const nActivos = nPend + nPed;
     const setLabel = (id, texto, n) => {
         const el = document.getElementById(id);
         if (el) el.innerHTML = `${texto} <span class="badge rounded-pill bg-white text-secondary border ms-1">${n}</span>`;
     };
-    setLabel('filtroFaltantesACTIVOS', 'En curso', nActivos);
     setLabel('filtroFaltantesPENDIENTE', 'Pendientes', nPend);
     setLabel('filtroFaltantesPEDIDO', 'Pedidos', nPed);
     setLabel('filtroFaltantesRECIBIDO', 'Recibidos', nRec);
 }
 
 async function marcarSeleccionFaltantes(estado) {
-    const ids = seleccionFaltantes.size > 0
-        ? Array.from(seleccionFaltantes)
-        : faltantesVisibles().map(f => Number(f.id));
+    const ids = idsFaltantesParaAccion();
+    const seleccionVisible = idsFaltantesVisibles().filter(id => seleccionFaltantes.has(id)).length;
 
     if (ids.length === 0) {
         return Swal.fire('Atención', 'No hay productos para actualizar en este filtro.', 'info');
@@ -1171,9 +1232,9 @@ async function marcarSeleccionFaltantes(estado) {
     };
     const confirm = await Swal.fire({
         title: titulos[estado] || 'Actualizar estado',
-        text: seleccionFaltantes.size > 0
-            ? `Se actualizan ${ids.length} ítem(s) seleccionados.`
-            : `No hay selección: se actualizan los ${ids.length} ítem(s) visibles.`,
+        text: seleccionVisible > 0
+            ? `Se actualizan ${ids.length} ítem(s) tildados de esta pestaña.`
+            : `No hay tilde: se actualizan los ${ids.length} ítem(s) visibles.`,
         icon: 'question',
         showCancelButton: true,
         confirmButtonText: 'Confirmar',
@@ -1196,6 +1257,25 @@ async function marcarSeleccionFaltantes(estado) {
         seleccionFaltantes.clear();
         await cargarTableroPedidos();
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Lista actualizada', showConfirmButton: false, timer: 1400 });
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
+async function devolverFaltanteAPendiente(id) {
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/reportes/faltantes/estado`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: [Number(id)], estado: 'PENDIENTE' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo actualizar.'));
+        }
+        await cargarTableroPedidos();
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Volvió a pendientes', showConfirmButton: false, timer: 1400 });
     } catch (e) {
         Swal.fire('Error', e.message, 'error');
     }
@@ -1254,11 +1334,13 @@ async function pasarAlertasALista() {
 }
 
 function recolectarItemsPedido() {
-    const haySeleccion = seleccionFaltantes.size > 0 || seleccionAlertas.size > 0;
-    const faltantes = (haySeleccion
-        ? faltantesCache.filter(f => seleccionFaltantes.has(Number(f.id)))
-        : faltantesVisibles()
-    ).map(f => ({
+    const visiblesFalt = faltantesVisibles();
+    const visSet = new Set(visiblesFalt.map(f => Number(f.id)));
+    const selFalt = Array.from(seleccionFaltantes).filter(id => visSet.has(id));
+    const faltantesFuente = selFalt.length > 0
+        ? visiblesFalt.filter(f => selFalt.includes(Number(f.id)))
+        : visiblesFalt;
+    const faltantes = faltantesFuente.map(f => ({
         producto: f.descripcion_producto || '',
         cantidad: formatearCantidadPedido(f.cantidad_pedida),
         observacion: f.notas || '',
@@ -1268,7 +1350,8 @@ function recolectarItemsPedido() {
         proveedor: ''
     }));
 
-    const alertas = (haySeleccion
+    const hayAlertas = seleccionAlertas.size > 0;
+    const alertas = (hayAlertas
         ? alertasStockCache.filter(p => seleccionAlertas.has(Number(p.producto_id)))
         : []
     ).map(p => {
