@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import sqlite3
 from backend.database import obtener_conexion
@@ -25,18 +25,26 @@ class ItemFactura(BaseModel):
     fecha_vencimiento: str = "2099-12-31"
     numero_lote_proveedor: str = "S/L"
 
+class PagoInmediato(BaseModel):
+    metodo_pago: str
+    monto: float
+    observaciones: str = ""
+    turno_id: Optional[int] = None
+
 class NuevaFacturaCompra(BaseModel):
     proveedor_id: int
     numero_factura: str
     condicion_pago: str
     cargos_extra: float = 0.0
     items: List[ItemFactura]
+    pago_inmediato: Optional[PagoInmediato] = None
     
 class PagoProveedor(BaseModel):
     proveedor_id: int
     monto_pagado: float
     metodo_pago: str
     observaciones: str = ""
+    turno_id: Optional[int] = None
 
 class DeudaRapida(BaseModel):
     proveedor_id: int
@@ -44,6 +52,134 @@ class DeudaRapida(BaseModel):
     condicion_pago: str
     total_factura: float
     observaciones: str = ""
+    pago_inmediato: Optional[PagoInmediato] = None
+
+
+def _usuario_desde_payload(payload: dict) -> int:
+    try:
+        return int((payload or {}).get("sub") or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _es_pago_efectivo_caja(metodo: str) -> bool:
+    m = (metodo or "").strip().upper().replace("_", " ")
+    return m == "EFECTIVO CAJA"
+
+
+def _asegurar_ctacte(cursor, proveedor_id: int):
+    cursor.execute("SELECT id FROM proveedores_ctacte WHERE proveedor_id = ?", (proveedor_id,))
+    if not cursor.fetchone():
+        cursor.execute(
+            "INSERT INTO proveedores_ctacte (proveedor_id, saldo_deudor) VALUES (?, 0)",
+            (proveedor_id,)
+        )
+
+
+def _sumar_deuda_proveedor(cursor, proveedor_id: int, monto: float):
+    _asegurar_ctacte(cursor, proveedor_id)
+    cursor.execute(
+        "UPDATE proveedores_ctacte SET saldo_deudor = saldo_deudor + ? WHERE proveedor_id = ?",
+        (monto, proveedor_id)
+    )
+
+
+def _asegurar_columna_usuario_pagos(cursor):
+    cursor.execute('''CREATE TABLE IF NOT EXISTS pagos_proveedores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        proveedor_id INTEGER,
+        fecha_pago TEXT,
+        monto_total_pagado REAL,
+        metodo_pago TEXT,
+        observaciones TEXT
+    )''')
+    cursor.execute("PRAGMA table_info(pagos_proveedores)")
+    cols = [c[1] for c in cursor.fetchall()]
+    if "usuario_id" not in cols:
+        cursor.execute("ALTER TABLE pagos_proveedores ADD COLUMN usuario_id INTEGER DEFAULT 1")
+
+
+def _registrar_pago_en_cursor(cursor, proveedor_id: int, monto: float, metodo: str,
+                              observaciones: str, usuario_id: int, turno_id=None):
+    """Historial + baja de saldo. Si es efectivo de registradora, RETIRO del turno. No toca gastos."""
+    if monto <= 0:
+        raise HTTPException(status_code=400, detail="El pago tiene que ser mayor a cero.")
+
+    _asegurar_columna_usuario_pagos(cursor)
+    _asegurar_ctacte(cursor, proveedor_id)
+    fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+
+    cursor.execute('''
+        INSERT INTO pagos_proveedores (proveedor_id, fecha_pago, monto_total_pagado, metodo_pago, observaciones, usuario_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (proveedor_id, fecha_actual, monto, metodo, observaciones or "", usuario_id))
+
+    cursor.execute(
+        "UPDATE proveedores_ctacte SET saldo_deudor = saldo_deudor - ? WHERE proveedor_id = ?",
+        (monto, proveedor_id)
+    )
+
+    retiro_caja = None
+    if _es_pago_efectivo_caja(metodo):
+        turno = None
+        if turno_id:
+            cursor.execute(
+                "SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'",
+                (turno_id,)
+            )
+            turno = cursor.fetchone()
+        if not turno:
+            cursor.execute(
+                "SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO' ORDER BY id DESC LIMIT 1"
+            )
+            turno = cursor.fetchone()
+        if not turno:
+            raise HTTPException(
+                status_code=400,
+                detail="No hay caja abierta. Abrí un turno para pagar en efectivo de la registradora."
+            )
+        tid = turno[0] if not isinstance(turno, sqlite3.Row) else turno["id"]
+        cursor.execute('''
+            INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+            VALUES (?, ?, 'RETIRO', ?, ?, ?)
+        ''', (fecha_actual, usuario_id, monto, f"Pago a proveedor #{proveedor_id}", tid))
+        retiro_caja = tid
+
+    return retiro_caja
+
+
+def _aplicar_pago_inmediato(cursor, proveedor_id: int, total_factura: float, condicion: str,
+                            pago: PagoInmediato, usuario_id: int):
+    if pago.monto <= 0:
+        raise HTTPException(status_code=400, detail="El pago inmediato tiene que ser mayor a cero.")
+    if pago.monto > total_factura + 0.009:
+        raise HTTPException(status_code=400, detail="El pago no puede ser mayor al total de la factura.")
+
+    # Contado no sumaba saldo; si hay pago hay que abrir deuda y cancelarla (si es total, queda en 0).
+    if condicion != "Cuenta Corriente":
+        _sumar_deuda_proveedor(cursor, proveedor_id, total_factura)
+
+    return _registrar_pago_en_cursor(
+        cursor,
+        proveedor_id,
+        pago.monto,
+        pago.metodo_pago,
+        pago.observaciones,
+        usuario_id,
+        pago.turno_id,
+    )
+
+
+def _avisar_retiro_proveedor(background_tasks: BackgroundTasks, monto: float, proveedor_id: int,
+                             usuario_id: int, turno_id):
+    from backend.whatsapp_puente import avisar_retiro, nombre_usuario
+    background_tasks.add_task(
+        avisar_retiro,
+        monto,
+        f"Pago a proveedor #{proveedor_id}",
+        nombre_usuario(usuario_id),
+        turno_id,
+    )
 
 # --- 1. GESTIÓN DE PROVEEDORES (ABM COMPLETO) ---
 @router.post("/alta", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
@@ -142,60 +278,32 @@ def reactivar_proveedor(prov_id: int):
 # --- EL CORAZÓN DE LOS PAGOS (PARCHE AQUÍ) ---
 # --- REGISTRAR PAGO Y DESCONTAR DEUDA ---
 # --- REGISTRAR PAGO Y DESCONTAR DEUDA ---
-@router.post("/pagar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
-def registrar_pago_proveedor(pago: PagoProveedor, background_tasks: BackgroundTasks):
+@router.post("/pagar")
+def registrar_pago_proveedor(pago: PagoProveedor, background_tasks: BackgroundTasks,
+                             payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))):
+    usuario_id = _usuario_desde_payload(payload)
+    rol = (payload or {}).get("rol") or ""
+    if rol == "CAJERO" and not _es_pago_efectivo_caja(pago.metodo_pago):
+        raise HTTPException(
+            status_code=403,
+            detail="El cajero solo puede pagar con efectivo de la registradora. Bolsillo o transferencia: Encargado o Admin."
+        )
+
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        # 0. Creamos la tabla si no existe
-        cursor.execute('''CREATE TABLE IF NOT EXISTS pagos_proveedores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            proveedor_id INTEGER,
-            fecha_pago TEXT,
-            monto_total_pagado REAL,
-            metodo_pago TEXT,
-            observaciones TEXT
-        )''')
-
-        # --- CORRECCIÓN: HORA ARGENTINA ---
-        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
-
-        # 1. Registramos el pago
-        cursor.execute('''
-            INSERT INTO pagos_proveedores (proveedor_id, fecha_pago, monto_total_pagado, metodo_pago, observaciones)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (pago.proveedor_id, fecha_actual, pago.monto_pagado, pago.metodo_pago, pago.observaciones))
-        
-        # 2. DESCONTAMOS LA DEUDA (EL PARCHE: Usamos la tabla proveedores_ctacte y la columna saldo_deudor)
-        cursor.execute("UPDATE proveedores_ctacte SET saldo_deudor = saldo_deudor - ? WHERE proveedor_id = ?", 
-                       (pago.monto_pagado, pago.proveedor_id))
-
-        # 3. Efectivo de caja: o mueve el cajón, o no se graba el pago
-        retiro_caja = None
-        if "CAJA" in pago.metodo_pago.upper():
-            cursor.execute("SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO' ORDER BY id DESC LIMIT 1")
-            turno = cursor.fetchone()
-            if not turno:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No hay caja abierta. Abrí un turno para pagar en efectivo de la registradora."
-                )
-            cursor.execute('''
-                INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
-                VALUES (?, ?, 'RETIRO', ?, ?, ?)
-            ''', (fecha_actual, 1, pago.monto_pagado, f"Pago a proveedor #{pago.proveedor_id}", turno[0]))
-            retiro_caja = turno[0]
-
+        retiro_caja = _registrar_pago_en_cursor(
+            cursor,
+            pago.proveedor_id,
+            pago.monto_pagado,
+            pago.metodo_pago,
+            pago.observaciones,
+            usuario_id,
+            pago.turno_id,
+        )
         conexion.commit()
         if retiro_caja is not None:
-            from backend.whatsapp_puente import avisar_retiro, nombre_usuario
-            background_tasks.add_task(
-                avisar_retiro,
-                pago.monto_pagado,
-                f"Pago a proveedor #{pago.proveedor_id}",
-                nombre_usuario(1),
-                retiro_caja,
-            )
+            _avisar_retiro_proveedor(background_tasks, pago.monto_pagado, pago.proveedor_id, usuario_id, retiro_caja)
         return {"mensaje": "Pago realizado con éxito"}
     except HTTPException:
         if conexion:
@@ -218,13 +326,15 @@ def registrar_pago_proveedor(pago: PagoProveedor, background_tasks: BackgroundTa
         conexion.close()
 
 # --- DEUDA RÁPIDA (solo saldo + historial, sin stock) ---
-@router.post("/deuda_rapida", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
-def registrar_deuda_rapida(deuda: DeudaRapida):
+@router.post("/deuda_rapida")
+def registrar_deuda_rapida(deuda: DeudaRapida, background_tasks: BackgroundTasks,
+                           payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
     if deuda.total_factura <= 0:
         raise HTTPException(status_code=400, detail="El total tiene que ser mayor a cero.")
     if not deuda.numero_factura.strip():
         raise HTTPException(status_code=400, detail="Falta el número de factura o remito.")
 
+    usuario_id = _usuario_desde_payload(payload)
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -249,19 +359,20 @@ def registrar_deuda_rapida(deuda: DeudaRapida):
         ''', (compra_id, nota, deuda.total_factura))
 
         if deuda.condicion_pago == "Cuenta Corriente":
-            cursor.execute("SELECT id FROM proveedores_ctacte WHERE proveedor_id = ?", (deuda.proveedor_id,))
-            if cursor.fetchone():
-                cursor.execute(
-                    "UPDATE proveedores_ctacte SET saldo_deudor = saldo_deudor + ? WHERE proveedor_id = ?",
-                    (deuda.total_factura, deuda.proveedor_id)
-                )
-            else:
-                cursor.execute(
-                    "INSERT INTO proveedores_ctacte (proveedor_id, saldo_deudor) VALUES (?, ?)",
-                    (deuda.proveedor_id, deuda.total_factura)
-                )
+            _sumar_deuda_proveedor(cursor, deuda.proveedor_id, deuda.total_factura)
+
+        retiro_caja = None
+        if deuda.pago_inmediato:
+            retiro_caja = _aplicar_pago_inmediato(
+                cursor, deuda.proveedor_id, deuda.total_factura, deuda.condicion_pago,
+                deuda.pago_inmediato, usuario_id
+            )
 
         conexion.commit()
+        if retiro_caja is not None:
+            _avisar_retiro_proveedor(
+                background_tasks, deuda.pago_inmediato.monto, deuda.proveedor_id, usuario_id, retiro_caja
+            )
         return {
             "mensaje": "Deuda registrada. No se tocó el stock.",
             "id": compra_id,
@@ -281,8 +392,9 @@ def registrar_deuda_rapida(deuda: DeudaRapida):
         conexion.close()
 
 # --- 2. INGRESO DE MERCADERÍA (CON ACTUALIZACIÓN DE SALDO) ---
-@router.post("/cargar_factura", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
-def ingresar_mercaderia(factura: NuevaFacturaCompra):
+@router.post("/cargar_factura")
+def ingresar_mercaderia(factura: NuevaFacturaCompra, background_tasks: BackgroundTasks,
+                        payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -334,18 +446,31 @@ def ingresar_mercaderia(factura: NuevaFacturaCompra):
         total_final_real = total_acumulado + factura.cargos_extra
         cursor.execute("UPDATE compras_cabecera SET total_factura = ? WHERE id = ?", (total_final_real, compra_id))
         
-        # 4. SUMAMOS A LA DEUDA (Si es Cuenta Corriente) - PARCHE BLINDADO
+        # 4. SUMAMOS A LA DEUDA (Si es Cuenta Corriente)
         if factura.condicion_pago == "Cuenta Corriente":
-            cursor.execute("SELECT id FROM proveedores_ctacte WHERE proveedor_id = ?", (factura.proveedor_id,))
-            if cursor.fetchone():
-                cursor.execute("UPDATE proveedores_ctacte SET saldo_deudor = saldo_deudor + ? WHERE proveedor_id = ?", (total_final_real, factura.proveedor_id))
-            else:
-                cursor.execute("INSERT INTO proveedores_ctacte (proveedor_id, saldo_deudor) VALUES (?, ?)", (factura.proveedor_id, total_final_real))
+            _sumar_deuda_proveedor(cursor, factura.proveedor_id, total_final_real)
+
+        retiro_caja = None
+        if factura.pago_inmediato:
+            retiro_caja = _aplicar_pago_inmediato(
+                cursor, factura.proveedor_id, total_final_real, factura.condicion_pago,
+                factura.pago_inmediato, _usuario_desde_payload(payload)
+            )
 
         conexion.commit()
+        if retiro_caja is not None:
+            _avisar_retiro_proveedor(
+                background_tasks, factura.pago_inmediato.monto, factura.proveedor_id,
+                _usuario_desde_payload(payload), retiro_caja
+            )
         conexion.close()
         return {"mensaje": "Stock, Precios y Deuda actualizados correctamente", "total": total_final_real}
         
+    except HTTPException:
+        if conexion:
+            conexion.rollback()
+            conexion.close()
+        raise
     except Exception as e:
             if conexion:
                 conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar

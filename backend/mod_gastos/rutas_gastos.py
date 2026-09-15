@@ -100,17 +100,32 @@ def crear_categoria(cat: NuevaCategoria, db: sqlite3.Connection = Depends(get_db
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+def _es_categoria_pago_proveedor(nombre: str) -> bool:
+    n = (nombre or "").lower()
+    return "proveedor" in n
+
+
 @router.get("/categorias", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_categorias(incluir_inactivas: bool = False, db: sqlite3.Connection = Depends(get_db)):
     try:
         if incluir_inactivas:
             # Para la pantalla de administración de categorías (ver y poder reactivar las ocultas)
             cursor = db.execute("SELECT * FROM categorias_gasto ORDER BY IFNULL(activo, 1) DESC, nombre ASC")
-        else:
-            # Para cualquier selector donde se elige categoría para un gasto NUEVO (F10, Cheques
-            # y Gastos, RRHH): las categorías ocultas no deben poder elegirse de nuevo.
-            cursor = db.execute("SELECT * FROM categorias_gasto WHERE IFNULL(activo, 1) = 1 ORDER BY nombre ASC")
-        return {"categorias": [dict(c) for c in cursor.fetchall()]}
+            return {"categorias": [dict(c) for c in cursor.fetchall()]}
+
+        # Selectores de gasto NUEVO (POS F10, Cheques y Gastos, RRHH):
+        # ocultas no, ni "pago a proveedor" (eso es tesorería, no gasto del local).
+        cursor = db.execute("SELECT * FROM categorias_gasto WHERE IFNULL(activo, 1) = 1 ORDER BY nombre ASC")
+        categorias = []
+        for c in cursor.fetchall():
+            fila = dict(c)
+            tipo = (fila.get("tipo_categoria") or "OPERATIVO").upper()
+            if tipo != "OPERATIVO":
+                continue
+            if _es_categoria_pago_proveedor(fila.get("nombre") or ""):
+                continue
+            categorias.append(fila)
+        return {"categorias": categorias}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -170,6 +185,20 @@ def _alerta_gasto_alto(monto: float, detalle: str):
 @router.post("/registrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_gasto_operativo(gasto: NuevoGasto, background_tasks: BackgroundTasks, db: sqlite3.Connection = Depends(get_db)):
     try:
+        cat = db.execute(
+            "SELECT nombre, IFNULL(tipo_categoria, 'OPERATIVO') as tipo_categoria FROM categorias_gasto WHERE id = ?",
+            (gasto.categoria_id,)
+        ).fetchone()
+        if not cat:
+            raise HTTPException(status_code=400, detail="La categoría de gasto no existe.")
+        if _es_categoria_pago_proveedor(cat["nombre"] or ""):
+            raise HTTPException(
+                status_code=400,
+                detail="Los pagos a proveedor no van en Gastos. En el POS: Retiro → Pago a proveedor. En admin: Proveedores → Pago."
+            )
+        if (cat["tipo_categoria"] or "OPERATIVO").upper() != "OPERATIVO":
+            raise HTTPException(status_code=400, detail="Esa categoría no es un gasto del local.")
+
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
         db.execute('''

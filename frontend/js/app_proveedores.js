@@ -369,6 +369,70 @@ function limpiarFactura() {
     dibujarTablaFactura();
 }
 
+async function preguntarPagoInmediato(total, condicion) {
+    const esCC = condicion === 'Cuenta Corriente';
+    const eleccion = await Swal.fire({
+        title: esCC ? '¿Pagás algo ahora?' : 'Contado: ¿de dónde salió la plata?',
+        html: esCC
+            ? '<p class="small text-muted mb-0">La factura suma deuda. Si pagás de esta caja, el cajón baja y <b>no</b> es gasto del mes.</p>'
+            : '<p class="small text-muted mb-0">Contado no saca el cajón solo. Si salió efectivo de la registradora, registralo acá (no uses Gastos del POS).</p>',
+        input: 'radio',
+        inputOptions: esCC
+            ? {
+                despues: 'Queda deuda (pago después)',
+                caja: 'Pago efectivo de esta caja',
+                bolsillo: 'Pago bolsillo / transferencia'
+            }
+            : {
+                caja: 'Efectivo de esta caja (todo o parte)',
+                bolsillo: 'Bolsillo / ya no está en el cajón',
+                papel: 'Solo anotar, sin pago'
+            },
+        inputValue: esCC ? 'despues' : 'caja',
+        showCancelButton: true,
+        confirmButtonText: 'Seguir',
+        cancelButtonText: 'Cancelar carga',
+        confirmButtonColor: '#1b365d'
+    });
+    if (!eleccion.isConfirmed) return { cancel: true };
+    const modo = eleccion.value;
+    if (modo === 'despues' || modo === 'papel') return { pago: null };
+
+    const montoDlg = await Swal.fire({
+        title: 'Monto a pagar ahora',
+        input: 'number',
+        inputValue: total,
+        inputAttributes: { min: 0.01, step: 0.01 },
+        showCancelButton: true,
+        confirmButtonText: 'Confirmar monto',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#1b365d',
+        preConfirm: (v) => {
+            const n = parseFloat(v);
+            if (!Number.isFinite(n) || n <= 0) {
+                Swal.showValidationMessage('Monto mayor a cero');
+                return false;
+            }
+            if (n > total + 0.009) {
+                Swal.showValidationMessage('No puede ser mayor al total de la factura');
+                return false;
+            }
+            return n;
+        }
+    });
+    if (!montoDlg.isConfirmed) return { cancel: true };
+
+    return {
+        pago: {
+            metodo_pago: modo === 'caja' ? 'EFECTIVO CAJA' : 'EFECTIVO BOLSILLO',
+            monto: montoDlg.value,
+            observaciones: modo === 'caja'
+                ? 'Pago al cargar (efectivo caja)'
+                : 'Pago al cargar (bolsillo / transferencia)'
+        }
+    };
+}
+
 async function confirmarDeudaRapida() {
     const provId = document.getElementById('selectProvIngreso').value;
     const numFactura = document.getElementById('inputNumFactura').value.trim();
@@ -393,6 +457,9 @@ async function confirmarDeudaRapida() {
     });
     if (!confirm.isConfirmed) return;
 
+    const pagoAhora = await preguntarPagoInmediato(total, condicion);
+    if (pagoAhora.cancel) return;
+
     try {
         const res = await fetch(`${obtenerBaseUrl()}/proveedores/deuda_rapida`, {
             method: 'POST',
@@ -402,7 +469,8 @@ async function confirmarDeudaRapida() {
                 numero_factura: numFactura,
                 condicion_pago: condicion,
                 total_factura: total,
-                observaciones
+                observaciones,
+                pago_inmediato: pagoAhora.pago
             })
         });
         const data = await res.json().catch(() => ({}));
@@ -416,7 +484,12 @@ async function confirmarDeudaRapida() {
         document.getElementById('inputTotalDeudaRapida').value = '';
         document.getElementById('inputObsDeudaRapida').value = '';
         await cargarProveedores();
-        Swal.fire('Deuda registrada', data.mensaje || 'Listo. El stock no se tocó.', 'success');
+        const extraPago = pagoAhora.pago
+            ? (pagoAhora.pago.metodo_pago === 'EFECTIVO CAJA'
+                ? ' Se registró el pago de caja (no es gasto).'
+                : ' Se registró el pago (bolsillo / transferencia).')
+            : '';
+        Swal.fire('Deuda registrada', (data.mensaje || 'Listo. El stock no se tocó.') + extraPago, 'success');
     } catch (e) {
         Swal.fire('Error', e.message, 'error');
     }
@@ -430,6 +503,12 @@ async function confirmarIngresoMercaderia() {
     if (!provId) return Swal.fire('Error', 'Debe seleccionar un proveedor.', 'warning');
     if (facturaActualItems.length === 0) return Swal.fire('Error', 'No hay productos en la factura.', 'warning');
 
+    const cargosExtraIngresados = parseFloat(document.getElementById('inputCargosExtra').value) || 0;
+    const totalEstimado = facturaActualItems.reduce((acc, it) => acc + (it.cantidad_comprada * it.costo_unitario), 0) + cargosExtraIngresados;
+
+    const pagoAhora = await preguntarPagoInmediato(totalEstimado, condicion);
+    if (pagoAhora.cancel) return;
+
     Swal.fire({ title: 'Procesando ingreso...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     const btnGuardar = document.querySelector('button[onclick="confirmarIngresoMercaderia()"]');
@@ -439,14 +518,13 @@ async function confirmarIngresoMercaderia() {
     }
 
     try {
-        const cargosExtraIngresados = parseFloat(document.getElementById('inputCargosExtra').value) || 0;
-
         const payload = {
             proveedor_id: parseInt(provId),
             numero_factura: numFactura,
             condicion_pago: condicion,
             cargos_extra: cargosExtraIngresados, // <--- ACÁ VIAJA EL DATO A PYTHON
-            items: facturaActualItems
+            items: facturaActualItems,
+            pago_inmediato: pagoAhora.pago
         };
 
         const res = await fetch(`${obtenerBaseUrl()}/proveedores/cargar_factura`, {
@@ -455,10 +533,19 @@ async function confirmarIngresoMercaderia() {
             body: JSON.stringify(payload)
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo guardar.'));
+        }
         if (data.error) throw new Error(data.error);
 
-        Swal.fire('¡Mercadería Ingresada!', 'El stock, los costos y la deuda se actualizaron correctamente.', 'success');
+        const extraPago = pagoAhora.pago
+            ? (pagoAhora.pago.metodo_pago === 'EFECTIVO CAJA'
+                ? ' Pago de caja registrado (no es gasto).'
+                : ' Pago bolsillo / transferencia registrado.')
+            : '';
+        Swal.fire('¡Mercadería Ingresada!', 'El stock, los costos y la deuda se actualizaron.' + extraPago, 'success');
         limpiarFactura();
         cargarProveedores(); // Recarga saldos de cuenta corriente
     } catch (e) {

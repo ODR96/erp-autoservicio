@@ -1693,37 +1693,153 @@ function cargarVentaEspera(index) {
 
 // --- MÓDULO INGRESO Y RETIRO DE CAJA (F10) (SIN HARDCODEO) ---
 // --- MÓDULO INGRESO Y RETIRO DE CAJA (F10) (DISEÑO OSCURO UNIFICADO) ---
+async function registrarPagoProveedorDesdePOS() {
+    let proveedores = [];
+    try {
+        Swal.fire({ title: 'Cargando proveedores...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        const res = await apiFetch(`${obtenerBaseUrl()}/proveedores/listado?solo_activos=true`);
+        const data = await res.json();
+        Swal.close();
+        proveedores = Array.isArray(data) ? data : (data.proveedores || []);
+        proveedores = proveedores.filter(p => p.activo !== 0);
+    } catch (e) {
+        Swal.fire({ title: 'Error', text: 'No se pudieron cargar los proveedores.', background: '#111C2A', color: '#fff', icon: 'error' });
+        inputScan.focus();
+        return;
+    }
+
+    if (proveedores.length === 0) {
+        Swal.fire({ title: 'Sin proveedores', text: 'Cargá el proveedor en Admin → Proveedores.', background: '#111C2A', color: '#fff', icon: 'info' });
+        inputScan.focus();
+        return;
+    }
+
+    const estilosInput = `
+        <style>
+            .swal2-input::-webkit-outer-spin-button,
+            .swal2-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+            .swal2-input[type=number] { -moz-appearance: textfield; }
+            .input-dark-custom { background-color: #070B14 !important; border: 1px solid #1F304A !important; color: white !important; border-radius: 8px !important; width: 80% !important; margin: 0 auto 15px auto !important; }
+            .sel-dark-custom { background-color: #070B14; border: 1px solid #1F304A; color: white; width: 80%; margin: 0 auto 15px auto; border-radius: 8px; display: block; padding: 0.5rem; }
+        </style>
+    `;
+    let opciones = '<select id="swal-proveedor" class="sel-dark-custom"><option value="" disabled selected>-- Proveedor --</option>';
+    proveedores.forEach(p => {
+        const saldo = Number(p.saldo_deudor || 0);
+        opciones += `<option value="${p.id}">${p.nombre_comercial} (debe $${saldo.toFixed(2)})</option>`;
+    });
+    opciones += '</select>';
+
+    const { value: formValues } = await Swal.fire({
+        title: '<span style="color:#fff; font-weight:bold;">Pago a proveedor</span>',
+        html: estilosInput + opciones +
+            `<p style="color:#94a3b8; font-size:0.85rem; width:80%; margin:0 auto 10px auto;">Sale del cajón. No es gasto del mes. Si le debés, baja el saldo.</p>` +
+            `<input id="swal-monto" type="number" class="swal2-input input-dark-custom" placeholder="Monto ($)">` +
+            `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (ej: pan, factura 123)">` +
+            `<hr style="border-color: #1F304A; width: 80%; margin: 15px auto;">` +
+            `<input id="swal-pin" type="password" class="swal2-input input-dark-custom" placeholder="PIN Encargado" style="border-color: #f59e0b !important;">`,
+        background: '#111C2A',
+        color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Pagar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#38bdf8',
+        cancelButtonColor: '#475569',
+        focusConfirm: false,
+        preConfirm: async () => {
+            const provId = document.getElementById('swal-proveedor').value;
+            const monto = document.getElementById('swal-monto').value;
+            const motivo = (document.getElementById('swal-motivo').value || '').trim();
+            const pinEl = document.getElementById('swal-pin');
+            if (!provId) { Swal.showValidationMessage('Elegí el proveedor'); return false; }
+            if (!monto || monto <= 0) { Swal.showValidationMessage('Ingrese un monto mayor a 0'); return false; }
+            if (!motivo) { Swal.showValidationMessage('Completá el detalle'); return false; }
+            if (!pinEl || !pinEl.value) { Swal.showValidationMessage('Ingrese su PIN secreto'); return false; }
+            try {
+                const resAuth = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pin_secreto: pinEl.value, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
+                });
+                if (!resAuth.ok) throw new Error("Inválido");
+            } catch (e) {
+                Swal.showValidationMessage('PIN incorrecto o sin permisos');
+                return false;
+            }
+            return { proveedor_id: parseInt(provId), monto: parseFloat(monto), motivo };
+        }
+    });
+
+    if (!formValues) {
+        inputScan.focus();
+        return;
+    }
+
+    try {
+        Swal.fire({ title: 'Registrando...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        const response = await apiFetch(`${obtenerBaseUrl()}/proveedores/pagar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                proveedor_id: formValues.proveedor_id,
+                monto_pagado: formValues.monto,
+                metodo_pago: 'EFECTIVO CAJA',
+                observaciones: formValues.motivo,
+                turno_id: turnoActualId
+            })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo registrar el pago.'));
+        }
+        if (data.error) throw new Error(data.error);
+        Swal.fire({ title: '✅ Pago registrado', text: `$${formValues.monto} salieron de caja. No entra en gastos del mes.`, background: '#111C2A', color: '#fff', icon: 'success', timer: 2200, showConfirmButton: false });
+    } catch (e) {
+        Swal.fire({ title: 'Error', text: e.message, background: '#111C2A', color: '#fff', icon: 'error' });
+    }
+    setTimeout(() => inputScan.focus(), 2000);
+}
+
+// --- MÓDULO INGRESO Y RETIRO DE CAJA (F10) (SIN HARDCODEO) ---
+// --- MÓDULO INGRESO Y RETIRO DE CAJA (F10) (DISEÑO OSCURO UNIFICADO) ---
 async function registrarMovimientoCaja(tipo) {
     modalGestion.hide();
 
-    // --- PASO 0 (SOLO RETIROS): ¿Es un Gasto del Local o una Sangría/Retiro Físico? ---
     let esSangria = false;
     if (tipo === 'retiro') {
         const eleccion = await Swal.fire({
             title: '<span style="color:#fff; font-weight:bold;">¿Qué tipo de retiro es?</span>',
-            html: `<p style="color:#94a3b8; font-size: 0.9rem;">
-                     Elegí bien: los <b>Gastos del Local</b> impactan la rentabilidad del mes.<br>
-                     Las <b>Sangrías / Retiros Físicos</b> son solo movimientos internos de tesorería
-                     (ej: cambio para otra caja, retiro para el dueño) y NO afectan la rentabilidad.
+            html: `<p style="color:#94a3b8; font-size: 0.9rem; text-align:left; width:90%; margin:0 auto;">
+                     <b>Gasto del local</b> (luz, limpia, plomero): pega a la rentabilidad.<br>
+                     <b>Pago a proveedor</b>: sale del cajón, baja deuda, <u>no</u> es gasto.<br>
+                     <b>Sangría</b>: la plata sigue siendo tuya (caja fuerte / cambio).
                    </p>`,
             icon: 'question',
             background: '#111C2A',
             color: '#fff',
-            showDenyButton: true,
+            input: 'radio',
+            inputOptions: {
+                gasto: 'Gasto del local',
+                proveedor: 'Pago a proveedor',
+                sangria: 'Sangría / tesorería'
+            },
+            inputValue: 'gasto',
             showCancelButton: true,
-            confirmButtonText: '🧾 Gasto del Local',
-            denyButtonText: '💰 Sangría / Retiro Físico',
+            confirmButtonText: 'Continuar',
             cancelButtonText: 'Cancelar',
-            confirmButtonColor: '#ef4444',
-            denyButtonColor: '#f59e0b',
+            confirmButtonColor: '#38bdf8',
             cancelButtonColor: '#475569'
         });
 
-        if (!eleccion.isConfirmed && !eleccion.isDenied) {
+        if (!eleccion.isConfirmed) {
             inputScan.focus();
-            return; // Canceló
+            return;
         }
-        esSangria = eleccion.isDenied;
+        if (eleccion.value === 'proveedor') {
+            await registrarPagoProveedorDesdePOS();
+            return;
+        }
+        esSangria = eleccion.value === 'sangria';
     }
 
     const titulo = tipo === 'ingreso'
@@ -1744,6 +1860,10 @@ async function registrarMovimientoCaja(tipo) {
                 opcionesCategoria = '<select id="swal-categoria" class="form-select form-select-lg mb-3" style="background-color: #070B14; border: 1px solid #1F304A; color: white; width: 80%; margin: 0 auto; border-radius: 8px;">';
                 opcionesCategoria += '<option value="" disabled selected>-- Elegí una Categoría --</option>';
                 dataCat.categorias.forEach(c => {
+                    const tipoCat = (c.tipo_categoria || 'OPERATIVO').toUpperCase();
+                    const nombre = (c.nombre || '').toLowerCase();
+                    if (tipoCat !== 'OPERATIVO') return;
+                    if (nombre.includes('proveedor')) return;
                     opcionesCategoria += `<option value="${c.id}">${c.nombre}</option>`;
                 });
                 opcionesCategoria += '</select>';
@@ -1770,7 +1890,7 @@ async function registrarMovimientoCaja(tipo) {
     if (tipo === 'retiro' && !esSangria) {
         // Flujo GASTO DEL LOCAL (sin cambios de comportamiento)
         inputsHtml += opcionesCategoria;
-        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (Ej: Proveedor pan, Vale Juan)">`;
+        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (Ej: Luz, limpia, vale Juan)">`;
         inputsHtml += `<hr style="border-color: #1F304A; width: 80%; margin: 15px auto;"><input id="swal-pin" type="password" class="swal2-input input-dark-custom" placeholder="PIN Encargado" style="border-color: #f59e0b !important;">`;
     } else if (tipo === 'retiro' && esSangria) {
         // Flujo SANGRÍA / RETIRO FÍSICO (simple, sin categoría de gasto)

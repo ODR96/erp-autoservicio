@@ -14,7 +14,7 @@ HITOS Y ARQUITECTURA ACTUAL:
 
 VERSIÓN:
 - Release Electron / badge: v1.0.30
-- Cache JS/CSS reciente (Proveedores/Faltantes): ?v=1.0.39 — no es release de tienda.
+- Cache JS/CSS reciente (POS pago proveedor / Proveedores): ?v=1.0.40 — no es release de tienda.
 
 HITOS RECIENTES (ya no son tareas):
 - Dashboard: piso operativo del mes (ganancia bruta vs gastos reales + sueldos).
@@ -25,6 +25,7 @@ HITOS RECIENTES (ya no son tareas):
 - Merma: baja lote + movimientos_stock + registro_mermas.costo_perdido (costo del lote; fallback costo_sin_iva). Resta en ganancia neta como línea 8, no en CMV ni gastos/cheques. Ajuste de facturación: costo_perdido = 0. Usuario del JWT.
 - Faltantes: alta desde Proveedores, WhatsApp al grupo (mismo recorte que PDF, fire-and-forget), hoja de cotización impresa. Neteo VENTA_SIN_STOCK al cargar factura (misma función que al abrir el producto). Pestañas Pendientes / Pedidos / Recibidos (sin En curso). La selección no cruza de pestaña. Recibidos es historial: sin tilde masivo; volver a pendiente o tacho.
 - Ola 2 UX pulgar: Proveedores directorio + Faltantes (toolbar apilada, 44px, ID/CUIT/Obs/Estado ocultos en xs). Gastos sigue en diferido.
+- Corte 1 tesorería: POS retiro → Pago a proveedor llama /proveedores/pagar (caja + saldo, sin gastos_operativos). Categorías con "proveedor" y no-OPERATIVO fuera del selector de gasto. Contado/factura preguntan origen de la plata (caja vs bolsillo).
 
 TAREAS ACTIVAS:
 (ninguna bloqueante; el siguiente corte se elige de DIFERIDO)
