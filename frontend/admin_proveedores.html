@@ -355,6 +355,10 @@
                                     onclick="marcarSeleccionFaltantes('PENDIENTE')">
                                     <i class="bi bi-arrow-counterclockwise"></i> Pendiente
                                 </button>
+                                <button type="button" class="btn btn-success btn-sm fw-bold"
+                                    onclick="enviarPedidoWhatsapp()">
+                                    <i class="bi bi-whatsapp"></i> WhatsApp
+                                </button>
                                 <button type="button" class="btn btn-outline-success btn-sm fw-bold"
                                     onclick="exportarPedidoExcel()">
                                     <i class="bi bi-file-earmark-excel"></i> Excel
@@ -363,10 +367,36 @@
                                     onclick="exportarPedidoPdf()">
                                     <i class="bi bi-file-earmark-pdf"></i> Vista previa
                                 </button>
+                                <button type="button" class="btn btn-outline-dark btn-sm fw-bold"
+                                    onclick="exportarHojaCotizacion()">
+                                    <i class="bi bi-clipboard2-plus"></i> Hoja cotización
+                                </button>
                             </div>
                         </div>
-                        <p class="small text-muted mb-3" id="resumenSeleccionFaltantes">Ningún ítem seleccionado. Excel y
-                            la vista previa usan la selección; si no hay, usan lo visible.</p>
+                        <p class="small text-muted mb-3" id="resumenSeleccionFaltantes">Ningún ítem seleccionado. Excel, WhatsApp y las hojas usan la selección; si no hay, usan lo visible.</p>
+
+                        <div class="row g-2 align-items-end mb-3 p-3 bg-light border rounded">
+                            <div class="col-md-5">
+                                <label class="form-label fw-bold small mb-1">Anotar faltante</label>
+                                <input type="text" id="faltanteAltaNombre" class="form-control"
+                                    placeholder="Catálogo o texto libre..." list="faltanteAltaSugerencias"
+                                    autocomplete="off" oninput="sugerirFaltanteCatalogo()">
+                                <datalist id="faltanteAltaSugerencias"></datalist>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label fw-bold small mb-1">Cant.</label>
+                                <input type="number" id="faltanteAltaCant" class="form-control text-center fw-bold" value="1" min="0.1" step="0.1">
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <label class="form-label fw-bold small mb-1">Obs.</label>
+                                <input type="text" id="faltanteAltaObs" class="form-control" placeholder="Opcional">
+                            </div>
+                            <div class="col-md-2">
+                                <button type="button" class="btn btn-primary w-100 fw-bold" onclick="anotarFaltanteManual()">
+                                    <i class="bi bi-plus-lg"></i> Anotar
+                                </button>
+                            </div>
+                        </div>
 
                         <div class="row g-4">
                             <div class="col-lg-7">
@@ -486,7 +516,7 @@
         <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content border-0 shadow">
                 <div class="modal-header text-white" style="background:#1b365d;">
-                    <h5 class="modal-title fw-bold"><i class="bi bi-file-earmark-pdf me-2"></i>Vista previa del pedido</h5>
+                    <h5 class="modal-title fw-bold" id="tituloPreviewPedido"><i class="bi bi-file-earmark-pdf me-2"></i>Vista previa del pedido</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body bg-light">
@@ -527,7 +557,7 @@
         }
     </script>
     <script src="js/layout.js?v=1.0.34"></script>
-    <script src="js/app_proveedores.js?v=1.0.32"></script>
+    <script src="js/app_proveedores.js?v=1.0.37"></script>
 </body>
 
 </html>

@@ -14,7 +14,7 @@ HITOS Y ARQUITECTURA ACTUAL:
 
 VERSIÓN:
 - Release Electron / badge: v1.0.30
-- Cache JS/CSS reciente (Productos + Dashboard merma): ?v=1.0.35 — no es release de tienda.
+- Cache JS/CSS reciente (Proveedores faltantes): ?v=1.0.37 — no es release de tienda.
 
 HITOS RECIENTES (ya no son tareas):
 - Dashboard: piso operativo del mes (ganancia bruta vs gastos reales + sueldos).
@@ -23,6 +23,7 @@ HITOS RECIENTES (ya no son tareas):
 - WhatsApp Contabo: POST /enviar validado. Dueño = teléfono de Configuración (Cierre Z detallado + cada retiro de caja). Grupo de compras = whatsapp_grupo_compras (digest de faltantes del turno al cerrar, agrupados por nombre). Docker corralón parado, restart=no.
 - Ola 1 UX pulgar: chrome admin + catálogo Productos (tap editar, menú ⋮, modal fullscreen) + Dashboard (viewport, scroll, KPIs). Probar en browser vs VPS; Electron 1.0.30 no trae este CSS.
 - Merma: baja lote + movimientos_stock + registro_mermas.costo_perdido (costo del lote; fallback costo_sin_iva). Resta en ganancia neta como línea 8, no en CMV ni gastos/cheques. Ajuste de facturación: costo_perdido = 0. Usuario del JWT.
+- Faltantes: alta desde Proveedores, WhatsApp al grupo (mismo recorte que PDF, fire-and-forget), hoja de cotización impresa. Neteo VENTA_SIN_STOCK al cargar factura (misma función que al abrir el producto).
 
 TAREAS ACTIVAS:
 (ninguna bloqueante; el siguiente corte se elige de DIFERIDO)

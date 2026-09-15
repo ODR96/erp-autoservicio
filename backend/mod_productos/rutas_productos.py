@@ -12,6 +12,53 @@ router = APIRouter()
 
 ZONA_AR = timezone(timedelta(hours=-3))
 
+
+def compensar_deuda_stock(cursor, producto_id, fecha_hoy_ar=None):
+    """Come lotes positivos contra VENTA_SIN_STOCK. Queda en la transacción del caller."""
+    if not fecha_hoy_ar:
+        fecha_hoy_ar = datetime.now(ZONA_AR).strftime("%Y-%m-%d")
+
+    cursor.execute(
+        "SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible < 0",
+        (producto_id,),
+    )
+    fila = cursor.fetchone()
+    suma_negativos = fila[0] if fila else None
+    if not suma_negativos or suma_negativos >= 0:
+        return 0.0
+
+    deuda_total = abs(float(suma_negativos))
+    cursor.execute(
+        "SELECT id, cantidad_disponible FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible > 0 ORDER BY fecha_ingreso ASC",
+        (producto_id,),
+    )
+    for lp in cursor.fetchall():
+        if deuda_total <= 0:
+            break
+        lote_id = lp[0]
+        disp = float(lp[1])
+        if disp >= deuda_total:
+            cursor.execute(
+                "UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible - ? WHERE id = ?",
+                (deuda_total, lote_id),
+            )
+            deuda_total = 0.0
+        else:
+            cursor.execute("UPDATE lotes_stock SET cantidad_disponible = 0 WHERE id = ?", (lote_id,))
+            deuda_total -= disp
+
+    cursor.execute("DELETE FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible < 0", (producto_id,))
+    cursor.execute("DELETE FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible = 0", (producto_id,))
+
+    if deuda_total > 0:
+        cursor.execute('''
+            INSERT INTO lotes_stock (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento,
+                cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
+            VALUES (?, 'VENTA_SIN_STOCK', ?, '2099-12-31', 0, ?, 0, 'Activo')
+        ''', (producto_id, fecha_hoy_ar, -deuda_total))
+    return deuda_total
+
+
 # --- MODELOS DE DATOS ---
 class ProductoNuevo(BaseModel):
     codigo_barras: str
@@ -254,37 +301,8 @@ def ver_producto_por_id(producto_id: int):
         cursor.execute("SELECT cantidad_minima as cantidad, precio_oferta_unitario as precio FROM promociones_volumen WHERE producto_id = ?", (producto_id,))
         resultado["reglas_mayoristas"] = [dict(r) for r in cursor.fetchall()]
 
-        cursor.execute("SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible < 0", (producto_id,))
-        suma_negativos = cursor.fetchone()[0]
-
-        if suma_negativos and suma_negativos < 0:
-            deuda_total = abs(suma_negativos)
-
-            cursor.execute("SELECT id, cantidad_disponible FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible > 0 ORDER BY fecha_ingreso ASC", (producto_id,))
-            lotes_positivos = cursor.fetchall()
-
-            for lp in lotes_positivos:
-                if deuda_total <= 0: break
-                disp = lp['cantidad_disponible']
-
-                if disp >= deuda_total:
-                    cursor.execute("UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible - ? WHERE id = ?", (deuda_total, lp['id']))
-                    deuda_total = 0
-                else:
-                    cursor.execute("UPDATE lotes_stock SET cantidad_disponible = 0 WHERE id = ?", (lp['id'],))
-                    deuda_total -= disp
-
-            cursor.execute("DELETE FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible < 0", (producto_id,))
-            cursor.execute("DELETE FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible = 0", (producto_id,))
-
-            if deuda_total > 0:
-                fecha_hoy_ar = datetime.now(ZONA_AR).strftime("%Y-%m-%d")
-                cursor.execute('''
-                    INSERT INTO lotes_stock (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento, cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
-                    VALUES (?, 'VENTA_SIN_STOCK', ?, '2099-12-31', 0, ?, 0, 'Activo')
-                ''', (producto_id, fecha_hoy_ar, -deuda_total))
-
-            conexion.commit() 
+        compensar_deuda_stock(cursor, producto_id)
+        conexion.commit() 
 
         cursor.execute("SELECT id as lote_id, numero_lote_proveedor as lote, fecha_ingreso as ingreso, fecha_vencimiento as vence, cantidad_disponible as stock, costo_real_ingreso as costo FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible != 0 ORDER BY fecha_ingreso ASC", (producto_id,))
         resultado["lotes"] = [dict(l) for l in cursor.fetchall()]

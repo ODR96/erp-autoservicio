@@ -1098,7 +1098,7 @@ function actualizarResumenSeleccion() {
     const nFalt = seleccionFaltantes.size;
     const nAlert = seleccionAlertas.size;
     if (nFalt === 0 && nAlert === 0) {
-        el.textContent = 'Ningún ítem seleccionado. Excel y la vista previa usan la selección; si no hay, usan lo visible.';
+        el.textContent = 'Ningún ítem seleccionado. Excel, WhatsApp y las hojas usan la selección; si no hay, usan lo visible.';
         return;
     }
     const partes = [];
@@ -1350,16 +1350,171 @@ function htmlPedidoFaltantes(items) {
         </table>`;
 }
 
+function htmlHojaCotizacion(items, columnas) {
+    const n = Math.min(4, Math.max(2, parseInt(columnas, 10) || 3));
+    const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: 'Autoservicio 20 de Junio' };
+    const nombreLocal = config.nombre_negocio || 'Autoservicio 20 de Junio';
+    const celdasPrecio = Array.from({ length: n }, () => '<td class="celda-precio"></td>').join('');
+    const encabezadosRayas = Array.from({ length: n }, (_, i) => `Prov. ${i + 1}: ____________`).join(' &nbsp;&nbsp; ');
+    const thPrecios = Array.from({ length: n }, (_, i) => `<th>Precio ${i + 1}</th>`).join('');
+    const filas = items.map(item => `
+        <tr>
+            <td>${escapeHtmlPedidos(item.producto)}</td>
+            <td style="text-align:center;">${escapeHtmlPedidos(item.cantidad)}</td>
+            ${celdasPrecio}
+        </tr>`).join('');
+
+    return `
+        <h2>Hoja de cotización</h2>
+        <div class="meta">${escapeHtmlPedidos(nombreLocal)} · ${fechaHoyAR()} · ${items.length} ítem(s) — ${n} proveedor(es)</div>
+        <div class="encabezados-prov">${encabezadosRayas}</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th style="width:70px;">Cant.</th>
+                    ${thPrecios}
+                </tr>
+            </thead>
+            <tbody>${filas}</tbody>
+        </table>`;
+}
+
+function abrirPreviewPedido(html, titulo, modo) {
+    const hoja = document.getElementById('previewPedidoHoja');
+    const modalEl = document.getElementById('modalPreviewPedido');
+    const tituloEl = document.getElementById('tituloPreviewPedido');
+    if (!hoja || !modalEl) return Swal.fire('Error', 'No se encontró la vista previa.', 'error');
+    hoja.innerHTML = html;
+    hoja.dataset.modo = modo || 'pedido';
+    if (tituloEl) tituloEl.innerHTML = titulo;
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
 function exportarPedidoPdf() {
     const items = recolectarItemsPedido();
     if (items.length === 0) return Swal.fire('Aviso', 'No hay productos para exportar.', 'info');
+    abrirPreviewPedido(htmlPedidoFaltantes(items), '<i class="bi bi-file-earmark-pdf me-2"></i>Vista previa del pedido', 'pedido');
+}
 
-    const hoja = document.getElementById('previewPedidoHoja');
-    const modalEl = document.getElementById('modalPreviewPedido');
-    if (!hoja || !modalEl) return Swal.fire('Error', 'No se encontró la vista previa.', 'error');
+async function exportarHojaCotizacion() {
+    const items = recolectarItemsPedido();
+    if (items.length === 0) return Swal.fire('Aviso', 'No hay productos para la hoja.', 'info');
 
-    hoja.innerHTML = htmlPedidoFaltantes(items);
-    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    const previa = parseInt(localStorage.getItem('cotizacion_columnas_prov') || '3', 10);
+    const { value: columnas, isConfirmed } = await Swal.fire({
+        title: 'Columnas de precio',
+        text: 'Cuántos proveedores vas a comparar en esta salida.',
+        input: 'select',
+        inputOptions: { 2: '2 proveedores', 3: '3 proveedores', 4: '4 proveedores' },
+        inputValue: [2, 3, 4].includes(previa) ? String(previa) : '3',
+        showCancelButton: true,
+        confirmButtonText: 'Armar hoja',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!isConfirmed) return;
+
+    const n = parseInt(columnas, 10) || 3;
+    localStorage.setItem('cotizacion_columnas_prov', String(n));
+    abrirPreviewPedido(htmlHojaCotizacion(items, n), '<i class="bi bi-clipboard2-plus me-2"></i>Hoja de cotización', 'cotizacion');
+}
+
+async function enviarPedidoWhatsapp() {
+    const items = recolectarItemsPedido();
+    if (items.length === 0) return Swal.fire('Aviso', 'No hay productos para enviar.', 'info');
+
+    const confirm = await Swal.fire({
+        title: '¿Mandar al grupo?',
+        text: `Se envían ${items.length} ítem(s) al grupo de compras. No se marca Pedido solo por enviar.`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Enviar WhatsApp',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!confirm.isConfirmed) return;
+
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/reportes/faltantes/whatsapp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                quien: localStorage.getItem('usuario_nombre') || '',
+                items: items.map(i => ({
+                    producto: i.producto,
+                    cantidad: i.cantidad,
+                    observacion: i.observacion || ''
+                }))
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo enviar.'));
+        }
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Disparado al grupo', showConfirmButton: false, timer: 1600 });
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
+let timeoutSugerirFaltante = null;
+function sugerirFaltanteCatalogo() {
+    const input = document.getElementById('faltanteAltaNombre');
+    const lista = document.getElementById('faltanteAltaSugerencias');
+    if (!input || !lista) return;
+    const q = input.value.trim();
+    clearTimeout(timeoutSugerirFaltante);
+    if (q.length < 2) {
+        lista.innerHTML = '';
+        return;
+    }
+    timeoutSugerirFaltante = setTimeout(async () => {
+        try {
+            const res = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(q)}`);
+            const data = await res.json();
+            lista.innerHTML = (data.productos || []).slice(0, 12).map(p =>
+                `<option value="${escapeHtmlPedidos(p.nombre)}"></option>`
+            ).join('');
+        } catch (e) {
+            lista.innerHTML = '';
+        }
+    }, 250);
+}
+
+async function anotarFaltanteManual() {
+    const nombre = (document.getElementById('faltanteAltaNombre')?.value || '').trim();
+    const obs = (document.getElementById('faltanteAltaObs')?.value || '').trim();
+    const cantidad = parseFloat(document.getElementById('faltanteAltaCant')?.value);
+
+    if (!nombre) return Swal.fire('Atención', 'Escribí el producto (del catálogo o a mano).', 'warning');
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
+        return Swal.fire('Atención', 'La cantidad tiene que ser mayor a cero.', 'warning');
+    }
+
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/reportes/registrar_faltante`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                descripcion: nombre,
+                cantidad,
+                notas: obs,
+                usuario_nombre: localStorage.getItem('usuario_nombre') || 'Oficina'
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo anotar.'));
+        }
+        document.getElementById('faltanteAltaNombre').value = '';
+        document.getElementById('faltanteAltaObs').value = '';
+        document.getElementById('faltanteAltaCant').value = '1';
+        await cargarTableroPedidos();
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Anotado', showConfirmButton: false, timer: 1200 });
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
 }
 
 function imprimirPedidoDesdePreview() {
@@ -1368,20 +1523,24 @@ function imprimirPedidoDesdePreview() {
         return Swal.fire('Aviso', 'No hay vista previa para imprimir.', 'info');
     }
 
+    const esCotizacion = hoja.dataset.modo === 'cotizacion';
     const win = window.open('', '_blank', 'width=900,height=700');
     if (!win) return Swal.fire('Aviso', 'El navegador bloqueó la ventana de impresión.', 'info');
 
     win.document.write(`
         <html>
         <head>
-            <title>Pedido de faltantes</title>
+            <title>${esCotizacion ? 'Hoja de cotización' : 'Pedido de faltantes'}</title>
             <style>
-                body { font-family: 'Segoe UI', sans-serif; color: #212529; padding: 28px; }
+                @page { size: A4 ${esCotizacion ? 'landscape' : 'portrait'}; margin: 12mm; }
+                body { font-family: 'Segoe UI', sans-serif; color: #212529; padding: 12px; }
                 h2 { margin: 0 0 4px; color: #1b365d; }
-                .meta { color: #6c757d; margin-bottom: 18px; font-size: 13px; }
+                .meta { color: #6c757d; margin-bottom: 10px; font-size: 13px; }
+                .encabezados-prov { margin-bottom: 12px; font-size: 13px; }
                 table { width: 100%; border-collapse: collapse; font-size: 13px; }
                 th { background: #f8f9fa; text-align: left; padding: 8px; border-bottom: 2px solid #1b365d; text-transform: uppercase; font-size: 11px; letter-spacing: .03em; }
                 td { padding: 8px; border-bottom: 1px solid #e9ecef; vertical-align: top; }
+                td.celda-precio { width: 18%; height: 28px; border: 1px solid #adb5bd; }
             </style>
         </head>
         <body>

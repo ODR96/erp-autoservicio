@@ -210,3 +210,36 @@ def avisar_faltantes_del_turno(turno_id, fecha_apertura, fecha_cierre, cajero: s
         quienes = ", ".join(item["quienes"]) if item["quienes"] else "-"
         lineas.append(f"• {item['nombre']} x{cant_txt} — {quienes}")
     return enviar_whatsapp("\n".join(lineas), numero=destino)
+
+
+def avisar_pedido_faltantes(items, quien: str = ""):
+    """Pedido armado desde Faltantes (selección o visibles). Texto al grupo de compras."""
+    destino = _grupo_compras()
+    if not destino:
+        print("WhatsApp puente: sin grupo de compras. Pedido de faltantes omitido.")
+        return {"ok": False, "detalle": "Falta el grupo de compras en Configuración."}
+
+    limpios = []
+    for item in items or []:
+        nombre = (item.get("producto") or "").strip()
+        if not nombre:
+            continue
+        limpios.append(item)
+    if not limpios:
+        return {"ok": False, "detalle": "No hay ítems para enviar."}
+
+    tope = 40
+    lineas = ["Pedido de faltantes"]
+    if quien:
+        lineas.append(f"Armó: {quien}")
+    lineas.append("")
+    for item in limpios[:tope]:
+        cant = item.get("cantidad") or "1"
+        linea = f"• {item.get('producto')} x{cant}"
+        obs = (item.get("observacion") or "").strip()
+        if obs:
+            linea += f" ({obs})"
+        lineas.append(linea)
+    if len(limpios) > tope:
+        lineas.append(f"… y {len(limpios) - tope} ítem(s) más")
+    return enviar_whatsapp("\n".join(lineas), numero=destino)

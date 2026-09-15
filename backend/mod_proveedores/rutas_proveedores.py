@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
+from backend.mod_productos.rutas_productos import compensar_deuda_stock
 
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3)) # <-- LA HORA ARGENTINA
@@ -318,6 +319,8 @@ def ingresar_mercaderia(factura: NuevaFacturaCompra):
                 INSERT INTO lotes_stock (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento, cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Activo')
             ''', (item.producto_id, item.numero_lote_proveedor, fecha_actual, item.fecha_vencimiento, item.cantidad_comprada, item.cantidad_comprada, item.costo_unitario))
+
+            compensar_deuda_stock(cursor, item.producto_id, fecha_actual)
             
             # C. ACTUALIZAMOS EL PRECIO MAESTRO (Si el usuario lo cambió en la ventanita)
             if item.nuevo_precio_venta is not None:

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 from typing import List, Literal
@@ -130,6 +130,15 @@ class CambioCantidadFaltante(BaseModel):
     id: int
     cantidad: float
 
+class ItemPedidoWhatsApp(BaseModel):
+    producto: str
+    cantidad: str = "1"
+    observacion: str = ""
+
+class PedidoFaltantesWhatsApp(BaseModel):
+    items: List[ItemPedidoWhatsApp]
+    quien: str = ""
+
 # --- 1. ALERTAS DEL DASHBOARD (Para ver a la mañana) ---
 @router.get("/alertas", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def obtener_alertas_dashboard():
@@ -258,6 +267,8 @@ def calcular_ganancia_neta(mes: str = None):
     
 @router.post("/registrar_faltante", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_pedido_no_encontrado(p: ProductoFaltante):
+    if not (p.descripcion or "").strip():
+        raise HTTPException(status_code=400, detail="Falta el nombre del producto.")
     if p.cantidad <= 0:
         raise HTTPException(status_code=400, detail="La cantidad tiene que ser mayor a cero.")
     conexion = obtener_conexion()
@@ -273,6 +284,23 @@ def registrar_pedido_no_encontrado(p: ProductoFaltante):
         return {"mensaje": "Anotado.", "id": nuevo_id}
     finally:
         conexion.close()
+
+@router.post("/faltantes/whatsapp", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def enviar_pedido_faltantes_whatsapp(pedido: PedidoFaltantesWhatsApp, background_tasks: BackgroundTasks):
+    items = [i for i in pedido.items if (i.producto or "").strip()]
+    if not items:
+        raise HTTPException(status_code=400, detail="No hay ítems para enviar.")
+
+    from backend.whatsapp_puente import avisar_pedido_faltantes, destino_grupo_compras
+    if not destino_grupo_compras():
+        raise HTTPException(status_code=400, detail="Falta el grupo de compras en Configuración.")
+
+    serial = [
+        {"producto": i.producto.strip(), "cantidad": i.cantidad or "1", "observacion": i.observacion or ""}
+        for i in items
+    ]
+    background_tasks.add_task(avisar_pedido_faltantes, serial, (pedido.quien or "").strip())
+    return {"mensaje": "Pedido disparado al grupo de WhatsApp.", "items": len(serial)}
 
 @router.get("/faltantes_pendientes", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def obtener_faltantes_pendientes():
