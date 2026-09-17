@@ -176,37 +176,146 @@ async function reactivarProveedor(id) {
 function llenarSelectoresProveedores() {
     const selIngreso = document.getElementById('selectProvIngreso');
     if (selIngreso) {
+        const previo = selIngreso.value;
         selIngreso.innerHTML = '<option value="">-- Seleccionar Proveedor --</option>';
         proveedoresGlobales.filter(p => p.activo !== 0).forEach(p => {
             selIngreso.innerHTML += `<option value="${p.id}">${p.nombre_comercial}</option>`;
         });
+        if (previo) selIngreso.value = previo;
     }
 }
 
 // ==========================================
+// 2. INGRESO DE FACTURAS (GRILLA EDITABLE)
 // ==========================================
-// 2. INGRESO DE FACTURAS (BUSCADOR BLINDADO)
-// ==========================================
+const CLAVE_BORRADOR_FACTURA = 'erpetto_borrador_factura_v1';
+let timerBorradorFactura = null;
+let restaurandoBorradorFactura = false;
+
+function hoyISOLocal() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function escapeHtmlFactura(valor) {
+    return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function detalleApi(data) {
+    const d = data && data.detail;
+    if (typeof d === 'string') return d;
+    if (Array.isArray(d) && d[0] && d[0].msg) return d[0].msg;
+    return (data && data.error) || 'No se pudo guardar.';
+}
+
+function asegurarFechaFactura() {
+    const inp = document.getElementById('inputFechaFactura');
+    if (inp && !inp.value) inp.value = hoyISOLocal();
+}
+
+function leerCabeceraFactura() {
+    return {
+        modo: document.getElementById('panelIngresoStock')?.classList.contains('d-none') ? 'deuda' : 'stock',
+        proveedor_id: document.getElementById('selectProvIngreso')?.value || '',
+        numero: document.getElementById('inputNumFactura')?.value || '',
+        condicion: document.getElementById('selectCondicionPago')?.value || 'Cuenta Corriente',
+        fecha: document.getElementById('inputFechaFactura')?.value || hoyISOLocal(),
+        cargos: document.getElementById('inputCargosExtra')?.value || '0',
+        total_papel: document.getElementById('inputTotalPapel')?.value || '',
+        total_deuda: document.getElementById('inputTotalDeudaRapida')?.value || '',
+        obs_deuda: document.getElementById('inputObsDeudaRapida')?.value || ''
+    };
+}
+
+function guardarBorradorFactura() {
+    if (restaurandoBorradorFactura) return;
+    const cab = leerCabeceraFactura();
+    const vacio = facturaActualItems.length === 0
+        && !(cab.numero || '').trim()
+        && !(cab.total_deuda || '').toString().trim()
+        && !(cab.total_papel || '').toString().trim()
+        && !(parseFloat(cab.cargos) > 0);
+    if (vacio) {
+        localStorage.removeItem(CLAVE_BORRADOR_FACTURA);
+        return;
+    }
+    localStorage.setItem(CLAVE_BORRADOR_FACTURA, JSON.stringify({ cab, items: facturaActualItems }));
+}
+
+function programarBorradorFactura() {
+    clearTimeout(timerBorradorFactura);
+    timerBorradorFactura = setTimeout(guardarBorradorFactura, 250);
+}
+
+function restaurarBorradorFactura() {
+    asegurarFechaFactura();
+    const raw = localStorage.getItem(CLAVE_BORRADOR_FACTURA);
+    if (!raw) return;
+    try {
+        const data = JSON.parse(raw);
+        restaurandoBorradorFactura = true;
+        const cab = data.cab || {};
+        if (cab.modo) cambiarModoIngreso(cab.modo);
+        if (cab.proveedor_id) document.getElementById('selectProvIngreso').value = cab.proveedor_id;
+        if (document.getElementById('inputNumFactura')) document.getElementById('inputNumFactura').value = cab.numero || '';
+        if (cab.condicion) document.getElementById('selectCondicionPago').value = cab.condicion;
+        document.getElementById('inputFechaFactura').value = cab.fecha || hoyISOLocal();
+        if (document.getElementById('inputCargosExtra')) document.getElementById('inputCargosExtra').value = cab.cargos || '0';
+        if (document.getElementById('inputTotalPapel')) document.getElementById('inputTotalPapel').value = cab.total_papel || '';
+        if (document.getElementById('inputTotalDeudaRapida')) document.getElementById('inputTotalDeudaRapida').value = cab.total_deuda || '';
+        if (document.getElementById('inputObsDeudaRapida')) document.getElementById('inputObsDeudaRapida').value = cab.obs_deuda || '';
+        facturaActualItems = Array.isArray(data.items) ? data.items : [];
+        dibujarTablaFactura();
+        restaurandoBorradorFactura = false;
+        if (facturaActualItems.length || (cab.numero || '').trim()) {
+            Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Borrador de factura recuperado', showConfirmButton: false, timer: 2200 });
+        }
+    } catch (e) {
+        restaurandoBorradorFactura = false;
+    }
+}
+
+function totalCalculadoFactura() {
+    const extra = parseFloat(document.getElementById('inputCargosExtra')?.value) || 0;
+    const items = facturaActualItems.reduce((acc, it) => acc + (Number(it.cantidad_comprada) * Number(it.costo_unitario)), 0);
+    return items + extra;
+}
+
+function papelVsCalculado() {
+    const raw = document.getElementById('inputTotalPapel')?.value;
+    if (raw === undefined || raw === null || String(raw).trim() === '') return { hayPapel: false, delta: 0, papel: 0 };
+    const papel = parseFloat(raw);
+    if (!Number.isFinite(papel)) return { hayPapel: false, delta: 0, papel: 0 };
+    return { hayPapel: true, papel, delta: totalCalculadoFactura() - papel };
+}
+
 document.getElementById('inputScanCompra')?.addEventListener('keypress', async function (e) {
     if (e.key === 'Enter') {
-        e.preventDefault(); // Evitamos que el Enter intente enviar un formulario fantasma
+        e.preventDefault();
         const query = this.value.trim();
-        
-        // Bajamos el límite a > 0 por si buscás IDs muy cortos
         if (query.length > 0) {
-            Swal.fire({ title: 'Buscando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
             await buscarParaCompra(query);
         }
         this.value = '';
+        this.focus();
     }
+});
+
+['selectProvIngreso', 'inputNumFactura', 'selectCondicionPago', 'inputFechaFactura',
+    'inputCargosExtra', 'inputTotalPapel', 'inputTotalDeudaRapida', 'inputObsDeudaRapida'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('input', programarBorradorFactura);
+    document.getElementById(id)?.addEventListener('change', programarBorradorFactura);
 });
 
 async function buscarParaCompra(query) {
     try {
         const res = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
-        const data = await res.json(); 
-
-        // PARCHE A PRUEBA DE BALAS: Atajamos el dato venga como venga
+        const data = await res.json();
         const productos = Array.isArray(data) ? data : (data.productos || []);
 
         if (productos.length === 0) {
@@ -215,22 +324,21 @@ async function buscarParaCompra(query) {
         }
 
         if (productos.length === 1) {
-            Swal.close();
-            pedirDatosIngresoItem(productos[0]);
-        } else {
-            let htmlOpciones = '<div class="list-group text-start mt-2" style="max-height: 250px; overflow-y: auto;">';
-            productos.forEach(p => {
-                let prodObj = encodeURIComponent(JSON.stringify(p));
-                htmlOpciones += `<button type="button" class="list-group-item list-group-item-action py-2" onclick="seleccionarOpcionCompra('${prodObj}')">
-                    <i class="bi bi-box"></i> <b>${p.codigo_barras || 'S/C'}</b> - ${p.nombre} <span class="float-end text-muted">Costo: $${p.costo_sin_iva}</span>
-                </button>`;
-            });
-            htmlOpciones += '</div>';
-
-            Swal.fire({ title: 'Seleccione un producto', html: htmlOpciones, showConfirmButton: false, showCloseButton: true });
+            agregarProductoAFactura(productos[0]);
+            return;
         }
-    } catch (e) { 
-        console.error(e); 
+
+        let htmlOpciones = '<div class="list-group text-start mt-2" style="max-height: 250px; overflow-y: auto;">';
+        productos.forEach(p => {
+            let prodObj = encodeURIComponent(JSON.stringify(p));
+            htmlOpciones += `<button type="button" class="list-group-item list-group-item-action py-2" onclick="seleccionarOpcionCompra('${prodObj}')">
+                <i class="bi bi-box"></i> <b>${escapeHtmlFactura(p.codigo_barras || 'S/C')}</b> - ${escapeHtmlFactura(p.nombre)} <span class="float-end text-muted">Costo: $${Number(p.costo_sin_iva || 0).toFixed(2)}</span>
+            </button>`;
+        });
+        htmlOpciones += '</div>';
+        Swal.fire({ title: 'Seleccione un producto', html: htmlOpciones, showConfirmButton: false, showCloseButton: true });
+    } catch (e) {
+        console.error(e);
         Swal.fire('Error', 'Fallo de conexión al buscar.', 'error');
     }
 }
@@ -238,113 +346,158 @@ async function buscarParaCompra(query) {
 window.seleccionarOpcionCompra = function(prodObjString) {
     Swal.close();
     let prod = JSON.parse(decodeURIComponent(prodObjString));
-    pedirDatosIngresoItem(prod);
+    agregarProductoAFactura(prod);
+};
+
+function agregarProductoAFactura(producto) {
+    const uxb = Math.max(1, parseInt(producto.unidades_por_bulto, 10) || 1);
+    const vencDefault = '2099-12-31';
+    const existente = facturaActualItems.find(it => Number(it.producto_id) === Number(producto.id)
+        && (it.fecha_vencimiento || vencDefault) === vencDefault);
+    if (existente) {
+        existente.cantidad_comprada = (parseFloat(existente.cantidad_comprada) || 0) + 1;
+        dibujarTablaFactura();
+        enfocarCantidadItem(facturaActualItems.indexOf(existente));
+        return;
+    }
+    facturaActualItems.push({
+        producto_id: producto.id,
+        nombre: producto.nombre,
+        codigo_barras: producto.codigo_barras || '',
+        cantidad_comprada: 1,
+        costo_unitario: parseFloat(producto.costo_sin_iva) || 0,
+        costo_anterior: parseFloat(producto.costo_sin_iva) || 0,
+        fecha_vencimiento: vencDefault,
+        nuevo_precio_venta: null,
+        precio_gondola_actual: parseFloat(producto.precio_venta_final) || 0,
+        actualizar_gondola: false,
+        unidades_por_bulto: uxb,
+        numero_lote_proveedor: 'LOTE-' + Date.now().toString().slice(-4)
+    });
+    dibujarTablaFactura();
+    enfocarCantidadItem(facturaActualItems.length - 1);
 }
 
-async function pedirDatosIngresoItem(producto) {
-    const margenActual = ((producto.precio_venta_final / (producto.costo_sin_iva || 1)) - 1) * 100;
-    
-    // PARCHE: Aseguramos que el IVA sea un número válido
-    const iva = (producto.porcentaje_iva !== undefined && producto.porcentaje_iva !== null) ? producto.porcentaje_iva : 21; 
-    const precioSugeridoInicial = (producto.costo_sin_iva * (1 + iva/100) * (1 + margenActual/100)).toFixed(2);
-
-    const { value: formValues } = await Swal.fire({
-        title: `<h4 class="text-primary fw-bold mb-0"><i class="bi bi-box-seam"></i> ${producto.nombre}</h4>`,
-        html: `
-            <div class="text-start mt-3" style="overflow-x: hidden;">
-                
-                <div class="row g-2 mb-3">
-                    <div class="col-6">
-                        <label class="small fw-bold text-muted mb-1">Cant. Recibida:</label>
-                        <input id="swal-cant" type="number" class="form-control form-control-lg text-center fw-bold border-secondary" value="1" min="0.1" step="0.1">
-                    </div>
-                    <div class="col-6">
-                        <label class="small fw-bold text-muted mb-1">Vencimiento (Opcional):</label>
-                        <input id="swal-venc" type="date" class="form-control form-control-lg text-center text-muted">
-                    </div>
-                </div>
-
-                <div class="p-3 bg-light border rounded mb-3 shadow-sm">
-                    <label class="small fw-bold text-primary mb-1">Costo Unitario Neto (Sin IVA):</label>
-                    <div class="input-group mb-2">
-                        <span class="input-group-text bg-primary text-white fw-bold">$</span>
-                        <input id="swal-costo" type="number" class="form-control fw-bold border-primary text-end fs-5" value="${producto.costo_sin_iva || 0}" step="0.01"
-                            oninput="document.getElementById('lbl-sugerido').innerText = '$' + (this.value * (1 + ${iva}/100) * (1 + ${margenActual}/100)).toFixed(2)">
-                    </div>
-                    <div class="d-flex justify-content-between small">
-                        <span class="text-muted">Margen Config.: <b>${margenActual.toFixed(1)}%</b></span>
-                        <span class="text-muted">Sugerido Venta: <b id="lbl-sugerido" class="text-primary">$${precioSugeridoInicial}</b></span>
-                    </div>
-                </div>
-
-                <label class="small fw-bold text-success mb-1">Precio Público Actual (Góndola):</label>
-                <div class="input-group input-group-lg shadow-sm">
-                    <span class="input-group-text bg-success text-white fw-bold">$</span>
-                    <input id="swal-precio" type="number" class="form-control border-success text-success fw-bold text-end" value="${producto.precio_venta_final}" step="0.01">
-                </div>
-
-            </div>
-        `,
-        width: '450px',
-        focusConfirm: false,
-        showCancelButton: true,
-        confirmButtonText: '<i class="bi bi-plus-circle"></i> Agregar a Factura',
-        cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#0d6efd',
-        cancelButtonColor: '#6c757d',
-        preConfirm: () => {
-            return {
-                cant: parseFloat(document.getElementById('swal-cant').value),
-                costo: parseFloat(document.getElementById('swal-costo').value),
-                venc: document.getElementById('swal-venc').value || "2099-12-31",
-                precioNuevo: parseFloat(document.getElementById('swal-precio').value)
-            }
+function enfocarCantidadItem(idx) {
+    setTimeout(() => {
+        const inp = document.querySelector(`[data-idx-factura="${idx}"] .inp-cant-factura`);
+        if (inp) {
+            inp.focus();
+            inp.select();
         }
-    });
+    }, 30);
+}
 
-    if (formValues && formValues.cant > 0) {
-        facturaActualItems.push({
-            producto_id: producto.id,
-            nombre: producto.nombre,
-            cantidad_comprada: formValues.cant,
-            costo_unitario: formValues.costo,
-            fecha_vencimiento: formValues.venc,
-            nuevo_precio_venta: formValues.precioNuevo,
-            numero_lote_proveedor: "LOTE-" + new Date().getTime().toString().slice(-4)
-        });
-        dibujarTablaFactura();
+function onInputFilaFactura(idx, campo, valor) {
+    const item = facturaActualItems[idx];
+    if (!item) return;
+    if (campo === 'cantidad_comprada' || campo === 'costo_unitario') {
+        const n = parseFloat(valor);
+        item[campo] = Number.isFinite(n) ? n : 0;
+    } else if (campo === 'fecha_vencimiento') {
+        item.fecha_vencimiento = valor || '2099-12-31';
+    } else if (campo === 'nuevo_precio_venta') {
+        const n = parseFloat(valor);
+        item.nuevo_precio_venta = Number.isFinite(n) ? n : item.precio_gondola_actual;
+    } else if (campo === 'bultos') {
+        const n = parseFloat(valor);
+        const uxb = item.unidades_por_bulto || 1;
+        if (Number.isFinite(n) && n > 0) {
+            item.cantidad_comprada = n * uxb;
+            const cantInp = document.querySelector(`[data-idx-factura="${idx}"] .inp-cant-factura`);
+            if (cantInp) cantInp.value = item.cantidad_comprada;
+        }
     }
+    const subCel = document.getElementById(`subtotal-fila-${idx}`);
+    if (subCel) {
+        const sub = (Number(item.cantidad_comprada) || 0) * (Number(item.costo_unitario) || 0);
+        subCel.textContent = '$' + sub.toFixed(2);
+    }
+    actualizarTotalVista();
+    programarBorradorFactura();
+}
+
+function toggleGondolaFila(idx, tildado) {
+    const item = facturaActualItems[idx];
+    if (!item) return;
+    item.actualizar_gondola = !!tildado;
+    if (item.actualizar_gondola) {
+        if (item.nuevo_precio_venta == null) item.nuevo_precio_venta = item.precio_gondola_actual;
+    } else {
+        item.nuevo_precio_venta = null;
+    }
+    dibujarTablaFactura();
+}
+
+function quitarItemFactura(idx) {
+    facturaActualItems.splice(idx, 1);
+    dibujarTablaFactura();
 }
 
 function dibujarTablaFactura() {
     const tbody = document.getElementById('tablaIngresoBody');
+    if (!tbody) return;
     tbody.innerHTML = '';
-    let total = 0;
 
     if (facturaActualItems.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-muted py-4">La factura está vacía. Escanee productos.</td></tr>';
-        document.getElementById('totalFacturaVista').innerText = '$ 0.00';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-muted py-4">La factura está vacía. Escaneá productos.</td></tr>';
+        actualizarTotalVista();
+        programarBorradorFactura();
         return;
     }
 
     facturaActualItems.forEach((item, idx) => {
-        let subtotal = item.cantidad_comprada * item.costo_unitario;
-        total += subtotal;
-        let vencVisual = item.fecha_vencimiento === "2099-12-31" ? "Sin Venc." : item.fecha_vencimiento;
+        const subtotal = (Number(item.cantidad_comprada) || 0) * (Number(item.costo_unitario) || 0);
+        const vencVal = item.fecha_vencimiento && item.fecha_vencimiento !== '2099-12-31' ? item.fecha_vencimiento : '';
+        const uxb = Math.max(1, parseInt(item.unidades_por_bulto, 10) || 1);
+        const bultosVal = (uxb > 1 && Number(item.cantidad_comprada) % uxb === 0)
+            ? (Number(item.cantidad_comprada) / uxb)
+            : '';
+        const meta = [];
+        if (item.codigo_barras) meta.push(escapeHtmlFactura(item.codigo_barras));
+        meta.push(`Último costo $${Number(item.costo_anterior || item.costo_unitario || 0).toFixed(2)}`);
+        if (uxb > 1) meta.push(`Bulto x${uxb}`);
+
+        const gondolaOn = !!item.actualizar_gondola;
+        const precioG = Number(item.nuevo_precio_venta != null ? item.nuevo_precio_venta : item.precio_gondola_actual || 0);
 
         tbody.innerHTML += `
-            <tr>
-                <td class="fw-bold">${item.cantidad_comprada}</td>
-                <td class="text-start fw-bold">${item.nombre} <br><small class="text-success fw-normal">Actualiza a $${item.nuevo_precio_venta.toFixed(2)}</small></td>
-                <td class="small text-muted">${vencVisual}</td>
-                <td>$${item.costo_unitario.toFixed(2)}</td>
-                <td class="fw-bold">$${subtotal.toFixed(2)}</td>
-                <td><button class="btn btn-sm text-danger border-0" onclick="facturaActualItems.splice(${idx}, 1); dibujarTablaFactura();"><i class="bi bi-trash"></i></button></td>
+            <tr data-idx-factura="${idx}">
+                <td>
+                    <input type="number" class="form-control form-control-sm inp-fila-factura inp-cant-factura" min="0.01" step="0.01"
+                        value="${item.cantidad_comprada}"
+                        oninput="onInputFilaFactura(${idx}, 'cantidad_comprada', this.value)">
+                    ${uxb > 1 ? `<input type="number" class="form-control form-control-sm mt-1 inp-fila-factura" min="0.01" step="0.01" value="${bultosVal}" placeholder="Bultos" title="Cantidad de bultos" oninput="onInputFilaFactura(${idx}, 'bultos', this.value)">` : ''}
+                </td>
+                <td class="text-start">
+                    <div class="fw-bold">${escapeHtmlFactura(item.nombre)}</div>
+                    <small class="text-muted">${meta.join(' · ')}</small>
+                </td>
+                <td>
+                    <input type="date" class="form-control form-control-sm" value="${vencVal}"
+                        onchange="onInputFilaFactura(${idx}, 'fecha_vencimiento', this.value)">
+                </td>
+                <td>
+                    <input type="number" class="form-control form-control-sm inp-fila-factura inp-costo-factura" min="0" step="0.01"
+                        value="${item.costo_unitario}"
+                        oninput="onInputFilaFactura(${idx}, 'costo_unitario', this.value)">
+                </td>
+                <td class="fw-bold" id="subtotal-fila-${idx}">$${subtotal.toFixed(2)}</td>
+                <td class="text-start">
+                    <label class="small mb-0 d-flex align-items-center gap-1">
+                        <input type="checkbox" class="form-check-input chk-gondola-fila" ${gondolaOn ? 'checked' : ''}
+                            onchange="toggleGondolaFila(${idx}, this.checked)">
+                        Actualizar
+                    </label>
+                    ${gondolaOn ? `<input type="number" class="form-control form-control-sm mt-1 inp-costo-factura" min="0" step="0.01" value="${precioG}" oninput="onInputFilaFactura(${idx}, 'nuevo_precio_venta', this.value)">` : `<small class="text-muted">Hoy $${Number(item.precio_gondola_actual || 0).toFixed(2)}</small>`}
+                </td>
+                <td><button type="button" class="btn btn-sm text-danger border-0" onclick="quitarItemFactura(${idx})"><i class="bi bi-trash"></i></button></td>
             </tr>
         `;
     });
 
-actualizarTotalVista();
+    actualizarTotalVista();
+    programarBorradorFactura();
 }
 
 function cambiarModoIngreso(modo) {
@@ -357,16 +510,47 @@ function cambiarModoIngreso(modo) {
     if (ayuda) {
         ayuda.textContent = esDeuda
             ? 'Anota factura o remito y el total. No toca stock ni precios.'
-            : 'Escaneá cada producto para actualizar stock, costo y precio.';
+            : 'Escaneá; cantidad y costo se editan en la grilla. Góndola solo si la tildás.';
     }
+    programarBorradorFactura();
 }
 
 function limpiarFactura() {
     facturaActualItems = [];
-    document.getElementById('inputNumFactura').value = '';
+    if (document.getElementById('inputNumFactura')) document.getElementById('inputNumFactura').value = '';
     const extra = document.getElementById('inputCargosExtra');
     if (extra) extra.value = '0';
+    const papel = document.getElementById('inputTotalPapel');
+    if (papel) papel.value = '';
+    const deuda = document.getElementById('inputTotalDeudaRapida');
+    if (deuda) deuda.value = '';
+    const obs = document.getElementById('inputObsDeudaRapida');
+    if (obs) obs.value = '';
+    asegurarFechaFactura();
+    localStorage.removeItem(CLAVE_BORRADOR_FACTURA);
     dibujarTablaFactura();
+}
+
+async function confirmarDuplicadoSiExiste(provId, numero) {
+    if (!provId || !numero) return { cancel: false, forzar: false };
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/proveedores/comprobar_factura?proveedor_id=${provId}&numero=${encodeURIComponent(numero)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!data.duplicada) return { cancel: false, forzar: false };
+        const ok = await Swal.fire({
+            title: 'Factura repetida',
+            html: `El N° <b>${escapeHtmlFactura(numero)}</b> ya está cargado (${escapeHtmlFactura(data.fecha_compra || '-')}, $${Number(data.total_factura || 0).toFixed(2)}).`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Cargar igual',
+            cancelButtonText: 'Volver',
+            confirmButtonColor: '#1b365d'
+        });
+        if (!ok.isConfirmed) return { cancel: true, forzar: false };
+        return { cancel: false, forzar: true };
+    } catch (e) {
+        return { cancel: false, forzar: false };
+    }
 }
 
 async function preguntarPagoInmediato(total, condicion) {
@@ -439,10 +623,14 @@ async function confirmarDeudaRapida() {
     const condicion = document.getElementById('selectCondicionPago').value;
     const total = parseFloat(document.getElementById('inputTotalDeudaRapida').value);
     const observaciones = document.getElementById('inputObsDeudaRapida').value.trim();
+    const fechaCompra = document.getElementById('inputFechaFactura')?.value || hoyISOLocal();
 
     if (!provId) return Swal.fire('Atención', 'Seleccioná un proveedor.', 'warning');
     if (!numFactura) return Swal.fire('Atención', 'Ingresá el N° de factura o remito.', 'warning');
     if (!Number.isFinite(total) || total <= 0) return Swal.fire('Atención', 'Ingresá un total mayor a cero.', 'warning');
+
+    const dup = await confirmarDuplicadoSiExiste(provId, numFactura);
+    if (dup.cancel) return;
 
     const confirm = await Swal.fire({
         title: '¿Guardar deuda?',
@@ -470,19 +658,16 @@ async function confirmarDeudaRapida() {
                 condicion_pago: condicion,
                 total_factura: total,
                 observaciones,
+                fecha_compra: fechaCompra,
+                forzar_duplicado: dup.forzar,
                 pago_inmediato: pagoAhora.pago
             })
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            const detalle = data.detail;
-            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo guardar.'));
-        }
+        if (!res.ok) throw new Error(detalleApi(data));
         if (data.error) throw new Error(data.error);
 
-        document.getElementById('inputNumFactura').value = '';
-        document.getElementById('inputTotalDeudaRapida').value = '';
-        document.getElementById('inputObsDeudaRapida').value = '';
+        limpiarFactura();
         await cargarProveedores();
         const extraPago = pagoAhora.pago
             ? (pagoAhora.pago.metodo_pago === 'EFECTIVO CAJA'
@@ -499,12 +684,31 @@ async function confirmarIngresoMercaderia() {
     const provId = document.getElementById('selectProvIngreso').value;
     const numFactura = document.getElementById('inputNumFactura').value.trim() || `INT-${new Date().getTime()}`;
     const condicion = document.getElementById('selectCondicionPago').value;
+    const fechaCompra = document.getElementById('inputFechaFactura')?.value || hoyISOLocal();
 
     if (!provId) return Swal.fire('Error', 'Debe seleccionar un proveedor.', 'warning');
     if (facturaActualItems.length === 0) return Swal.fire('Error', 'No hay productos en la factura.', 'warning');
+    const itemMalo = facturaActualItems.find(it => !(Number(it.cantidad_comprada) > 0));
+    if (itemMalo) return Swal.fire('Atención', `Revisá la cantidad de ${itemMalo.nombre}.`, 'warning');
 
     const cargosExtraIngresados = parseFloat(document.getElementById('inputCargosExtra').value) || 0;
-    const totalEstimado = facturaActualItems.reduce((acc, it) => acc + (it.cantidad_comprada * it.costo_unitario), 0) + cargosExtraIngresados;
+    const totalEstimado = totalCalculadoFactura();
+    const vsPapel = papelVsCalculado();
+    if (vsPapel.hayPapel && Math.abs(vsPapel.delta) > 0.05) {
+        const seguir = await Swal.fire({
+            title: 'No cierra con el papel',
+            html: `Papel <b>$${vsPapel.papel.toFixed(2)}</b><br>Sistema <b>$${totalEstimado.toFixed(2)}</b><br>Diferencia <b>$${vsPapel.delta.toFixed(2)}</b>`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Guardar igual',
+            cancelButtonText: 'Revisar',
+            confirmButtonColor: '#1b365d'
+        });
+        if (!seguir.isConfirmed) return;
+    }
+
+    const dup = await confirmarDuplicadoSiExiste(provId, numFactura);
+    if (dup.cancel) return;
 
     const pagoAhora = await preguntarPagoInmediato(totalEstimado, condicion);
     if (pagoAhora.cancel) return;
@@ -522,8 +726,21 @@ async function confirmarIngresoMercaderia() {
             proveedor_id: parseInt(provId),
             numero_factura: numFactura,
             condicion_pago: condicion,
-            cargos_extra: cargosExtraIngresados, // <--- ACÁ VIAJA EL DATO A PYTHON
-            items: facturaActualItems,
+            cargos_extra: cargosExtraIngresados,
+            fecha_compra: fechaCompra,
+            forzar_duplicado: dup.forzar,
+            items: facturaActualItems.map(it => ({
+                producto_id: it.producto_id,
+                cantidad_comprada: Number(it.cantidad_comprada),
+                costo_unitario: Number(it.costo_unitario),
+                fecha_vencimiento: it.fecha_vencimiento || '2099-12-31',
+                numero_lote_proveedor: it.numero_lote_proveedor || 'S/L',
+                nuevo_precio_venta: it.actualizar_gondola
+                    ? (Number.isFinite(Number(it.nuevo_precio_venta))
+                        ? Number(it.nuevo_precio_venta)
+                        : Number(it.precio_gondola_actual) || 0)
+                    : null
+            })),
             pago_inmediato: pagoAhora.pago
         };
 
@@ -534,10 +751,7 @@ async function confirmarIngresoMercaderia() {
         });
 
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            const detalle = data.detail;
-            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo guardar.'));
-        }
+        if (!res.ok) throw new Error(detalleApi(data));
         if (data.error) throw new Error(data.error);
 
         const extraPago = pagoAhora.pago
@@ -545,7 +759,7 @@ async function confirmarIngresoMercaderia() {
                 ? ' Pago de caja registrado (no es gasto).'
                 : ' Pago bolsillo / transferencia registrado.')
             : '';
-        Swal.fire('¡Mercadería Ingresada!', 'El stock, los costos y la deuda se actualizaron.' + extraPago, 'success');
+        Swal.fire('¡Mercadería Ingresada!', 'El stock y los costos se actualizaron. La góndola solo si la tildaste.' + extraPago, 'success');
         limpiarFactura();
         cargarProveedores(); // Recarga saldos de cuenta corriente
     } catch (e) {
@@ -841,25 +1055,22 @@ function imprimirTicketDetalle(items, numFactura, proveedor, total) {
 
 // Agregá esto en app_proveedores.js
 function actualizarTotalVista() {
-    if (!facturaActualItems) return; // Si no hay array, cortamos acá
-    
-    // 1. Sumamos los productos
-    let subtotalProductos = facturaActualItems.reduce((acc, item) => acc + (item.cantidad_comprada * item.costo_unitario), 0);
-    
-    // 2. Buscamos el casillero de forma SEGURA
-    let inputExtra = document.getElementById('inputCargosExtra');
-    let cargosExtra = 0;
-    
-    if (inputExtra && inputExtra.value) {
-        cargosExtra = parseFloat(inputExtra.value) || 0;
-    }
-    
-    // 3. Calculamos y dibujamos (siempre que estemos en la pestaña correcta)
-    let totalReal = subtotalProductos + cargosExtra;
-    let vistaTotal = document.getElementById('totalFacturaVista');
-    
-    if (vistaTotal) {
-        vistaTotal.innerText = '$ ' + totalReal.toFixed(2);
+    const vistaTotal = document.getElementById('totalFacturaVista');
+    const aviso = document.getElementById('avisoDescuadreFactura');
+    const totalReal = totalCalculadoFactura();
+    if (vistaTotal) vistaTotal.innerText = '$ ' + totalReal.toFixed(2);
+    if (aviso) {
+        const vs = papelVsCalculado();
+        if (!vs.hayPapel) {
+            aviso.textContent = '';
+            aviso.className = 'd-block small fw-bold';
+        } else if (Math.abs(vs.delta) <= 0.05) {
+            aviso.textContent = 'Cierra con el papel';
+            aviso.className = 'd-block small fw-bold text-success';
+        } else {
+            aviso.textContent = `No cierra: ${vs.delta > 0 ? '+' : ''}$${vs.delta.toFixed(2)} vs papel`;
+            aviso.className = 'd-block small fw-bold text-danger';
+        }
     }
 }
 
@@ -1407,7 +1618,8 @@ async function pasarAlertasALista() {
                     descripcion: p.nombre,
                     cantidad: 1.0,
                     notas: `Stock ${p.stock_actual} / mín. ${p.stock_minimo_alerta} · ${nombreProv}`,
-                    usuario_nombre: 'Sistema (stock mínimo)'
+                    usuario_nombre: 'Sistema (stock mínimo)',
+                    origen: 'COMPRAS'
                 })
             });
             if (!res.ok) throw new Error('No se pudo pasar una alerta a la lista.');
@@ -1669,7 +1881,8 @@ async function anotarFaltanteManual() {
                 descripcion: nombre,
                 cantidad,
                 notas: obs,
-                usuario_nombre: localStorage.getItem('usuario_nombre') || 'Oficina'
+                usuario_nombre: localStorage.getItem('usuario_nombre') || 'Oficina',
+                origen: 'COMPRAS'
             })
         });
         const data = await res.json().catch(() => ({}));
@@ -1723,4 +1936,8 @@ function imprimirPedidoDesdePreview() {
 }
 
 // ARRANQUE INICIAL
-document.addEventListener("DOMContentLoaded", cargarProveedores);
+document.addEventListener("DOMContentLoaded", async () => {
+    asegurarFechaFactura();
+    await cargarProveedores();
+    restaurarBorradorFactura();
+});

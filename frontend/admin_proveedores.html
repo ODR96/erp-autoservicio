@@ -54,6 +54,30 @@
             letter-spacing: .03em;
         }
         #previewPedidoHoja td { padding: 8px; border-bottom: 1px solid #e9ecef; vertical-align: top; }
+        .wrap-tabla-factura {
+            min-height: 220px;
+            max-height: min(55vh, 480px);
+            overflow: auto;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+        }
+        .wrap-tabla-factura thead th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: #f8f9fa;
+        }
+        .inp-fila-factura {
+            min-width: 0;
+            text-align: center;
+            font-weight: 700;
+        }
+        .inp-costo-factura { text-align: right; }
+        .chk-gondola-fila { width: 1.1rem; height: 1.1rem; }
+        @media (max-width: 767.98px) {
+            .inp-fila-factura, #tablaIngresoFactura input.form-control { min-height: 44px; }
+            .pie-factura-ingreso .btn { min-height: 44px; width: 100%; }
+        }
     </style>
 </head>
 
@@ -140,12 +164,16 @@
                                 <input type="text" id="inputNumFactura" class="form-control"
                                     placeholder="Ej: 0001-00004567">
                             </div>
-                            <div class="col-md-2">
+                            <div class="col-6 col-md-2">
                                 <label class="form-label fw-bold small text-primary">3. Condición</label>
                                 <select id="selectCondicionPago" class="form-select">
                                     <option value="Contado">Contado</option>
                                     <option value="Cuenta Corriente" selected>Cuenta Corriente</option>
                                 </select>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <label class="form-label fw-bold small text-primary">4. Fecha del papel</label>
+                                <input type="date" id="inputFechaFactura" class="form-control">
                             </div>
                         </div>
 
@@ -176,59 +204,67 @@
 
                         <div id="panelIngresoStock" class="d-none">
                         <div class="row g-3 mb-3">
-                            <div class="col-md-8">
+                            <div class="col-12">
                                 <div class="input-group">
                                     <span class="input-group-text bg-white text-muted"><i
                                             class="bi bi-upc-scan"></i></span>
                                     <input type="text" id="inputScanCompra" class="form-control border-start-0"
-                                        placeholder="Escanear código o buscar producto para agregar a la factura...">
+                                        placeholder="Escanear o buscar: entra a la grilla. Editá cantidad y costo en la fila."
+                                        autocomplete="off">
                                 </div>
+                                <p class="small text-muted mb-0 mt-1">Mismo código suma cantidad. La góndola no cambia salvo que tildes la fila.</p>
                             </div>
                         </div>
 
-                        <div class="table-responsive mb-3" style="min-height: 250px;">
-                            <table class="table table-bordered table-sm align-middle text-center">
+                        <div class="table-responsive mb-3 wrap-tabla-factura">
+                            <table class="table table-bordered table-sm align-middle text-center mb-0" id="tablaIngresoFactura">
                                 <thead class="table-light">
                                     <tr>
-                                        <th style="width: 10%;">Cant.</th>
-                                        <th style="width: 40%;" class="text-start">Producto</th>
-                                        <th style="width: 15%;">Lote/Venc (Opcional)</th>
-                                        <th style="width: 15%;">Costo Unit. Nuevo</th>
-                                        <th style="width: 15%;">Subtotal</th>
+                                        <th style="width: 9%;">Cant.</th>
+                                        <th class="text-start">Producto</th>
+                                        <th style="width: 12%;">Venc.</th>
+                                        <th style="width: 13%;">Costo unit.</th>
+                                        <th style="width: 11%;">Subtotal</th>
+                                        <th style="width: 16%;">Góndola</th>
                                         <th style="width: 5%;"></th>
                                     </tr>
                                 </thead>
                                 <tbody id="tablaIngresoBody">
                                     <tr>
-                                        <td colspan="6" class="text-muted py-4">La factura está vacía. Escanee
+                                        <td colspan="7" class="text-muted py-4">La factura está vacía. Escaneá
                                             productos.</td>
                                     </tr>
                                 </tbody>
                             </table>
                         </div>
 
-                        <div class="d-flex justify-content-between align-items-center bg-light p-3 rounded border">
-                            <button class="btn btn-outline-danger fw-bold" onclick="limpiarFactura()">Anular
-                                Carga</button>
-
-                            <div class="d-flex align-items-center justify-content-end flex-grow-1">
-                                <div class="me-4 text-end">
-                                    <label class="form-label fw-bold text-muted mb-0 small">Cargos Extra (IVA/Flete)
-                                        $</label>
+                        <div class="bg-light p-3 rounded border pie-factura-ingreso">
+                            <div class="row g-3 align-items-end">
+                                <div class="col-6 col-lg-2">
+                                    <label class="form-label fw-bold text-muted mb-0 small">Cargos extra $</label>
                                     <input type="number" id="inputCargosExtra"
-                                        class="form-control form-control-lg text-end fw-bold border-secondary" value="0"
-                                        step="0.01" style="width: 160px;" oninput="actualizarTotalVista()">
+                                        class="form-control text-end fw-bold" value="0"
+                                        step="0.01" oninput="actualizarTotalVista()">
                                 </div>
-
-                                <div class="text-end border-start ps-4">
-                                    <span class="fs-5 text-muted fw-bold d-block mb-1">TOTAL FACTURA:</span>
-                                    <span class="display-6 fw-bold text-primary" id="totalFacturaVista">$ 0.00</span>
+                                <div class="col-6 col-lg-2">
+                                    <label class="form-label fw-bold text-muted mb-0 small">Total del papel $</label>
+                                    <input type="number" id="inputTotalPapel"
+                                        class="form-control text-end fw-bold" placeholder="Opcional"
+                                        step="0.01" min="0" oninput="actualizarTotalVista()">
                                 </div>
-
-                                <button class="btn btn-success btn-lg fw-bold shadow-sm ms-4"
-                                    onclick="confirmarIngresoMercaderia()">
-                                    <i class="bi bi-check2-all"></i> GUARDAR INGRESO
-                                </button>
+                                <div class="col-12 col-lg-4">
+                                    <span class="small text-muted d-block">Suma ítems + extras</span>
+                                    <span class="fs-4 fw-bold text-primary" id="totalFacturaVista">$ 0.00</span>
+                                    <span class="d-block small fw-bold" id="avisoDescuadreFactura"></span>
+                                </div>
+                                <div class="col-12 col-lg-4 d-flex flex-wrap gap-2 justify-content-lg-end">
+                                    <button type="button" class="btn btn-outline-danger fw-bold" onclick="limpiarFactura()">Anular
+                                        carga</button>
+                                    <button type="button" class="btn btn-success btn-lg fw-bold shadow-sm"
+                                        onclick="confirmarIngresoMercaderia()">
+                                        <i class="bi bi-check2-all"></i> GUARDAR INGRESO
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         </div>
@@ -554,7 +590,7 @@
         }
     </script>
     <script src="js/layout.js?v=1.0.41"></script>
-    <script src="js/app_proveedores.js?v=1.0.40"></script>
+    <script src="js/app_proveedores.js?v=1.0.43"></script>
 </body>
 
 </html>

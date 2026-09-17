@@ -3055,7 +3055,8 @@ async function guardarFaltante() {
                 descripcion: nombre,
                 cantidad: cantidad,
                 notas: obs,
-                usuario_nombre: empleadoLogueado ? empleadoLogueado.nombre : "Caja Principal"
+                usuario_nombre: empleadoLogueado ? empleadoLogueado.nombre : "Caja Principal",
+                origen: 'POS'
             })
         });
 

@@ -21,7 +21,7 @@ class ItemFactura(BaseModel):
     producto_id: int
     cantidad_comprada: float
     costo_unitario: float
-    nuevo_precio_venta: float = None
+    nuevo_precio_venta: Optional[float] = None
     fecha_vencimiento: str = "2099-12-31"
     numero_lote_proveedor: str = "S/L"
 
@@ -36,6 +36,8 @@ class NuevaFacturaCompra(BaseModel):
     numero_factura: str
     condicion_pago: str
     cargos_extra: float = 0.0
+    fecha_compra: str = ""
+    forzar_duplicado: bool = False
     items: List[ItemFactura]
     pago_inmediato: Optional[PagoInmediato] = None
     
@@ -52,7 +54,60 @@ class DeudaRapida(BaseModel):
     condicion_pago: str
     total_factura: float
     observaciones: str = ""
+    fecha_compra: str = ""
+    forzar_duplicado: bool = False
     pago_inmediato: Optional[PagoInmediato] = None
+
+
+def _hoy_ar() -> str:
+    return datetime.now(ZONA_AR).strftime("%Y-%m-%d")
+
+
+def _normalizar_fecha_compra(fecha: Optional[str]) -> str:
+    texto = (fecha or "").strip()[:10]
+    if not texto:
+        return _hoy_ar()
+    try:
+        datetime.strptime(texto, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Fecha de factura inválida.")
+    return texto
+
+
+def _numero_factura_clave(numero: str) -> str:
+    return " ".join((numero or "").strip().upper().split())
+
+
+def _buscar_factura_duplicada(cursor, proveedor_id: int, numero: str):
+    clave = _numero_factura_clave(numero)
+    if not clave:
+        return None
+    cursor.execute(
+        '''
+        SELECT id, numero_factura, fecha_compra, total_factura
+        FROM compras_cabecera
+        WHERE proveedor_id = ?
+          AND UPPER(TRIM(numero_factura)) = ?
+        ORDER BY id DESC
+        LIMIT 1
+        ''',
+        (proveedor_id, clave),
+    )
+    return cursor.fetchone()
+
+
+def _exigir_factura_unica(cursor, proveedor_id: int, numero: str, forzar: bool):
+    dup = _buscar_factura_duplicada(cursor, proveedor_id, numero)
+    if not dup:
+        return
+    if forzar:
+        return
+    fecha = dup["fecha_compra"] if isinstance(dup, sqlite3.Row) else dup[2]
+    total = dup["total_factura"] if isinstance(dup, sqlite3.Row) else dup[3]
+    raise HTTPException(
+        status_code=409,
+        detail=f"Ese N° ya está cargado ({fecha}, ${float(total or 0):.2f}). Revisá o confirmá el duplicado.",
+    )
 
 
 def _usuario_desde_payload(payload: dict) -> int:
@@ -343,13 +398,15 @@ def registrar_deuda_rapida(deuda: DeudaRapida, background_tasks: BackgroundTasks
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="El proveedor no existe o está inactivo.")
 
-        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d")
+        numero = deuda.numero_factura.strip()
+        _exigir_factura_unica(cursor, deuda.proveedor_id, numero, deuda.forzar_duplicado)
+        fecha_compra = _normalizar_fecha_compra(deuda.fecha_compra)
         nota = (deuda.observaciones or "").strip() or "Carga rápida (sin detalle de ítems)"
 
         cursor.execute('''
             INSERT INTO compras_cabecera (proveedor_id, numero_factura, fecha_compra, total_factura, condicion_pago)
             VALUES (?, ?, ?, ?, ?)
-        ''', (deuda.proveedor_id, deuda.numero_factura.strip(), fecha_actual, deuda.total_factura, deuda.condicion_pago))
+        ''', (deuda.proveedor_id, numero, fecha_compra, deuda.total_factura, deuda.condicion_pago))
         compra_id = cursor.lastrowid
 
         cursor.execute('''
@@ -391,56 +448,86 @@ def registrar_deuda_rapida(deuda: DeudaRapida, background_tasks: BackgroundTasks
     finally:
         conexion.close()
 
+@router.get("/comprobar_factura", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def comprobar_factura(proveedor_id: int, numero: str):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        dup = _buscar_factura_duplicada(cursor, proveedor_id, numero)
+        if not dup:
+            return {"duplicada": False}
+        return {
+            "duplicada": True,
+            "id": dup["id"],
+            "numero_factura": dup["numero_factura"],
+            "fecha_compra": dup["fecha_compra"],
+            "total_factura": dup["total_factura"],
+        }
+    finally:
+        conexion.close()
+
+
 # --- 2. INGRESO DE MERCADERÍA (CON ACTUALIZACIÓN DE SALDO) ---
 @router.post("/cargar_factura")
 def ingresar_mercaderia(factura: NuevaFacturaCompra, background_tasks: BackgroundTasks,
                         payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
+    if not factura.items:
+        raise HTTPException(status_code=400, detail="La factura no tiene productos.")
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
     try:
-        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d")
+        numero = (factura.numero_factura or "").strip() or f"INT-{int(datetime.now(ZONA_AR).timestamp())}"
+        _exigir_factura_unica(cursor, factura.proveedor_id, numero, factura.forzar_duplicado)
+        fecha_compra = _normalizar_fecha_compra(factura.fecha_compra)
         total_acumulado = 0.0
         
         # 1. Creamos la cabecera de la compra
         cursor.execute('''
             INSERT INTO compras_cabecera (proveedor_id, numero_factura, fecha_compra, total_factura, condicion_pago)
             VALUES (?, ?, ?, 0, ?)
-        ''', (factura.proveedor_id, factura.numero_factura, fecha_actual, factura.condicion_pago))
+        ''', (factura.proveedor_id, numero, fecha_compra, factura.condicion_pago))
         compra_id = cursor.lastrowid
         
         # 2. Procesamos cada producto que llegó en el camión
         for item in factura.items:
+            if item.cantidad_comprada <= 0:
+                raise HTTPException(status_code=400, detail="Hay un ítem con cantidad inválida.")
+            if item.costo_unitario < 0:
+                raise HTTPException(status_code=400, detail="Hay un ítem con costo negativo.")
             subtotal_item = item.cantidad_comprada * item.costo_unitario
             total_acumulado += subtotal_item
             
-            # Buscamos el nombre para el historial
             cursor.execute("SELECT nombre FROM productos WHERE id = ?", (item.producto_id,))
             prod = cursor.fetchone()
+            if not prod:
+                raise HTTPException(status_code=400, detail=f"El producto #{item.producto_id} no existe.")
 
-            # A. Guardamos el detalle de la factura
             cursor.execute('''
                 INSERT INTO compras_detalle 
                 (compra_id, producto_id, descripcion_historica, cantidad_comprada, costo_unitario, fecha_vencimiento, numero_lote_proveedor)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (compra_id, item.producto_id, prod['nombre'], item.cantidad_comprada, item.costo_unitario, item.fecha_vencimiento, item.numero_lote_proveedor))
             
-            # B. SUMAMOS EL STOCK (Creamos el Lote)
             cursor.execute('''
                 INSERT INTO lotes_stock (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento, cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Activo')
-            ''', (item.producto_id, item.numero_lote_proveedor, fecha_actual, item.fecha_vencimiento, item.cantidad_comprada, item.cantidad_comprada, item.costo_unitario))
+            ''', (item.producto_id, item.numero_lote_proveedor, fecha_compra, item.fecha_vencimiento, item.cantidad_comprada, item.cantidad_comprada, item.costo_unitario))
 
-            compensar_deuda_stock(cursor, item.producto_id, fecha_actual)
-            
-            # C. ACTUALIZAMOS EL PRECIO MAESTRO (Si el usuario lo cambió en la ventanita)
+            compensar_deuda_stock(cursor, item.producto_id, fecha_compra)
+
+            # Costo siempre (CMV). Góndola solo si el operador la tildó.
+            cursor.execute(
+                "UPDATE productos SET costo_sin_iva = ? WHERE id = ?",
+                (item.costo_unitario, item.producto_id),
+            )
             if item.nuevo_precio_venta is not None:
-                cursor.execute('''
-                    UPDATE productos 
-                    SET precio_venta_final = ?, costo_sin_iva = ? 
-                    WHERE id = ?
-                ''', (item.nuevo_precio_venta, item.costo_unitario, item.producto_id))
+                cursor.execute(
+                    "UPDATE productos SET precio_venta_final = ? WHERE id = ?",
+                    (item.nuevo_precio_venta, item.producto_id),
+                )
 
 # 3. ACTUALIZAMOS EL TOTAL DE LA FACTURA (Sumando los cargos extra)
         total_final_real = total_acumulado + factura.cargos_extra

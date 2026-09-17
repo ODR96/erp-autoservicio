@@ -105,10 +105,19 @@ def asegurar_tablas_reportes():
         'estado': "TEXT DEFAULT 'PENDIENTE'",
         'fecha_pedido': 'TEXT',
         'fecha_recibido': 'TEXT',
+        'origen': "TEXT DEFAULT 'POS'",
     }
     for col, ddl in nuevas.items():
         if col not in columnas:
             cursor.execute(f"ALTER TABLE productos_solicitados_faltantes ADD COLUMN {col} {ddl}")
+
+    # Stock mínimo / lista de compras no es faltante de mostrador.
+    cursor.execute('''
+        UPDATE productos_solicitados_faltantes
+        SET origen = 'COMPRAS'
+        WHERE IFNULL(origen, 'POS') = 'POS'
+          AND usuario_anoto = 'Sistema (stock mínimo)'
+    ''')
 
     conexion.commit()
     conexion.close()
@@ -120,7 +129,8 @@ class ProductoFaltante(BaseModel):
     descripcion: str
     cantidad: float = 1.0
     notas: str = ""
-    usuario_nombre: str = "Desconocido" # <-- NUEVO: Atrapamos al responsable
+    usuario_nombre: str = "Desconocido"
+    origen: Literal['POS', 'COMPRAS'] = 'POS'
 
 class CambioEstadoFaltantes(BaseModel):
     ids: List[int]
@@ -276,9 +286,9 @@ def registrar_pedido_no_encontrado(p: ProductoFaltante):
     try:
         cursor.execute('''
             INSERT INTO productos_solicitados_faltantes
-                (descripcion_producto, cantidad_pedida, notas, usuario_anoto, estado, fecha_hora)
-            VALUES (?, ?, ?, ?, 'PENDIENTE', ?)
-        ''', (p.descripcion, p.cantidad, p.notas, p.usuario_nombre, _ahora_ar().strftime("%Y-%m-%d %H:%M:%S")))
+                (descripcion_producto, cantidad_pedida, notas, usuario_anoto, estado, fecha_hora, origen)
+            VALUES (?, ?, ?, ?, 'PENDIENTE', ?, ?)
+        ''', (p.descripcion, p.cantidad, p.notas, p.usuario_nombre, _ahora_ar().strftime("%Y-%m-%d %H:%M:%S"), p.origen))
         nuevo_id = cursor.lastrowid
         conexion.commit()
         return {"mensaje": "Anotado.", "id": nuevo_id}

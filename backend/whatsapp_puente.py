@@ -183,6 +183,7 @@ def avisar_faltantes_del_turno(turno_id, fecha_apertura, fecha_cierre, cajero: s
             SELECT descripcion_producto, cantidad_pedida, usuario_anoto
             FROM productos_solicitados_faltantes
             WHERE IFNULL(estado, 'PENDIENTE') = 'PENDIENTE'
+              AND IFNULL(origen, 'POS') = 'POS'
               AND fecha_hora >= ? AND fecha_hora <= ?
             ORDER BY id ASC
             ''',
