@@ -80,9 +80,11 @@ function chatFacturaPermitido(message) {
 }
 
 function esMediaFactura(message) {
-    if (!message || !message.hasMedia) return false;
-    if (message.type === 'sticker' || message.type === 'ptt' || message.type === 'audio') return false;
-    return message.type === 'image' || message.type === 'document';
+    if (!message) return false;
+    const t = message.type || '';
+    if (t === 'sticker' || t === 'ptt' || t === 'audio' || t === 'vcard' || t === 'location') return false;
+    if (t === 'image' || t === 'document') return true;
+    return !!message.hasMedia;
 }
 
 function postJson(url, payload) {
@@ -173,13 +175,7 @@ async function onMensajeEntrante(message) {
     }
 }
 
-client.on('message', (message) => {
-    if (message.fromMe) return;
-    onMensajeEntrante(message);
-});
-
 client.on('message_create', (message) => {
-    if (!message.fromMe) return;
     onMensajeEntrante(message).catch((e) => console.error(e));
 });
 
