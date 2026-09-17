@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP Admin - Reportes</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/estilos.css?v=1.0.34">
+</head>
+<body>
+    <div id="layout-sidebar-placeholder"></div>
+    <div class="main-wrapper">
+        <div id="layout-navbar-placeholder"></div>
+        <div class="content-area">
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
+                <h3 class="fw-bold mb-0"><i class="bi bi-bar-chart text-primary"></i> Reportes</h3>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <label class="small fw-bold text-muted mb-0" for="inputMesReporte">Mes</label>
+                    <input type="month" id="inputMesReporte" class="form-control form-control-sm fw-bold" style="max-width: 170px;">
+                    <button type="button" class="btn btn-primary btn-sm fw-bold" onclick="cargarReportes()">
+                        <i class="bi bi-arrow-repeat"></i> Actualizar
+                    </button>
+                </div>
+            </div>
+            <p class="text-muted small mb-3">Auditoría del mes. El dashboard es el vistazo; acá filtrás y exportás. No carga stock ni toca caja.</p>
+
+            <ul class="nav nav-tabs mb-3" id="tabsReportes">
+                <li class="nav-item">
+                    <button type="button" class="nav-link active fw-bold" data-tab="rentabilidad" onclick="cambiarTabReporte('rentabilidad')">Rentabilidad</button>
+                </li>
+                <li class="nav-item">
+                    <button type="button" class="nav-link fw-bold text-secondary" data-tab="ranking" onclick="cambiarTabReporte('ranking')">Qué se vende</button>
+                </li>
+                <li class="nav-item">
+                    <button type="button" class="nav-link fw-bold text-secondary" data-tab="mix" onclick="cambiarTabReporte('mix')">Cómo pagan</button>
+                </li>
+                <li class="nav-item">
+                    <button type="button" class="nav-link fw-bold text-secondary" data-tab="clavos" onclick="cambiarTabReporte('clavos')">Clavos / 30 días</button>
+                </li>
+                <li class="nav-item">
+                    <button type="button" class="nav-link fw-bold text-secondary" data-tab="dias" onclick="cambiarTabReporte('dias')">Ventas por día</button>
+                </li>
+                <li class="nav-item">
+                    <button type="button" class="nav-link fw-bold text-secondary" data-tab="cierres" onclick="cambiarTabReporte('cierres')">Cierres de caja</button>
+                </li>
+            </ul>
+
+            <div id="tab-rentabilidad" class="tab-reporte">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="small text-muted" id="txtMesRentabilidad">—</span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold" onclick="exportarCsvRentabilidad()">CSV</button>
+                </div>
+                <div class="table-responsive bg-white border rounded">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Concepto</th>
+                                <th class="text-end">Este mes</th>
+                                <th class="text-end">Mes anterior</th>
+                                <th class="text-end">Dif.</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaRentabilidad"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="tab-ranking" class="tab-reporte d-none">
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold" onclick="exportarCsvRanking()">CSV</button>
+                </div>
+                <div class="table-responsive bg-white border rounded">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>#</th>
+                                <th>Producto</th>
+                                <th class="text-end">Unidades</th>
+                                <th class="text-end">Recaudación</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaRanking"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="tab-mix" class="tab-reporte d-none">
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold" onclick="exportarCsvMix()">CSV</button>
+                </div>
+                <div class="table-responsive bg-white border rounded">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Medio</th>
+                                <th class="text-end">Tickets</th>
+                                <th class="text-end">Importe</th>
+                                <th class="text-end">% del mes</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaMix"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="tab-clavos" class="tab-reporte d-none">
+                <p class="small text-muted">Stock activo sin ventas en 30 días y lote de más de 30 días. No depende del mes elegido.</p>
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold" onclick="exportarCsvClavos()">CSV</button>
+                </div>
+                <div class="table-responsive bg-white border rounded">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Producto</th>
+                                <th class="text-end">Stock</th>
+                                <th class="text-end">Días clavado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaClavos"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="tab-dias" class="tab-reporte d-none">
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold" onclick="exportarCsvDias()">CSV</button>
+                </div>
+                <div class="table-responsive bg-white border rounded">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Día</th>
+                                <th class="text-end">Tickets</th>
+                                <th class="text-end">Total</th>
+                                <th class="text-end">Efectivo</th>
+                                <th class="text-end">Fiado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaDias"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="tab-cierres" class="tab-reporte d-none">
+                <p class="small text-muted mb-2">Margen = ventas − CMV del turno. Faltante = declarado vs sistema. No se le prorratea alquiler ni sueldo al Z.</p>
+                <div id="resumenCierres" class="small fw-bold text-muted mb-2">—</div>
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold" onclick="exportarCsvCierres()">CSV</button>
+                </div>
+                <div class="table-responsive bg-white border rounded">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>#</th>
+                                <th>Cajero</th>
+                                <th>Apertura</th>
+                                <th>Cierre</th>
+                                <th>Estado</th>
+                                <th class="text-end">Ventas</th>
+                                <th class="text-end">CMV</th>
+                                <th class="text-end">Margen</th>
+                                <th class="text-end">Faltante</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaCierres"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="js/layout.js?v=1.0.42"></script>
+    <script src="js/app_reportes.js?v=1.0.3"></script>
+</body>
+</html>

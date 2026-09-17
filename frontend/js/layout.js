@@ -88,13 +88,13 @@ function inyectarLayout() {
                 <a href="admin_clientes.html" class="menu-item"><i class="bi bi-people"></i> Clientes (Cta Cte)</a>
                 <a href="admin_proveedores.html" class="menu-item"><i class="bi bi-building"></i> Proveedores</a>
                 
-                ${esAdmin ? `<a href="#" class="menu-item"><i class="bi bi-bar-chart"></i> Reportes</a>` : ''}
+                ${esAdmin ? `<a href="admin_reportes.html" class="menu-item"><i class="bi bi-bar-chart"></i> Reportes</a>` : ''}
                 ${esAdmin ? `<a href="admin_config.html" class="menu-item"><i class="bi bi-gear"></i> Configuración</a>` : ''}
             </div>
 
             <!-- FOOTER DE VERSIÓN -->
             <div class="sidebar-footer mt-auto py-3 text-center" style="background-color: rgba(0,0,0,0.2); border-top: 1px solid rgba(255,255,255,0.05);">
-                <div class="text-secondary small fw-bold" style="letter-spacing: 1px;">ERPetto | ODR Systems</div>
+                <div class="text-secondary small fw-bold" style="letter-spacing: 1px;">ERP | ODR Systems</div>
                 <div class="badge bg-secondary text-light mt-1"><i class="bi bi-git me-1"></i> ${APP_VERSION}</div>
             </div>
         </div>

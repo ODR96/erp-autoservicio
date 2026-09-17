@@ -414,15 +414,17 @@ def borrar_faltante_resuelto(faltante_id: int):
 
 # --- 2. RANKING DE PRODUCTOS (Top Ventas) ---
 @router.get("/ranking_ventas", dependencies=[Depends(VerificarRol(["ADMIN"]))])
-def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
+def obtener_ranking_productos(periodo: str = "dia", mes: str = None, limit: int = 10):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
-    # Definimos el filtro de fecha según el periodo
+
     hoy = _hoy_ar_iso()
-    mes = _mes_ar()
-    if periodo == "dia":
+    tope = max(1, min(int(limit or 10), 100))
+    if mes:
+        filtro = "strftime('%Y-%m', vc.fecha_hora) = ?"
+        params = (_mes_ar(mes),)
+    elif periodo == "dia":
         filtro = "date(vc.fecha_hora) = ?"
         params = (hoy,)
     elif periodo == "semana":
@@ -430,7 +432,7 @@ def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
         params = (hoy,)
     else:
         filtro = "strftime('%Y-%m', vc.fecha_hora) = ?"
-        params = (mes,)
+        params = (_mes_ar(),)
 
     query = f'''
         SELECT p.nombre, SUM(vd.cantidad) as total_vendido, SUM(vd.subtotal) as recaudacion
@@ -441,7 +443,7 @@ def obtener_ranking_productos(periodo: str = "dia"): # dia, semana, mes
         AND vc.estado != 'ANULADA'
         GROUP BY p.id
         ORDER BY total_vendido DESC
-        LIMIT 10
+        LIMIT {tope}
     '''
     cursor.execute(query, params)
     ranking = cursor.fetchall()
@@ -481,7 +483,7 @@ def productos_sin_salida():
         conexion.close()
 
 @router.get("/ventas_por_pago", dependencies=[Depends(VerificarRol(["ADMIN"]))])
-def ventas_por_metodo():
+def ventas_por_metodo(mes: str = None):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -526,7 +528,7 @@ def ventas_por_metodo():
             GROUP BY metodo_pago_traducido
             ORDER BY total_dinero DESC
         '''
-        mes = _mes_ar()
+        mes = _mes_ar(mes)
         cursor.execute(query, (mes, mes))
         metodos = [dict(row) for row in cursor.fetchall()]
         return metodos
@@ -615,5 +617,76 @@ def detalle_ventas_por_hora(hora: str):
     except Exception as e:
         print(f"🚨 Error en detalle_hora: {e}")
         return {"error": str(e)}
+    finally:
+        conexion.close()
+
+
+@router.get("/cierres", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def listar_cierres_mes(mes: str = None):
+    mes = _mes_ar(mes)
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute('''
+            WITH ventas_turno AS (
+                SELECT turno_id,
+                       COUNT(id) AS tickets,
+                       IFNULL(SUM(total_venta), 0) AS ventas
+                FROM ventas_cabecera
+                WHERE estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
+                GROUP BY turno_id
+            ),
+            cmv_turno AS (
+                SELECT c.turno_id,
+                       IFNULL(SUM(d.cantidad * COALESCE(d.costo_unitario_historico, p.costo_sin_iva, 0)), 0) AS cmv
+                FROM ventas_detalle d
+                JOIN ventas_cabecera c ON d.venta_id = c.id
+                LEFT JOIN productos p ON d.producto_id = p.id
+                WHERE c.estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
+                GROUP BY c.turno_id
+            )
+            SELECT t.id, t.caja_id, t.fecha_hora_apertura, t.fecha_hora_cierre,
+                   t.monto_inicial, t.monto_final_sistema, t.monto_final_declarado,
+                   t.diferencia, t.estado_turno,
+                   IFNULL(u.nombre_completo, '—') as cajero,
+                   IFNULL(cf.nombre, '') as caja_nombre,
+                   IFNULL(vt.tickets, 0) as tickets,
+                   IFNULL(vt.ventas, 0) as ventas,
+                   IFNULL(ct.cmv, 0) as cmv,
+                   ROUND(IFNULL(vt.ventas, 0) - IFNULL(ct.cmv, 0), 2) as ganancia_bruta
+            FROM turnos_caja t
+            LEFT JOIN usuarios u ON t.usuario_id = u.id
+            LEFT JOIN cajas_fisicas cf ON t.caja_id = cf.id
+            LEFT JOIN ventas_turno vt ON vt.turno_id = t.id
+            LEFT JOIN cmv_turno ct ON ct.turno_id = t.id
+            WHERE strftime('%Y-%m', t.fecha_hora_apertura) = ?
+            ORDER BY t.fecha_hora_apertura DESC
+        ''', (mes,))
+        return {"cierres": [dict(r) for r in cursor.fetchall()], "mes": mes}
+    finally:
+        conexion.close()
+
+
+@router.get("/ventas_por_dia", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def ventas_por_dia(mes: str = None):
+    mes = _mes_ar(mes)
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute('''
+            SELECT date(fecha_hora) as dia,
+                   COUNT(id) as tickets,
+                   IFNULL(SUM(total_venta), 0) as total,
+                   IFNULL(SUM(CASE WHEN UPPER(metodo_pago) LIKE '%EFECTIVO%' THEN total_venta ELSE 0 END), 0) as efectivo,
+                   IFNULL(SUM(CASE WHEN UPPER(metodo_pago) IN ('CUENTA CORRIENTE', 'FIADO') THEN total_venta ELSE 0 END), 0) as fiado
+            FROM ventas_cabecera
+            WHERE strftime('%Y-%m', fecha_hora) = ?
+              AND estado != 'ANULADA'
+            GROUP BY date(fecha_hora)
+            ORDER BY dia
+        ''', (mes,))
+        return {"dias": [dict(r) for r in cursor.fetchall()], "mes": mes}
     finally:
         conexion.close()
