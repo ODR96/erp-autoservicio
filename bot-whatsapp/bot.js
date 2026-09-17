@@ -63,14 +63,20 @@ function exigirToken(req, res, next) {
     next();
 }
 
+function esChatDirecto(id) {
+    const s = String(id || '');
+    return s.endsWith('@c.us') || s.endsWith('@lid');
+}
+
 function chatFacturaPermitido(message) {
     const from = message.from || '';
-    if (from === 'status@broadcast') return false;
+    if (from === 'status@broadcast' || from.endsWith('@g.us')) return false;
     const peer = message.fromMe ? (message.to || from) : from;
+    if (peer === 'status@broadcast' || String(peer).endsWith('@g.us')) return false;
     if (CHATS_FACTURA.length) {
         return CHATS_FACTURA.includes(from) || CHATS_FACTURA.includes(peer);
     }
-    return String(peer).endsWith('@c.us');
+    return esChatDirecto(peer);
 }
 
 function esMediaFactura(message) {
@@ -120,7 +126,11 @@ function detalleErp(json) {
 }
 
 async function mandarFotoAlErp(message) {
-    if (!esMediaFactura(message) || !chatFacturaPermitido(message)) return;
+    if (!esMediaFactura(message)) return;
+    if (!chatFacturaPermitido(message)) {
+        console.log(`Foto ignorada chat=${message.from} type=${message.type}`);
+        return;
+    }
     const media = await message.downloadMedia();
     if (!media || !media.data) return;
     const mime = (media.mimetype || 'image/jpeg').split(';')[0].trim().toLowerCase();
@@ -149,7 +159,7 @@ async function mandarFotoAlErp(message) {
 
 async function onMensajeEntrante(message) {
     const from = message.from || '';
-    console.log(`MSG from=${from} author=${message.author || '-'} body=${String(message.body || '').slice(0, 80)}`);
+    console.log(`MSG from=${from} type=${message.type || '-'} media=${!!message.hasMedia} author=${message.author || '-'} body=${String(message.body || '').slice(0, 80)}`);
     if (from.endsWith('@g.us')) {
         gruposVistos.set(from, { nombre: '', id: from });
     }
