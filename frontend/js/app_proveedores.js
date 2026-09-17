@@ -189,8 +189,13 @@ function llenarSelectoresProveedores() {
 // 2. INGRESO DE FACTURAS (GRILLA EDITABLE)
 // ==========================================
 const CLAVE_BORRADOR_FACTURA = 'erpetto_borrador_factura_v1';
+const CLAVE_BORRADOR_ID = 'erpetto_borrador_factura_id';
 let timerBorradorFactura = null;
 let restaurandoBorradorFactura = false;
+let borradorServidorId = null;
+let fotosBorradorActual = [];
+let listaBorradoresCache = [];
+const blobFotosBorrador = {};
 
 function hoyISOLocal() {
     const d = new Date();
@@ -232,57 +237,408 @@ function leerCabeceraFactura() {
     };
 }
 
-function guardarBorradorFactura() {
-    if (restaurandoBorradorFactura) return;
+function marcarEstadoBorradorFactura(texto) {
+    const el = document.getElementById('estadoBorradorFactura');
+    if (el) el.textContent = texto;
+}
+
+function payloadBorradorActual() {
+    return { cab: leerCabeceraFactura(), items: facturaActualItems };
+}
+
+function borradorTieneContenido() {
     const cab = leerCabeceraFactura();
-    const vacio = facturaActualItems.length === 0
-        && !(cab.numero || '').trim()
-        && !(cab.total_deuda || '').toString().trim()
-        && !(cab.total_papel || '').toString().trim()
-        && !(parseFloat(cab.cargos) > 0);
-    if (vacio) {
+    return facturaActualItems.length > 0
+        || fotosBorradorActual.length > 0
+        || !!(cab.numero || '').trim()
+        || !!(cab.total_deuda || '').toString().trim()
+        || !!(cab.total_papel || '').toString().trim()
+        || parseFloat(cab.cargos) > 0;
+}
+
+function revocarBlobsFotosBorrador() {
+    Object.keys(blobFotosBorrador).forEach((k) => {
+        try { URL.revokeObjectURL(blobFotosBorrador[k]); } catch (e) { /* */ }
+        delete blobFotosBorrador[k];
+    });
+}
+
+function guardarBorradorLocalCache() {
+    if (restaurandoBorradorFactura) return;
+    if (!borradorTieneContenido() && !borradorServidorId) {
         localStorage.removeItem(CLAVE_BORRADOR_FACTURA);
+        localStorage.removeItem(CLAVE_BORRADOR_ID);
         return;
     }
-    localStorage.setItem(CLAVE_BORRADOR_FACTURA, JSON.stringify({ cab, items: facturaActualItems }));
+    localStorage.setItem(CLAVE_BORRADOR_FACTURA, JSON.stringify(payloadBorradorActual()));
+    if (borradorServidorId) localStorage.setItem(CLAVE_BORRADOR_ID, String(borradorServidorId));
+    else localStorage.removeItem(CLAVE_BORRADOR_ID);
+}
+
+function aplicarCabeceraFactura(cab) {
+    cab = cab || {};
+    if (cab.modo) cambiarModoIngreso(cab.modo);
+    if (document.getElementById('selectProvIngreso')) {
+        document.getElementById('selectProvIngreso').value = cab.proveedor_id || '';
+    }
+    if (document.getElementById('inputNumFactura')) document.getElementById('inputNumFactura').value = cab.numero || '';
+    if (cab.condicion && document.getElementById('selectCondicionPago')) {
+        document.getElementById('selectCondicionPago').value = cab.condicion;
+    }
+    if (document.getElementById('inputFechaFactura')) {
+        document.getElementById('inputFechaFactura').value = cab.fecha || hoyISOLocal();
+    }
+    if (document.getElementById('inputCargosExtra')) document.getElementById('inputCargosExtra').value = cab.cargos || '0';
+    if (document.getElementById('inputTotalPapel')) document.getElementById('inputTotalPapel').value = cab.total_papel || '';
+    if (document.getElementById('inputTotalDeudaRapida')) document.getElementById('inputTotalDeudaRapida').value = cab.total_deuda || '';
+    if (document.getElementById('inputObsDeudaRapida')) document.getElementById('inputObsDeudaRapida').value = cab.obs_deuda || '';
+}
+
+function aplicarPayloadBorrador(data) {
+    restaurandoBorradorFactura = true;
+    aplicarCabeceraFactura(data.cab || {});
+    facturaActualItems = Array.isArray(data.items) ? data.items.map(normalizarItemFactura) : [];
+    fotosBorradorActual = Array.isArray(data.fotos) ? data.fotos : [];
+    borradorServidorId = data.id || null;
+    dibujarTablaFactura();
+    dibujarFotosBorrador();
+    restaurandoBorradorFactura = false;
+    guardarBorradorLocalCache();
+}
+
+function dibujarSelectBorradores() {
+    const sel = document.getElementById('selectBorradorFactura');
+    if (!sel) return;
+    sel.dataset.silent = '1';
+    const actualEnLista = listaBorradoresCache.some((b) => Number(b.id) === Number(borradorServidorId));
+    let html = '<option value="">Nuevo (sin guardar)</option>';
+    listaBorradoresCache.forEach((b) => {
+        html += `<option value="${b.id}">${escapeHtmlFactura(b.titulo || ('#' + b.id))}</option>`;
+    });
+    sel.innerHTML = html;
+    if (borradorServidorId && actualEnLista) sel.value = String(borradorServidorId);
+    else if (borradorServidorId) {
+        sel.innerHTML = `<option value="${borradorServidorId}">#${borradorServidorId} (este)</option>` + html;
+        sel.value = String(borradorServidorId);
+    } else {
+        sel.value = '';
+    }
+    delete sel.dataset.silent;
+}
+
+async function urlBlobFotoBorrador(foto) {
+    const key = `${borradorServidorId}:${foto.id}`;
+    if (blobFotosBorrador[key]) return blobFotosBorrador[key];
+    const res = await fetch(`${obtenerBaseUrl()}/proveedores/borradores/${borradorServidorId}/fotos/${foto.id}`);
+    if (!res.ok) throw new Error('No se pudo abrir la foto.');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    blobFotosBorrador[key] = url;
+    return url;
+}
+
+function dibujarFotosBorrador() {
+    const caja = document.getElementById('galeriaFotosBorrador');
+    if (!caja) return;
+    if (!fotosBorradorActual.length) {
+        caja.innerHTML = '';
+        return;
+    }
+    caja.innerHTML = fotosBorradorActual.map((f) => {
+        const esPdf = (f.mime || '').indexOf('pdf') >= 0;
+        return `<div class="foto-borrador-thumb" data-foto-id="${escapeHtmlFactura(f.id)}">
+            ${esPdf
+                ? '<div class="d-flex h-100 align-items-center justify-content-center text-danger"><i class="bi bi-file-earmark-pdf fs-3"></i></div>'
+                : '<div class="d-flex h-100 align-items-center justify-content-center text-muted"><i class="bi bi-image"></i></div>'}
+            <button type="button" class="btn btn-danger btn-sm btn-del-foto" title="Quitar"
+                onclick="quitarFotoBorrador('${escapeHtmlFactura(f.id)}')">&times;</button>
+        </div>`;
+    }).join('');
+    fotosBorradorActual.forEach(async (f) => {
+        if ((f.mime || '').indexOf('pdf') >= 0 || !borradorServidorId) return;
+        try {
+            const url = await urlBlobFotoBorrador(f);
+            const nodo = caja.querySelector(`[data-foto-id="${f.id}"]`);
+            if (!nodo) return;
+            const img = document.createElement('img');
+            img.alt = f.filename || 'foto';
+            img.src = url;
+            const placeholder = nodo.querySelector('.d-flex');
+            if (placeholder) placeholder.replaceWith(img);
+        } catch (e) { /* miniatura opcional */ }
+    });
+}
+
+async function refrescarListaBorradores() {
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/proveedores/borradores`);
+        const data = await res.json().catch(() => []);
+        listaBorradoresCache = Array.isArray(data) ? data : [];
+        dibujarSelectBorradores();
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function flushBorradorServidor() {
+    if (restaurandoBorradorFactura) return null;
+    guardarBorradorLocalCache();
+    if (!borradorTieneContenido() && !borradorServidorId) {
+        marcarEstadoBorradorFactura('Sin borrador.');
+        return null;
+    }
+    const body = JSON.stringify(payloadBorradorActual());
+    try {
+        let res;
+        if (!borradorServidorId) {
+            res = await fetch(`${obtenerBaseUrl()}/proveedores/borradores`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body
+            });
+        } else {
+            res = await fetch(`${obtenerBaseUrl()}/proveedores/borradores/${borradorServidorId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body
+            });
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(detalleApi(data));
+        borradorServidorId = data.id;
+        fotosBorradorActual = Array.isArray(data.fotos) ? data.fotos : fotosBorradorActual;
+        guardarBorradorLocalCache();
+        await refrescarListaBorradores();
+        const nFotos = fotosBorradorActual.length;
+        marcarEstadoBorradorFactura(
+            `Borrador #${borradorServidorId} en el servidor` + (nFotos ? ` · ${nFotos} foto${nFotos === 1 ? '' : 's'}` : '') + '.'
+        );
+        return data;
+    } catch (e) {
+        marcarEstadoBorradorFactura('Sin conexión · guardado en este navegador.');
+        return null;
+    }
 }
 
 function programarBorradorFactura() {
+    if (restaurandoBorradorFactura) return;
+    guardarBorradorLocalCache();
     clearTimeout(timerBorradorFactura);
-    timerBorradorFactura = setTimeout(guardarBorradorFactura, 250);
+    timerBorradorFactura = setTimeout(() => { flushBorradorServidor(); }, 700);
 }
 
-function restaurarBorradorFactura() {
+function guardarBorradorFactura() {
+    programarBorradorFactura();
+}
+
+async function cargarBorradorServidor(id) {
+    const res = await fetch(`${obtenerBaseUrl()}/proveedores/borradores/${id}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(detalleApi(data));
+    revocarBlobsFotosBorrador();
+    aplicarPayloadBorrador(data);
+    await refrescarListaBorradores();
+    const nFotos = fotosBorradorActual.length;
+    marcarEstadoBorradorFactura(
+        `Borrador #${id} en el servidor` + (nFotos ? ` · ${nFotos} foto${nFotos === 1 ? '' : 's'}` : '') + '.'
+    );
+}
+
+function resetFormularioFacturaLocal() {
+    restaurandoBorradorFactura = true;
+    facturaActualItems = [];
+    fotosBorradorActual = [];
+    if (document.getElementById('inputNumFactura')) document.getElementById('inputNumFactura').value = '';
+    const extra = document.getElementById('inputCargosExtra');
+    if (extra) extra.value = '0';
+    const papel = document.getElementById('inputTotalPapel');
+    if (papel) papel.value = '';
+    const deuda = document.getElementById('inputTotalDeudaRapida');
+    if (deuda) deuda.value = '';
+    const obs = document.getElementById('inputObsDeudaRapida');
+    if (obs) obs.value = '';
     asegurarFechaFactura();
+    revocarBlobsFotosBorrador();
+    dibujarTablaFactura();
+    dibujarFotosBorrador();
+    restaurandoBorradorFactura = false;
+}
+
+async function iniciarBorradoresFactura() {
+    asegurarFechaFactura();
+    const online = await refrescarListaBorradores();
+    const idGuardado = parseInt(localStorage.getItem(CLAVE_BORRADOR_ID) || '', 10);
+    if (online && idGuardado && listaBorradoresCache.some((b) => Number(b.id) === idGuardado)) {
+        try {
+            await cargarBorradorServidor(idGuardado);
+            Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Borrador recuperado del servidor', showConfirmButton: false, timer: 2200 });
+            return;
+        } catch (e) { /* cae a local */ }
+    }
+    if (online && listaBorradoresCache.length) {
+        try {
+            await cargarBorradorServidor(listaBorradoresCache[0].id);
+            Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Borrador abierto en el servidor', showConfirmButton: false, timer: 2200 });
+            return;
+        } catch (e) { /* cae a local */ }
+    }
     const raw = localStorage.getItem(CLAVE_BORRADOR_FACTURA);
-    if (!raw) return;
+    if (!raw) {
+        marcarEstadoBorradorFactura('Sin borrador.');
+        dibujarFotosBorrador();
+        return;
+    }
     try {
         const data = JSON.parse(raw);
-        restaurandoBorradorFactura = true;
-        const cab = data.cab || {};
-        if (cab.modo) cambiarModoIngreso(cab.modo);
-        if (cab.proveedor_id) document.getElementById('selectProvIngreso').value = cab.proveedor_id;
-        if (document.getElementById('inputNumFactura')) document.getElementById('inputNumFactura').value = cab.numero || '';
-        if (cab.condicion) document.getElementById('selectCondicionPago').value = cab.condicion;
-        document.getElementById('inputFechaFactura').value = cab.fecha || hoyISOLocal();
-        if (document.getElementById('inputCargosExtra')) document.getElementById('inputCargosExtra').value = cab.cargos || '0';
-        if (document.getElementById('inputTotalPapel')) document.getElementById('inputTotalPapel').value = cab.total_papel || '';
-        if (document.getElementById('inputTotalDeudaRapida')) document.getElementById('inputTotalDeudaRapida').value = cab.total_deuda || '';
-        if (document.getElementById('inputObsDeudaRapida')) document.getElementById('inputObsDeudaRapida').value = cab.obs_deuda || '';
-        facturaActualItems = Array.isArray(data.items) ? data.items : [];
-        dibujarTablaFactura();
-        restaurandoBorradorFactura = false;
-        if (facturaActualItems.length || (cab.numero || '').trim()) {
-            Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Borrador de factura recuperado', showConfirmButton: false, timer: 2200 });
+        aplicarPayloadBorrador({ cab: data.cab || {}, items: data.items || [], fotos: [], id: null });
+        if (borradorTieneContenido()) {
+            await flushBorradorServidor();
+            Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Borrador local pasado al servidor', showConfirmButton: false, timer: 2200 });
         }
     } catch (e) {
         restaurandoBorradorFactura = false;
     }
 }
 
+async function onChangeSelectBorrador() {
+    const sel = document.getElementById('selectBorradorFactura');
+    if (!sel || sel.dataset.silent) return;
+    const id = parseInt(sel.value, 10);
+    if (!id) {
+        sel.value = borradorServidorId ? String(borradorServidorId) : '';
+        return;
+    }
+    if (Number(id) === Number(borradorServidorId)) return;
+    await flushBorradorServidor();
+    try {
+        await cargarBorradorServidor(id);
+    } catch (e) {
+        Swal.fire('Error', e.message || 'No se pudo abrir el borrador.', 'error');
+    }
+}
+
+async function nuevoBorradorFactura() {
+    await flushBorradorServidor();
+    borradorServidorId = null;
+    localStorage.removeItem(CLAVE_BORRADOR_ID);
+    resetFormularioFacturaLocal();
+    localStorage.removeItem(CLAVE_BORRADOR_FACTURA);
+    await refrescarListaBorradores();
+    marcarEstadoBorradorFactura('Nuevo borrador. Se guarda al cargar algo.');
+}
+
+async function anularCargaFactura() {
+    const ok = await Swal.fire({
+        title: '¿Anular esta carga?',
+        text: 'El borrador se cierra en el servidor. Las fotos quedan archivadas, el stock no se toca.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Anular',
+        cancelButtonText: 'Seguir editando',
+        confirmButtonColor: '#d33'
+    });
+    if (!ok.isConfirmed) return;
+    if (borradorServidorId) {
+        try {
+            await fetch(`${obtenerBaseUrl()}/proveedores/borradores/${borradorServidorId}/anular`, { method: 'POST' });
+        } catch (e) { /* si no hay red, igual limpiamos la pantalla */ }
+    }
+    borradorServidorId = null;
+    localStorage.removeItem(CLAVE_BORRADOR_FACTURA);
+    localStorage.removeItem(CLAVE_BORRADOR_ID);
+    resetFormularioFacturaLocal();
+    await refrescarListaBorradores();
+    marcarEstadoBorradorFactura('Sin borrador.');
+}
+
+async function marcarBorradorConfirmado(compraId) {
+    if (!borradorServidorId) {
+        resetFormularioFacturaLocal();
+        localStorage.removeItem(CLAVE_BORRADOR_FACTURA);
+        localStorage.removeItem(CLAVE_BORRADOR_ID);
+        return;
+    }
+    try {
+        await fetch(`${obtenerBaseUrl()}/proveedores/borradores/${borradorServidorId}/confirmar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ compra_id: compraId || null })
+        });
+    } catch (e) { /* la factura ya se grabó */ }
+    borradorServidorId = null;
+    localStorage.removeItem(CLAVE_BORRADOR_FACTURA);
+    localStorage.removeItem(CLAVE_BORRADOR_ID);
+    resetFormularioFacturaLocal();
+    await refrescarListaBorradores();
+    marcarEstadoBorradorFactura('Sin borrador.');
+}
+
+async function onInputFotoBorrador(input) {
+    const files = Array.from(input.files || []);
+    input.value = '';
+    if (!files.length) return;
+    let data = await flushBorradorServidor();
+    if (!borradorServidorId) {
+        const creado = await fetch(`${obtenerBaseUrl()}/proveedores/borradores`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payloadBorradorActual())
+        });
+        data = await creado.json().catch(() => ({}));
+        if (!creado.ok) return Swal.fire('Error', detalleApi(data), 'error');
+        borradorServidorId = data.id;
+        guardarBorradorLocalCache();
+    }
+    for (const file of files) {
+        const fd = new FormData();
+        fd.append('archivo', file);
+        try {
+            const res = await fetch(`${obtenerBaseUrl()}/proveedores/borradores/${borradorServidorId}/fotos`, {
+                method: 'POST',
+                body: fd
+            });
+            const out = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(detalleApi(out));
+            fotosBorradorActual = (out.borrador && out.borrador.fotos) || fotosBorradorActual;
+        } catch (e) {
+            Swal.fire('Foto', e.message || 'No se pudo adjuntar.', 'error');
+            break;
+        }
+    }
+    dibujarFotosBorrador();
+    await refrescarListaBorradores();
+    marcarEstadoBorradorFactura(`Borrador #${borradorServidorId} en el servidor · ${fotosBorradorActual.length} foto(s).`);
+}
+
+async function quitarFotoBorrador(fotoId) {
+    if (!borradorServidorId || !fotoId) return;
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/proveedores/borradores/${borradorServidorId}/fotos/${fotoId}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(detalleApi(data));
+        fotosBorradorActual = Array.isArray(data.fotos) ? data.fotos : fotosBorradorActual.filter((f) => f.id !== fotoId);
+        const key = `${borradorServidorId}:${fotoId}`;
+        if (blobFotosBorrador[key]) {
+            try { URL.revokeObjectURL(blobFotosBorrador[key]); } catch (e) { /* */ }
+            delete blobFotosBorrador[key];
+        }
+        dibujarFotosBorrador();
+        await refrescarListaBorradores();
+    } catch (e) {
+        Swal.fire('Error', e.message || 'No se pudo quitar la foto.', 'error');
+    }
+}
+
+function restaurarBorradorFactura() {
+    iniciarBorradoresFactura();
+}
+
 function totalCalculadoFactura() {
     const extra = parseFloat(document.getElementById('inputCargosExtra')?.value) || 0;
-    const items = facturaActualItems.reduce((acc, it) => acc + (Number(it.cantidad_comprada) * Number(it.costo_unitario)), 0);
+    const items = facturaActualItems.reduce((acc, it) => acc + (cantidadStockItem(it) * Number(it.costo_unitario)), 0);
     return items + extra;
 }
 
@@ -294,16 +650,188 @@ function papelVsCalculado() {
     return { hayPapel: true, papel, delta: totalCalculadoFactura() - papel };
 }
 
-document.getElementById('inputScanCompra')?.addEventListener('keypress', async function (e) {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        const query = this.value.trim();
-        if (query.length > 0) {
-            await buscarParaCompra(query);
-        }
-        this.value = '';
-        this.focus();
+function uxbItem(item) {
+    return Math.max(1, parseInt(item && item.unidades_por_bulto, 10) || 1);
+}
+
+function cantidadStockItem(item) {
+    const n = Number(item.cantidad_ingresada);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return item.modo_cantidad === 'CAJA' ? n * uxbItem(item) : n;
+}
+
+function margenItem(item) {
+    if (Number.isFinite(Number(item.margen_pct))) return Number(item.margen_pct);
+    const costoBase = Number(item.costo_anterior) || 0;
+    const precio = Number(item.precio_gondola_actual) || 0;
+    if (costoBase <= 0) return 0;
+    return ((precio / costoBase) - 1) * 100;
+}
+
+function ivaItem(item) {
+    const iva = item.porcentaje_iva;
+    return (iva !== undefined && iva !== null && iva !== '') ? Number(iva) : 21;
+}
+
+function precioSugeridoItem(item) {
+    const costo = Number(item.costo_unitario) || 0;
+    return costo * (1 + ivaItem(item) / 100) * (1 + margenItem(item) / 100);
+}
+
+function syncDerivadosItem(item) {
+    item.cantidad_comprada = cantidadStockItem(item);
+    const uxb = uxbItem(item);
+    if (item.modo_cantidad === 'CAJA') {
+        item.costo_caja = (Number(item.costo_unitario) || 0) * uxb;
     }
+}
+
+function normalizarItemFactura(it) {
+    const uxb = Math.max(1, parseInt(it.unidades_por_bulto, 10) || 1);
+    const modo = it.modo_cantidad === 'CAJA' ? 'CAJA' : 'UN';
+    let ingresada = Number(it.cantidad_ingresada);
+    if (!Number.isFinite(ingresada) || ingresada <= 0) {
+        const stock = Number(it.cantidad_comprada) || 1;
+        ingresada = (modo === 'CAJA' && uxb > 1) ? stock / uxb : stock;
+    }
+    const item = {
+        ...it,
+        modo_cantidad: modo,
+        cantidad_ingresada: ingresada,
+        unidades_por_bulto: uxb,
+        porcentaje_iva: it.porcentaje_iva ?? 21,
+        precio_editado_manual: !!it.precio_editado_manual
+    };
+    if (!Number.isFinite(Number(item.margen_pct))) item.margen_pct = margenItem(item);
+    syncDerivadosItem(item);
+    return item;
+}
+
+let timeoutSugerirCompra = null;
+let sugerenciasCompraCache = [];
+let indiceSugerenciaActiva = 0;
+
+function ocultarSugerenciasCompra() {
+    const box = document.getElementById('sugerenciasCompra');
+    if (box) {
+        box.classList.remove('mostrar');
+        box.innerHTML = '';
+    }
+    sugerenciasCompraCache = [];
+    indiceSugerenciaActiva = 0;
+}
+
+function pintarSugerenciaActiva() {
+    const box = document.getElementById('sugerenciasCompra');
+    if (!box) return;
+    const botones = box.querySelectorAll('.list-group-item');
+    botones.forEach((btn, i) => {
+        btn.classList.toggle('sug-activa', i === indiceSugerenciaActiva);
+        btn.classList.toggle('active', i === indiceSugerenciaActiva);
+    });
+    const actual = botones[indiceSugerenciaActiva];
+    if (actual) actual.scrollIntoView({ block: 'nearest' });
+}
+
+function moverSugerenciaCompra(delta) {
+    if (sugerenciasCompraCache.length === 0) return;
+    const n = sugerenciasCompraCache.length;
+    indiceSugerenciaActiva = (indiceSugerenciaActiva + delta + n) % n;
+    pintarSugerenciaActiva();
+}
+
+function mostrarSugerenciasCompra(productos) {
+    const box = document.getElementById('sugerenciasCompra');
+    if (!box) return;
+    sugerenciasCompraCache = productos || [];
+    if (sugerenciasCompraCache.length === 0) {
+        ocultarSugerenciasCompra();
+        return;
+    }
+    indiceSugerenciaActiva = 0;
+    box.innerHTML = sugerenciasCompraCache.map((p, i) => {
+        const uxb = Math.max(1, parseInt(p.unidades_por_bulto, 10) || 1);
+        const extra = uxb > 1 ? ` · caja x${uxb}` : '';
+        return `<button type="button" class="list-group-item list-group-item-action py-2 text-start" onclick="elegirSugerenciaCompra(${i})">
+            <div class="fw-bold">${escapeHtmlFactura(p.nombre)}</div>
+            <small class="text-muted">${escapeHtmlFactura(p.codigo_barras || 'S/C')} · Costo $${Number(p.costo_sin_iva || 0).toFixed(2)}${extra}</small>
+        </button>`;
+    }).join('');
+    box.classList.add('mostrar');
+    pintarSugerenciaActiva();
+}
+
+window.elegirSugerenciaCompra = function(i) {
+    const prod = sugerenciasCompraCache[i];
+    if (!prod) return;
+    agregarProductoAFactura(prod);
+    const inp = document.getElementById('inputScanCompra');
+    if (inp) {
+        inp.value = '';
+        inp.focus();
+    }
+    ocultarSugerenciasCompra();
+};
+
+document.getElementById('inputScanCompra')?.addEventListener('input', function () {
+    const query = this.value.trim();
+    clearTimeout(timeoutSugerirCompra);
+    if (query.length < 2) {
+        ocultarSugerenciasCompra();
+        return;
+    }
+    timeoutSugerirCompra = setTimeout(async () => {
+        try {
+            const res = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
+            const data = await res.json();
+            const productos = Array.isArray(data) ? data : (data.productos || []);
+            mostrarSugerenciasCompra(productos.slice(0, 12));
+        } catch (e) {
+            ocultarSugerenciasCompra();
+        }
+    }, 220);
+});
+
+document.getElementById('inputScanCompra')?.addEventListener('keydown', async function (e) {
+    const listaAbierta = sugerenciasCompraCache.length > 0;
+
+    if (e.key === 'ArrowDown') {
+        if (!listaAbierta) return;
+        e.preventDefault();
+        moverSugerenciaCompra(1);
+        return;
+    }
+    if (e.key === 'ArrowUp') {
+        if (!listaAbierta) return;
+        e.preventDefault();
+        moverSugerenciaCompra(-1);
+        return;
+    }
+    if (e.key === 'Escape') {
+        if (!listaAbierta) return;
+        e.preventDefault();
+        ocultarSugerenciasCompra();
+        return;
+    }
+    if (e.key !== 'Enter') return;
+
+    e.preventDefault();
+    clearTimeout(timeoutSugerirCompra);
+    const query = this.value.trim();
+    const pareceCodigo = /^\d{6,}$/.test(query);
+    if (!pareceCodigo && listaAbierta) {
+        elegirSugerenciaCompra(indiceSugerenciaActiva);
+        return;
+    }
+    if (query.length > 0) await buscarParaCompra(query);
+    this.value = '';
+    this.focus();
+    ocultarSugerenciasCompra();
+});
+
+document.addEventListener('click', (e) => {
+    const caja = document.getElementById('cajaSugerenciasCompra');
+    if (caja && !caja.contains(e.target)) ocultarSugerenciasCompra();
 });
 
 ['selectProvIngreso', 'inputNumFactura', 'selectCondicionPago', 'inputFechaFactura',
@@ -325,18 +853,11 @@ async function buscarParaCompra(query) {
 
         if (productos.length === 1) {
             agregarProductoAFactura(productos[0]);
+            ocultarSugerenciasCompra();
             return;
         }
 
-        let htmlOpciones = '<div class="list-group text-start mt-2" style="max-height: 250px; overflow-y: auto;">';
-        productos.forEach(p => {
-            let prodObj = encodeURIComponent(JSON.stringify(p));
-            htmlOpciones += `<button type="button" class="list-group-item list-group-item-action py-2" onclick="seleccionarOpcionCompra('${prodObj}')">
-                <i class="bi bi-box"></i> <b>${escapeHtmlFactura(p.codigo_barras || 'S/C')}</b> - ${escapeHtmlFactura(p.nombre)} <span class="float-end text-muted">Costo: $${Number(p.costo_sin_iva || 0).toFixed(2)}</span>
-            </button>`;
-        });
-        htmlOpciones += '</div>';
-        Swal.fire({ title: 'Seleccione un producto', html: htmlOpciones, showConfirmButton: false, showCloseButton: true });
+        mostrarSugerenciasCompra(productos.slice(0, 12));
     } catch (e) {
         console.error(e);
         Swal.fire('Error', 'Fallo de conexión al buscar.', 'error');
@@ -355,27 +876,52 @@ function agregarProductoAFactura(producto) {
     const existente = facturaActualItems.find(it => Number(it.producto_id) === Number(producto.id)
         && (it.fecha_vencimiento || vencDefault) === vencDefault);
     if (existente) {
-        existente.cantidad_comprada = (parseFloat(existente.cantidad_comprada) || 0) + 1;
-        dibujarTablaFactura();
-        enfocarCantidadItem(facturaActualItems.indexOf(existente));
+        existente.cantidad_ingresada = (parseFloat(existente.cantidad_ingresada) || 0) + 1;
+        syncDerivadosItem(existente);
+        const idx = facturaActualItems.indexOf(existente);
+        const cantInp = document.querySelector(`[data-idx-factura="${idx}"] .inp-cant-factura`);
+        if (cantInp) cantInp.value = existente.cantidad_ingresada;
+        refrescarLabelsFila(idx);
+        actualizarTotalVista();
+        programarBorradorFactura();
+        document.getElementById('inputScanCompra')?.focus();
         return;
     }
-    facturaActualItems.push({
+    const costo = parseFloat(producto.costo_sin_iva) || 0;
+    const precio = parseFloat(producto.precio_venta_final) || 0;
+    const item = {
         producto_id: producto.id,
         nombre: producto.nombre,
         codigo_barras: producto.codigo_barras || '',
+        cantidad_ingresada: 1,
+        modo_cantidad: 'UN',
         cantidad_comprada: 1,
-        costo_unitario: parseFloat(producto.costo_sin_iva) || 0,
-        costo_anterior: parseFloat(producto.costo_sin_iva) || 0,
+        costo_unitario: costo,
+        costo_anterior: costo,
+        costo_caja: costo * uxb,
         fecha_vencimiento: vencDefault,
         nuevo_precio_venta: null,
-        precio_gondola_actual: parseFloat(producto.precio_venta_final) || 0,
+        precio_gondola_actual: precio,
         actualizar_gondola: false,
+        precio_editado_manual: false,
         unidades_por_bulto: uxb,
+        porcentaje_iva: (producto.porcentaje_iva !== undefined && producto.porcentaje_iva !== null) ? producto.porcentaje_iva : 21,
+        margen_pct: costo > 0 ? ((precio / costo) - 1) * 100 : 0,
         numero_lote_proveedor: 'LOTE-' + Date.now().toString().slice(-4)
-    });
-    dibujarTablaFactura();
-    enfocarCantidadItem(facturaActualItems.length - 1);
+    };
+    syncDerivadosItem(item);
+    facturaActualItems.push(item);
+    const tbody = document.getElementById('tablaIngresoBody');
+    if (tbody && tbody.querySelector('td[colspan]')) {
+        dibujarTablaFactura();
+    } else if (tbody && facturaActualItems.length > 1) {
+        tbody.insertAdjacentHTML('beforeend', htmlFilaFactura(item, facturaActualItems.length - 1));
+        actualizarTotalVista();
+        programarBorradorFactura();
+    } else {
+        dibujarTablaFactura();
+    }
+    document.getElementById('inputScanCompra')?.focus();
 }
 
 function enfocarCantidadItem(idx) {
@@ -388,33 +934,85 @@ function enfocarCantidadItem(idx) {
     }, 30);
 }
 
+function refrescarLabelsFila(idx) {
+    const item = facturaActualItems[idx];
+    if (!item) return;
+    const stock = cantidadStockItem(item);
+    const subCel = document.getElementById(`subtotal-fila-${idx}`);
+    if (subCel) subCel.textContent = '$' + (stock * (Number(item.costo_unitario) || 0)).toFixed(2);
+    const equiv = document.getElementById(`equiv-fila-${idx}`);
+    if (equiv) {
+        const uxb = uxbItem(item);
+        equiv.textContent = item.modo_cantidad === 'CAJA'
+            ? `= ${stock} un. (x${uxb})`
+            : (uxb > 1 ? `Caja x${uxb}` : '');
+    }
+    const sug = document.getElementById(`sugerido-fila-${idx}`);
+    if (sug) {
+        sug.innerHTML = `Margen ${margenItem(item).toFixed(1)}% · Sugerido <b>$${precioSugeridoItem(item).toFixed(2)}</b>`;
+    }
+    const costoUn = document.querySelector(`[data-idx-factura="${idx}"] .inp-costo-factura`);
+    if (costoUn && document.activeElement !== costoUn) costoUn.value = Number(item.costo_unitario) || 0;
+    const costoCaja = document.querySelector(`[data-idx-factura="${idx}"] .inp-costo-caja`);
+    if (costoCaja && document.activeElement !== costoCaja) costoCaja.value = (Number(item.costo_caja) || 0).toFixed(2);
+    const precioInp = document.querySelector(`[data-idx-factura="${idx}"] .inp-precio-gondola`);
+    if (precioInp && item.actualizar_gondola && !item.precio_editado_manual && document.activeElement !== precioInp) {
+        precioInp.value = precioSugeridoItem(item).toFixed(2);
+    }
+}
+
 function onInputFilaFactura(idx, campo, valor) {
     const item = facturaActualItems[idx];
     if (!item) return;
-    if (campo === 'cantidad_comprada' || campo === 'costo_unitario') {
+    if (campo === 'cantidad_ingresada') {
         const n = parseFloat(valor);
-        item[campo] = Number.isFinite(n) ? n : 0;
+        item.cantidad_ingresada = Number.isFinite(n) ? n : 0;
+        syncDerivadosItem(item);
+    } else if (campo === 'costo_unitario') {
+        const n = parseFloat(valor);
+        item.costo_unitario = Number.isFinite(n) ? n : 0;
+        syncDerivadosItem(item);
+        if (item.actualizar_gondola && !item.precio_editado_manual) {
+            item.nuevo_precio_venta = Math.round(precioSugeridoItem(item) * 100) / 100;
+        }
+    } else if (campo === 'costo_caja') {
+        const n = parseFloat(valor);
+        const uxb = uxbItem(item);
+        item.costo_caja = Number.isFinite(n) ? n : 0;
+        item.costo_unitario = uxb > 0 ? item.costo_caja / uxb : 0;
+        if (item.actualizar_gondola && !item.precio_editado_manual) {
+            item.nuevo_precio_venta = Math.round(precioSugeridoItem(item) * 100) / 100;
+        }
     } else if (campo === 'fecha_vencimiento') {
         item.fecha_vencimiento = valor || '2099-12-31';
     } else if (campo === 'nuevo_precio_venta') {
         const n = parseFloat(valor);
+        item.precio_editado_manual = true;
         item.nuevo_precio_venta = Number.isFinite(n) ? n : item.precio_gondola_actual;
-    } else if (campo === 'bultos') {
-        const n = parseFloat(valor);
-        const uxb = item.unidades_por_bulto || 1;
-        if (Number.isFinite(n) && n > 0) {
-            item.cantidad_comprada = n * uxb;
-            const cantInp = document.querySelector(`[data-idx-factura="${idx}"] .inp-cant-factura`);
-            if (cantInp) cantInp.value = item.cantidad_comprada;
-        }
     }
-    const subCel = document.getElementById(`subtotal-fila-${idx}`);
-    if (subCel) {
-        const sub = (Number(item.cantidad_comprada) || 0) * (Number(item.costo_unitario) || 0);
-        subCel.textContent = '$' + sub.toFixed(2);
-    }
+    refrescarLabelsFila(idx);
     actualizarTotalVista();
     programarBorradorFactura();
+}
+
+function cambiarModoCantidadFila(idx, modo) {
+    const item = facturaActualItems[idx];
+    if (!item) return;
+    const stock = cantidadStockItem(item);
+    const uxb = uxbItem(item);
+    item.modo_cantidad = modo === 'CAJA' ? 'CAJA' : 'UN';
+    if (item.modo_cantidad === 'CAJA') {
+        if (uxb <= 1) {
+            Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Este producto no tiene unidades por bulto. Cargalo en Productos.', showConfirmButton: false, timer: 2500 });
+            item.modo_cantidad = 'UN';
+        } else {
+            item.cantidad_ingresada = stock / uxb;
+        }
+    } else {
+        item.cantidad_ingresada = stock;
+    }
+    syncDerivadosItem(item);
+    reemplazarFilaFactura(idx);
 }
 
 function toggleGondolaFila(idx, tildado) {
@@ -422,11 +1020,23 @@ function toggleGondolaFila(idx, tildado) {
     if (!item) return;
     item.actualizar_gondola = !!tildado;
     if (item.actualizar_gondola) {
-        if (item.nuevo_precio_venta == null) item.nuevo_precio_venta = item.precio_gondola_actual;
+        item.precio_editado_manual = false;
+        item.nuevo_precio_venta = Math.round(precioSugeridoItem(item) * 100) / 100;
     } else {
         item.nuevo_precio_venta = null;
+        item.precio_editado_manual = false;
     }
-    dibujarTablaFactura();
+    reemplazarFilaFactura(idx);
+}
+
+function usarSugeridoGondola(idx) {
+    const item = facturaActualItems[idx];
+    if (!item || !item.actualizar_gondola) return;
+    item.precio_editado_manual = false;
+    item.nuevo_precio_venta = Math.round(precioSugeridoItem(item) * 100) / 100;
+    const precioInp = document.querySelector(`[data-idx-factura="${idx}"] .inp-precio-gondola`);
+    if (precioInp) precioInp.value = Number(item.nuevo_precio_venta).toFixed(2);
+    programarBorradorFactura();
 }
 
 function quitarItemFactura(idx) {
@@ -434,68 +1044,107 @@ function quitarItemFactura(idx) {
     dibujarTablaFactura();
 }
 
-function dibujarTablaFactura() {
-    const tbody = document.getElementById('tablaIngresoBody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
+function scrollTablaFactura() {
+    return document.querySelector('.wrap-tabla-factura');
+}
 
-    if (facturaActualItems.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-muted py-4">La factura está vacía. Escaneá productos.</td></tr>';
-        actualizarTotalVista();
-        programarBorradorFactura();
-        return;
-    }
+function htmlFilaFactura(item, idx) {
+    syncDerivadosItem(item);
+    const stock = cantidadStockItem(item);
+    const subtotal = stock * (Number(item.costo_unitario) || 0);
+    const vencVal = item.fecha_vencimiento && item.fecha_vencimiento !== '2099-12-31' ? item.fecha_vencimiento : '';
+    const uxb = uxbItem(item);
+    const esCaja = item.modo_cantidad === 'CAJA';
+    const meta = [];
+    if (item.codigo_barras) meta.push(escapeHtmlFactura(item.codigo_barras));
+    meta.push(`Último costo $${Number(item.costo_anterior || item.costo_unitario || 0).toFixed(2)}`);
+    if (uxb > 1) meta.push(`Caja x${uxb}`);
 
-    facturaActualItems.forEach((item, idx) => {
-        const subtotal = (Number(item.cantidad_comprada) || 0) * (Number(item.costo_unitario) || 0);
-        const vencVal = item.fecha_vencimiento && item.fecha_vencimiento !== '2099-12-31' ? item.fecha_vencimiento : '';
-        const uxb = Math.max(1, parseInt(item.unidades_por_bulto, 10) || 1);
-        const bultosVal = (uxb > 1 && Number(item.cantidad_comprada) % uxb === 0)
-            ? (Number(item.cantidad_comprada) / uxb)
-            : '';
-        const meta = [];
-        if (item.codigo_barras) meta.push(escapeHtmlFactura(item.codigo_barras));
-        meta.push(`Último costo $${Number(item.costo_anterior || item.costo_unitario || 0).toFixed(2)}`);
-        if (uxb > 1) meta.push(`Bulto x${uxb}`);
+    const gondolaOn = !!item.actualizar_gondola;
+    const sugerido = precioSugeridoItem(item);
+    const precioG = Number(item.nuevo_precio_venta != null ? item.nuevo_precio_venta : (gondolaOn ? sugerido : item.precio_gondola_actual || 0));
 
-        const gondolaOn = !!item.actualizar_gondola;
-        const precioG = Number(item.nuevo_precio_venta != null ? item.nuevo_precio_venta : item.precio_gondola_actual || 0);
-
-        tbody.innerHTML += `
+    return `
             <tr data-idx-factura="${idx}">
-                <td>
-                    <input type="number" class="form-control form-control-sm inp-fila-factura inp-cant-factura" min="0.01" step="0.01"
-                        value="${item.cantidad_comprada}"
-                        oninput="onInputFilaFactura(${idx}, 'cantidad_comprada', this.value)">
-                    ${uxb > 1 ? `<input type="number" class="form-control form-control-sm mt-1 inp-fila-factura" min="0.01" step="0.01" value="${bultosVal}" placeholder="Bultos" title="Cantidad de bultos" oninput="onInputFilaFactura(${idx}, 'bultos', this.value)">` : ''}
+                <td data-label="Cantidad">
+                    <div class="d-flex gap-1">
+                        <input type="number" class="form-control form-control-sm inp-fila-factura inp-cant-factura" min="0.01" step="0.01"
+                            value="${item.cantidad_ingresada}"
+                            oninput="onInputFilaFactura(${idx}, 'cantidad_ingresada', this.value)">
+                        <select class="form-select form-select-sm sel-modo-cant" onchange="cambiarModoCantidadFila(${idx}, this.value)" title="Unidad o caja">
+                            <option value="UN" ${!esCaja ? 'selected' : ''}>Un</option>
+                            <option value="CAJA" ${esCaja ? 'selected' : ''}>Caja</option>
+                        </select>
+                    </div>
+                    <small class="text-muted" id="equiv-fila-${idx}">${esCaja ? `= ${stock} un. (x${uxb})` : (uxb > 1 ? `Caja x${uxb}` : '')}</small>
                 </td>
-                <td class="text-start">
+                <td class="text-start" data-label="Producto">
                     <div class="fw-bold">${escapeHtmlFactura(item.nombre)}</div>
                     <small class="text-muted">${meta.join(' · ')}</small>
                 </td>
-                <td>
+                <td data-label="Vencimiento">
                     <input type="date" class="form-control form-control-sm" value="${vencVal}"
                         onchange="onInputFilaFactura(${idx}, 'fecha_vencimiento', this.value)">
                 </td>
-                <td>
+                <td class="celda-costo-factura" data-label="Costo">
                     <input type="number" class="form-control form-control-sm inp-fila-factura inp-costo-factura" min="0" step="0.01"
                         value="${item.costo_unitario}"
-                        oninput="onInputFilaFactura(${idx}, 'costo_unitario', this.value)">
+                        oninput="onInputFilaFactura(${idx}, 'costo_unitario', this.value)" title="Costo por unidad">
+                    <input type="number" class="form-control form-control-sm mt-1 inp-fila-factura inp-costo-caja" min="0" step="0.01"
+                        value="${Number(item.costo_caja || 0).toFixed(2)}"
+                        ${esCaja ? '' : 'disabled'}
+                        oninput="onInputFilaFactura(${idx}, 'costo_caja', this.value)" placeholder="Costo caja" title="Costo de la caja">
+                    <small class="text-muted d-block">${esCaja ? 'Arriba un. · abajo caja' : 'Por unidad · caja desactivada'}</small>
                 </td>
-                <td class="fw-bold" id="subtotal-fila-${idx}">$${subtotal.toFixed(2)}</td>
-                <td class="text-start">
+                <td class="fw-bold" data-label="Subtotal" id="subtotal-fila-${idx}">$${subtotal.toFixed(2)}</td>
+                <td class="text-start celda-gondola-factura" data-label="Góndola">
+                    <div class="hint-margen-fila text-muted mb-1" id="sugerido-fila-${idx}">Margen ${margenItem(item).toFixed(1)}% · Sugerido <b>$${sugerido.toFixed(2)}</b></div>
                     <label class="small mb-0 d-flex align-items-center gap-1">
                         <input type="checkbox" class="form-check-input chk-gondola-fila" ${gondolaOn ? 'checked' : ''}
                             onchange="toggleGondolaFila(${idx}, this.checked)">
                         Actualizar
                     </label>
-                    ${gondolaOn ? `<input type="number" class="form-control form-control-sm mt-1 inp-costo-factura" min="0" step="0.01" value="${precioG}" oninput="onInputFilaFactura(${idx}, 'nuevo_precio_venta', this.value)">` : `<small class="text-muted">Hoy $${Number(item.precio_gondola_actual || 0).toFixed(2)}</small>`}
+                    <input type="number" class="form-control form-control-sm mt-1 inp-costo-factura inp-precio-gondola" min="0" step="0.01"
+                        value="${Number(precioG).toFixed(2)}" ${gondolaOn ? '' : 'disabled'}
+                        oninput="onInputFilaFactura(${idx}, 'nuevo_precio_venta', this.value)">
+                    <button type="button" class="btn btn-link btn-sm p-0 mt-1" ${gondolaOn ? '' : 'disabled'} onclick="usarSugeridoGondola(${idx})">Usar sugerido</button>
+                    <small class="text-muted d-block">Hoy $${Number(item.precio_gondola_actual || 0).toFixed(2)}</small>
                 </td>
-                <td><button type="button" class="btn btn-sm text-danger border-0" onclick="quitarItemFactura(${idx})"><i class="bi bi-trash"></i></button></td>
+                <td class="td-borrar-factura"><button type="button" class="btn btn-sm text-danger border-0" onclick="quitarItemFactura(${idx})"><i class="bi bi-trash"></i></button></td>
             </tr>
         `;
-    });
+}
 
+function reemplazarFilaFactura(idx) {
+    const wrap = scrollTablaFactura();
+    const y = wrap ? wrap.scrollTop : 0;
+    const vieja = document.querySelector(`#tablaIngresoBody tr[data-idx-factura="${idx}"]`);
+    const item = facturaActualItems[idx];
+    if (!vieja || !item) {
+        dibujarTablaFactura();
+        return;
+    }
+    vieja.outerHTML = htmlFilaFactura(item, idx);
+    if (wrap) wrap.scrollTop = y;
+    actualizarTotalVista();
+    programarBorradorFactura();
+}
+
+function dibujarTablaFactura() {
+    const tbody = document.getElementById('tablaIngresoBody');
+    if (!tbody) return;
+    const wrap = scrollTablaFactura();
+    const y = wrap ? wrap.scrollTop : 0;
+
+    if (facturaActualItems.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-muted py-4">La factura está vacía. Escribí o escaneá un producto.</td></tr>';
+        actualizarTotalVista();
+        programarBorradorFactura();
+        return;
+    }
+
+    tbody.innerHTML = facturaActualItems.map((item, idx) => htmlFilaFactura(item, idx)).join('');
+    if (wrap) wrap.scrollTop = y;
     actualizarTotalVista();
     programarBorradorFactura();
 }
@@ -510,25 +1159,13 @@ function cambiarModoIngreso(modo) {
     if (ayuda) {
         ayuda.textContent = esDeuda
             ? 'Anota factura o remito y el total. No toca stock ni precios.'
-            : 'Escaneá; cantidad y costo se editan en la grilla. Góndola solo si la tildás.';
+            : 'Escribí o escaneá. Unidad o Caja por fila. Góndola solo si la tildás.';
     }
     programarBorradorFactura();
 }
 
 function limpiarFactura() {
-    facturaActualItems = [];
-    if (document.getElementById('inputNumFactura')) document.getElementById('inputNumFactura').value = '';
-    const extra = document.getElementById('inputCargosExtra');
-    if (extra) extra.value = '0';
-    const papel = document.getElementById('inputTotalPapel');
-    if (papel) papel.value = '';
-    const deuda = document.getElementById('inputTotalDeudaRapida');
-    if (deuda) deuda.value = '';
-    const obs = document.getElementById('inputObsDeudaRapida');
-    if (obs) obs.value = '';
-    asegurarFechaFactura();
-    localStorage.removeItem(CLAVE_BORRADOR_FACTURA);
-    dibujarTablaFactura();
+    anularCargaFactura();
 }
 
 async function confirmarDuplicadoSiExiste(provId, numero) {
@@ -667,7 +1304,7 @@ async function confirmarDeudaRapida() {
         if (!res.ok) throw new Error(detalleApi(data));
         if (data.error) throw new Error(data.error);
 
-        limpiarFactura();
+        await marcarBorradorConfirmado(data.id);
         await cargarProveedores();
         const extraPago = pagoAhora.pago
             ? (pagoAhora.pago.metodo_pago === 'EFECTIVO CAJA'
@@ -688,7 +1325,7 @@ async function confirmarIngresoMercaderia() {
 
     if (!provId) return Swal.fire('Error', 'Debe seleccionar un proveedor.', 'warning');
     if (facturaActualItems.length === 0) return Swal.fire('Error', 'No hay productos en la factura.', 'warning');
-    const itemMalo = facturaActualItems.find(it => !(Number(it.cantidad_comprada) > 0));
+    const itemMalo = facturaActualItems.find(it => !(cantidadStockItem(it) > 0));
     if (itemMalo) return Swal.fire('Atención', `Revisá la cantidad de ${itemMalo.nombre}.`, 'warning');
 
     const cargosExtraIngresados = parseFloat(document.getElementById('inputCargosExtra').value) || 0;
@@ -731,14 +1368,14 @@ async function confirmarIngresoMercaderia() {
             forzar_duplicado: dup.forzar,
             items: facturaActualItems.map(it => ({
                 producto_id: it.producto_id,
-                cantidad_comprada: Number(it.cantidad_comprada),
+                cantidad_comprada: cantidadStockItem(it),
                 costo_unitario: Number(it.costo_unitario),
                 fecha_vencimiento: it.fecha_vencimiento || '2099-12-31',
                 numero_lote_proveedor: it.numero_lote_proveedor || 'S/L',
                 nuevo_precio_venta: it.actualizar_gondola
                     ? (Number.isFinite(Number(it.nuevo_precio_venta))
                         ? Number(it.nuevo_precio_venta)
-                        : Number(it.precio_gondola_actual) || 0)
+                        : Number(precioSugeridoItem(it).toFixed(2)))
                     : null
             })),
             pago_inmediato: pagoAhora.pago
@@ -760,7 +1397,7 @@ async function confirmarIngresoMercaderia() {
                 : ' Pago bolsillo / transferencia registrado.')
             : '';
         Swal.fire('¡Mercadería Ingresada!', 'El stock y los costos se actualizaron. La góndola solo si la tildaste.' + extraPago, 'success');
-        limpiarFactura();
+        await marcarBorradorConfirmado(data.id);
         cargarProveedores(); // Recarga saldos de cuenta corriente
     } catch (e) {
         Swal.fire('Error al ingresar', e.message, 'error');
@@ -1939,5 +2576,5 @@ function imprimirPedidoDesdePreview() {
 document.addEventListener("DOMContentLoaded", async () => {
     asegurarFechaFactura();
     await cargarProveedores();
-    restaurarBorradorFactura();
+    await iniciarBorradoresFactura();
 });

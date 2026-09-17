@@ -18,3 +18,12 @@ node_modules/
 
 # Instaladores y compilados del frontend
 dist/
+
+# Fotos de borradores de factura (el bot las deja acá)
+data/borradores_factura/
+
+# Sesión WhatsApp (vive en el cwd de PM2 en Contabo)
+.wwebjs_auth/
+.wwebjs_cache/
+bot-whatsapp/.wwebjs_auth/
+bot-whatsapp/.wwebjs_cache/
