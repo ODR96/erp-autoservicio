@@ -112,7 +112,7 @@ function postJson(url, payload) {
             });
         });
         req.on('error', reject);
-        req.setTimeout(20000, () => {
+        req.setTimeout(60000, () => {
             req.destroy(new Error('timeout ERP'));
         });
         req.write(data);
@@ -127,20 +127,46 @@ function detalleErp(json) {
     return (json && json.error) || 'ERP rechazó la foto';
 }
 
+function esperar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function bajarMedia(message) {
+    let ultimo = null;
+    for (let i = 1; i <= 3; i++) {
+        try {
+            console.log(`Bajando foto intento ${i}...`);
+            const media = await message.downloadMedia();
+            if (media && media.data) {
+                console.log(`Foto bajada mime=${media.mimetype || '-'} bytes_b64=${String(media.data).length}`);
+                return media;
+            }
+            ultimo = new Error('downloadMedia vacío');
+        } catch (e) {
+            ultimo = e;
+            console.error(`downloadMedia intento ${i}:`, (e && e.message) ? e.message : e);
+        }
+        await esperar(800 * i);
+    }
+    throw ultimo || new Error('No se pudo bajar la foto de WhatsApp');
+}
+
 async function mandarFotoAlErp(message) {
     if (!esMediaFactura(message)) return;
     if (!chatFacturaPermitido(message)) {
         console.log(`Foto ignorada chat=${message.from} type=${message.type}`);
         return;
     }
-    const media = await message.downloadMedia();
-    if (!media || !media.data) return;
+    const media = await bajarMedia(message);
     const mime = (media.mimetype || 'image/jpeg').split(';')[0].trim().toLowerCase();
     if (!mime.startsWith('image/') && mime !== 'application/pdf') {
+        console.log(`Foto ignorada mime=${mime}`);
         return;
     }
     const chatId = message.fromMe ? (message.to || message.from) : message.from;
-    const { status, json } = await postJson(`${ERP_URL}/proveedores/borradores/desde_whatsapp`, {
+    const url = `${ERP_URL}/proveedores/borradores/desde_whatsapp`;
+    console.log(`POST ERP ${url} chat=${chatId}`);
+    const { status, json } = await postJson(url, {
         chat_id: chatId,
         caption: String(message.body || '').slice(0, 500),
         foto_b64: media.data,
@@ -148,7 +174,7 @@ async function mandarFotoAlErp(message) {
         filename: media.filename || 'whatsapp.jpg'
     });
     if (status >= 400) {
-        throw new Error(detalleErp(json));
+        throw new Error(`ERP ${status}: ${detalleErp(json)}`);
     }
     const id = json.borrador_id;
     const n = json.n_fotos || 1;
@@ -160,6 +186,7 @@ async function mandarFotoAlErp(message) {
 }
 
 async function onMensajeEntrante(message) {
+    if (message.fromMe && (message.type || '') === 'chat') return;
     const from = message.from || '';
     console.log(`MSG from=${from} type=${message.type || '-'} media=${!!message.hasMedia} author=${message.author || '-'} body=${String(message.body || '').slice(0, 80)}`);
     if (from.endsWith('@g.us')) {
