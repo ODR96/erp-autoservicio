@@ -141,6 +141,95 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
     finally:
         if conexion: conexion.close()
 
+
+class AltaDesdeFactura(BaseModel):
+    nombre: str
+    codigo_barras: str = ""
+    proveedor_habitual_id: int = 0
+    costo_sin_iva: float = 0.0
+    porcentaje_iva: float = 21.0
+    unidades_por_bulto: int = 1
+    precio_venta_final: Optional[float] = None
+    categoria_id: Optional[int] = None
+
+
+@router.post("/alta_desde_factura", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def alta_producto_desde_factura(alta: AltaDesdeFactura):
+    """Alta mínima desde la carga de factura. Cero stock: el lote lo crea Guardar ingreso."""
+    nombre = (alta.nombre or "").strip()
+    if not nombre:
+        return {"error": "Falta el nombre del producto."}
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        codigo = (alta.codigo_barras or "").strip()
+        if codigo:
+            cursor.execute(
+                "SELECT id, nombre FROM productos WHERE codigo_barras = ? AND activo = 1",
+                (codigo,),
+            )
+            dup = cursor.fetchone()
+            if dup:
+                return {
+                    "error": f"Ese código ya es {dup['nombre']}.",
+                    "id": dup["id"],
+                    "existente": True,
+                }
+
+        categoria_id = alta.categoria_id
+        if not categoria_id:
+            cursor.execute("SELECT id FROM categorias_productos ORDER BY id ASC LIMIT 1")
+            cat = cursor.fetchone()
+            if cat:
+                categoria_id = cat["id"]
+            else:
+                cursor.execute("INSERT INTO categorias_productos (nombre) VALUES ('General')")
+                categoria_id = cursor.lastrowid
+
+        uxb = max(1, int(alta.unidades_por_bulto or 1))
+        costo = max(0.0, float(alta.costo_sin_iva or 0))
+        precio = alta.precio_venta_final
+        if precio is None:
+            precio = round(costo * 1.4, 2) if costo > 0 else 0.0
+
+        cursor.execute(
+            '''
+            INSERT INTO productos (
+                codigo_barras, nombre, categoria_id, proveedor_habitual_id, costo_sin_iva,
+                porcentaje_iva, precio_venta_final, stock_minimo_alerta, dias_alerta_vencimiento,
+                unidad_medida, activo, unidades_por_bulto
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 30, 'Unidad', 1, ?)
+            ''',
+            (
+                codigo,
+                nombre[:120],
+                int(categoria_id),
+                int(alta.proveedor_habitual_id or 0),
+                costo,
+                float(alta.porcentaje_iva or 21),
+                float(precio),
+                uxb,
+            ),
+        )
+        nuevo_id = cursor.lastrowid
+        conexion.commit()
+        cursor.execute("SELECT * FROM productos WHERE id = ?", (nuevo_id,))
+        prod = dict(cursor.fetchone())
+        prod["stock_actual"] = 0
+        prod["reglas_mayoristas"] = []
+        return {"mensaje": "Producto creado. El stock entra al guardar la factura.", "id": nuevo_id, "producto": prod}
+    except Exception as e:
+        if conexion:
+            conexion.rollback()
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+        return {"error": mensaje_error}
+    finally:
+        if conexion:
+            conexion.close()
+
 @router.get("/listar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_todos_los_productos(
     estado: str = "1", 

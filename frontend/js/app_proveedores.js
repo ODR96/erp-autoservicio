@@ -298,6 +298,7 @@ function aplicarPayloadBorrador(data) {
     restaurandoBorradorFactura = true;
     aplicarCabeceraFactura(data.cab || {});
     facturaActualItems = Array.isArray(data.items) ? data.items.map(normalizarItemFactura) : [];
+    if (facturaActualItems.length) cambiarModoIngreso('stock');
     fotosBorradorActual = Array.isArray(data.fotos) ? data.fotos : [];
     borradorServidorId = data.id || null;
     dibujarTablaFactura();
@@ -609,6 +610,9 @@ async function onInputFotoBorrador(input) {
     dibujarFotosBorrador();
     await refrescarListaBorradores();
     marcarEstadoBorradorFactura(`Borrador #${borradorServidorId} en el servidor · ${fotosBorradorActual.length} foto(s).`);
+    if (files.some((f) => String(f.type || '').startsWith('image/'))) {
+        await ocrBorradorFactura();
+    }
 }
 
 async function quitarFotoBorrador(fotoId) {
@@ -700,7 +704,9 @@ function normalizarItemFactura(it) {
         cantidad_ingresada: ingresada,
         unidades_por_bulto: uxb,
         porcentaje_iva: it.porcentaje_iva ?? 21,
-        precio_editado_manual: !!it.precio_editado_manual
+        precio_editado_manual: !!it.precio_editado_manual,
+        origen_linea: it.origen_linea || (it.producto_id ? 'MANUAL' : 'OCR'),
+        huerfano: !it.producto_id
     };
     if (!Number.isFinite(Number(item.margen_pct))) item.margen_pct = margenItem(item);
     syncDerivadosItem(item);
@@ -847,7 +853,16 @@ async function buscarParaCompra(query) {
         const productos = Array.isArray(data) ? data : (data.productos || []);
 
         if (productos.length === 0) {
-            Swal.fire('No encontrado', 'El producto no existe en el catálogo. Cargalo primero en Stock.', 'warning');
+            const alta = await Swal.fire({
+                title: 'No está en el catálogo',
+                text: '¿Alta rápida desde esta factura? El stock entra al Guardar ingreso, no ahora.',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Alta rápida',
+                cancelButtonText: 'Volver',
+                confirmButtonColor: '#1b365d'
+            });
+            if (alta.isConfirmed) await altaRapidaProducto({ nombre: query, codigo_barras: /^\d{6,}$/.test(query) ? query : '' });
             return;
         }
 
@@ -907,7 +922,9 @@ function agregarProductoAFactura(producto) {
         unidades_por_bulto: uxb,
         porcentaje_iva: (producto.porcentaje_iva !== undefined && producto.porcentaje_iva !== null) ? producto.porcentaje_iva : 21,
         margen_pct: costo > 0 ? ((precio / costo) - 1) * 100 : 0,
-        numero_lote_proveedor: 'LOTE-' + Date.now().toString().slice(-4)
+        numero_lote_proveedor: 'LOTE-' + Date.now().toString().slice(-4),
+        origen_linea: 'MANUAL',
+        huerfano: false
     };
     syncDerivadosItem(item);
     facturaActualItems.push(item);
@@ -1065,7 +1082,7 @@ function htmlFilaFactura(item, idx) {
     const precioG = Number(item.nuevo_precio_venta != null ? item.nuevo_precio_venta : (gondolaOn ? sugerido : item.precio_gondola_actual || 0));
 
     return `
-            <tr data-idx-factura="${idx}">
+            <tr data-idx-factura="${idx}" class="${item.producto_id ? '' : 'fila-huerfana'}">
                 <td data-label="Cantidad">
                     <div class="d-flex gap-1">
                         <input type="number" class="form-control form-control-sm inp-fila-factura inp-cant-factura" min="0.01" step="0.01"
@@ -1079,8 +1096,16 @@ function htmlFilaFactura(item, idx) {
                     <small class="text-muted" id="equiv-fila-${idx}">${esCaja ? `= ${stock} un. (x${uxb})` : (uxb > 1 ? `Caja x${uxb}` : '')}</small>
                 </td>
                 <td class="text-start" data-label="Producto">
-                    <div class="fw-bold">${escapeHtmlFactura(item.nombre)}</div>
-                    <small class="text-muted">${meta.join(' · ')}</small>
+                    ${item.producto_id
+                        ? `<div class="fw-bold">${escapeHtmlFactura(item.nombre)}</div>
+                    <small class="text-muted">${meta.join(' · ')}</small>`
+                        : `<div class="fw-bold text-warning">Sin catálogo</div>
+                    <div>${escapeHtmlFactura(item.nombre || item.nombre_ocr || '')}</div>
+                    <small class="text-muted">${escapeHtmlFactura(item.codigo_ocr || item.codigo_barras || 'sin código')} · del papel</small>
+                    <div class="d-flex flex-wrap gap-1 mt-1">
+                        <button type="button" class="btn btn-outline-primary btn-sm py-0" onclick="vincularProductoFila(${idx})">Vincular</button>
+                        <button type="button" class="btn btn-primary btn-sm py-0" onclick="altaRapidaFila(${idx})">Alta rápida</button>
+                    </div>`}
                 </td>
                 <td data-label="Vencimiento">
                     <input type="date" class="form-control form-control-sm" value="${vencVal}"
@@ -1113,6 +1138,192 @@ function htmlFilaFactura(item, idx) {
                 <td class="td-borrar-factura"><button type="button" class="btn btn-sm text-danger border-0" onclick="quitarItemFactura(${idx})"><i class="bi bi-trash"></i></button></td>
             </tr>
         `;
+}
+
+function aplicarProductoAFila(idx, producto) {
+    const item = facturaActualItems[idx];
+    if (!item || !producto) return;
+    const uxb = Math.max(1, parseInt(producto.unidades_por_bulto, 10) || item.unidades_por_bulto || 1);
+    const costoPapel = Number(item.costo_unitario);
+    const costo = Number.isFinite(costoPapel) && costoPapel > 0 ? costoPapel : (parseFloat(producto.costo_sin_iva) || 0);
+    const precio = parseFloat(producto.precio_venta_final) || 0;
+    item.producto_id = producto.id;
+    item.nombre = producto.nombre;
+    item.codigo_barras = producto.codigo_barras || item.codigo_ocr || '';
+    item.unidades_por_bulto = uxb;
+    item.costo_unitario = costo;
+    item.costo_anterior = parseFloat(producto.costo_sin_iva) || costo;
+    item.costo_caja = costo * uxb;
+    item.precio_gondola_actual = precio;
+    item.porcentaje_iva = (producto.porcentaje_iva !== undefined && producto.porcentaje_iva !== null) ? producto.porcentaje_iva : 21;
+    item.huerfano = false;
+    item.origen_linea = 'MANUAL';
+    if (costo > 0) item.margen_pct = ((precio / costo) - 1) * 100;
+    syncDerivadosItem(item);
+    reemplazarFilaFactura(idx);
+    programarBorradorFactura();
+}
+
+async function vincularProductoFila(idx) {
+    const item = facturaActualItems[idx];
+    if (!item) return;
+    const previa = (item.codigo_ocr || item.nombre_ocr || item.nombre || '').trim();
+    const busqueda = await Swal.fire({
+        title: 'Vincular al catálogo',
+        input: 'text',
+        inputValue: previa,
+        inputPlaceholder: 'Nombre o código',
+        showCancelButton: true,
+        confirmButtonText: 'Buscar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#1b365d'
+    });
+    if (!busqueda.isConfirmed || !(busqueda.value || '').trim()) return;
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(busqueda.value.trim())}`);
+        const data = await res.json().catch(() => ({}));
+        const productos = Array.isArray(data) ? data : (data.productos || []);
+        if (!productos.length) {
+            const alta = await Swal.fire({
+                title: 'No está',
+                text: '¿Alta rápida con ese nombre?',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Alta rápida',
+                cancelButtonText: 'Volver',
+                confirmButtonColor: '#1b365d'
+            });
+            if (alta.isConfirmed) await altaRapidaFila(idx, busqueda.value.trim());
+            return;
+        }
+        const inputOptions = {};
+        productos.slice(0, 12).forEach((p, i) => {
+            inputOptions[String(i)] = `${p.nombre} (${p.codigo_barras || 'S/C'})`;
+        });
+        const eleccion = await Swal.fire({
+            title: 'Elegí el producto',
+            input: 'select',
+            inputOptions,
+            showCancelButton: true,
+            confirmButtonText: 'Vincular',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#1b365d'
+        });
+        if (!eleccion.isConfirmed) return;
+        aplicarProductoAFila(idx, productos[parseInt(eleccion.value, 10)]);
+    } catch (e) {
+        Swal.fire('Error', e.message || 'No se pudo buscar.', 'error');
+    }
+}
+
+async function altaRapidaProducto(prefill, idxFila) {
+    prefill = prefill || {};
+    const provId = document.getElementById('selectProvIngreso')?.value || '0';
+    const html = `
+        <input id="altaFacNombre" class="swal2-input" placeholder="Nombre" value="${escapeHtmlFactura(prefill.nombre || '')}">
+        <input id="altaFacCodigo" class="swal2-input" placeholder="Código (opcional)" value="${escapeHtmlFactura(prefill.codigo_barras || '')}">
+        <input id="altaFacCosto" class="swal2-input" type="number" step="0.01" placeholder="Costo unitario" value="${prefill.costo_unitario || ''}">
+        <input id="altaFacIva" class="swal2-input" type="number" step="0.01" placeholder="IVA %" value="${prefill.porcentaje_iva || 21}">
+        <input id="altaFacUxb" class="swal2-input" type="number" step="1" min="1" placeholder="Unidades por caja" value="${prefill.unidades_por_bulto || 1}">
+        <p class="small text-muted mb-0">No entra stock ahora. El lote se crea al Guardar ingreso.</p>`;
+    const dlg = await Swal.fire({
+        title: 'Alta rápida',
+        html,
+        showCancelButton: true,
+        confirmButtonText: 'Crear y usar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#1b365d',
+        preConfirm: () => {
+            const nombre = document.getElementById('altaFacNombre').value.trim();
+            if (!nombre) {
+                Swal.showValidationMessage('Falta el nombre');
+                return false;
+            }
+            return {
+                nombre,
+                codigo_barras: document.getElementById('altaFacCodigo').value.trim(),
+                costo_sin_iva: parseFloat(document.getElementById('altaFacCosto').value) || 0,
+                porcentaje_iva: parseFloat(document.getElementById('altaFacIva').value) || 21,
+                unidades_por_bulto: parseInt(document.getElementById('altaFacUxb').value, 10) || 1,
+                proveedor_habitual_id: parseInt(provId, 10) || 0
+            };
+        }
+    });
+    if (!dlg.isConfirmed) return null;
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/productos/alta_desde_factura`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(dlg.value)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.existente && data.id) {
+            const bus = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(dlg.value.codigo_barras || dlg.value.nombre)}`);
+            const lista = await bus.json().catch(() => ({}));
+            const productos = Array.isArray(lista) ? lista : (lista.productos || []);
+            const prod = productos.find(p => Number(p.id) === Number(data.id)) || { id: data.id, nombre: dlg.value.nombre, codigo_barras: dlg.value.codigo_barras, costo_sin_iva: dlg.value.costo_sin_iva, unidades_por_bulto: dlg.value.unidades_por_bulto, porcentaje_iva: dlg.value.porcentaje_iva, precio_venta_final: 0 };
+            if (idxFila != null) aplicarProductoAFila(idxFila, prod);
+            else agregarProductoAFactura(prod);
+            Swal.fire('Ya existía', data.error || 'Se vinculó al código existente.', 'info');
+            return prod;
+        }
+        if (!res.ok || data.error) throw new Error(detalleApi(data));
+        const prod = data.producto || { id: data.id, ...dlg.value, precio_venta_final: 0 };
+        if (idxFila != null) aplicarProductoAFila(idxFila, prod);
+        else agregarProductoAFactura(prod);
+        return prod;
+    } catch (e) {
+        Swal.fire('Error', e.message || 'No se pudo crear.', 'error');
+        return null;
+    }
+}
+
+async function altaRapidaFila(idx, nombreForzado) {
+    const item = facturaActualItems[idx];
+    if (!item) return;
+    await altaRapidaProducto({
+        nombre: nombreForzado || item.nombre_ocr || item.nombre || '',
+        codigo_barras: item.codigo_ocr || item.codigo_barras || '',
+        costo_unitario: item.costo_unitario,
+        porcentaje_iva: item.porcentaje_iva,
+        unidades_por_bulto: item.unidades_por_bulto
+    }, idx);
+}
+
+async function ocrBorradorFactura() {
+    if (!borradorServidorId) {
+        await flushBorradorServidor();
+    }
+    if (!borradorServidorId) return Swal.fire('Fotos', 'Adjuntá una foto o esperá la del bot.', 'info');
+    Swal.fire({ title: 'Leyendo el papel...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/proveedores/borradores/${borradorServidorId}/ocr`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(detalleApi(data));
+        aplicarPayloadBorrador(data);
+        await refrescarListaBorradores();
+        const ocr = data.ocr || {};
+        if (ocr.estado === 'mano') {
+            Swal.fire('Manuscrita', 'No precargo ítems. Cargalos a mano; la foto queda en el borrador.', 'info');
+            return;
+        }
+        if (ocr.estado === 'omitido_edicion') {
+            Swal.fire('Sin pisar', 'Ya había ítems cargados a mano. No reescribí la grilla.', 'info');
+            return;
+        }
+        if (ocr.estado === 'sin_clave') {
+            Swal.fire('OCR', 'Falta OPENAI_API_KEY en el servidor.', 'warning');
+            return;
+        }
+        const h = ocr.n_huerfanos || 0;
+        Swal.fire(
+            'Papel leído',
+            `${ocr.n_items || facturaActualItems.length} ítems. ${h ? h + ' sin catálogo: vinculá o alta rápida. ' : ''}No se tocó stock.`,
+            'success'
+        );
+    } catch (e) {
+        Swal.fire('OCR', e.message || 'No se pudo leer.', 'error');
+    }
 }
 
 function reemplazarFilaFactura(idx) {
@@ -1325,6 +1536,10 @@ async function confirmarIngresoMercaderia() {
 
     if (!provId) return Swal.fire('Error', 'Debe seleccionar un proveedor.', 'warning');
     if (facturaActualItems.length === 0) return Swal.fire('Error', 'No hay productos en la factura.', 'warning');
+    const huerfano = facturaActualItems.find(it => !it.producto_id);
+    if (huerfano) {
+        return Swal.fire('Sin catálogo', `Vinculá o dales alta a «${huerfano.nombre || 'la línea'}» antes de guardar. El OCR no crea productos solo.`, 'warning');
+    }
     const itemMalo = facturaActualItems.find(it => !(cantidadStockItem(it) > 0));
     if (itemMalo) return Swal.fire('Atención', `Revisá la cantidad de ${itemMalo.nombre}.`, 'warning');
 

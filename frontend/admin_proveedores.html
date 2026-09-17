@@ -118,6 +118,8 @@
             line-height: 1.2;
             font-size: 12px;
         }
+        tr.fila-huerfana { background: #fff8f0; }
+        tr.fila-huerfana td { border-color: #ffd8a8; }
         @media (max-width: 767.98px) {
             .inp-fila-factura, #tablaIngresoFactura input.form-control, #tablaIngresoFactura select.form-select { min-height: 44px; }
             .pie-factura-ingreso .btn { min-height: 44px; width: 100%; }
@@ -246,7 +248,10 @@
                                     <input type="file" id="inputFotoBorrador" class="d-none" accept="image/*,application/pdf"
                                         capture="environment" multiple onchange="onInputFotoBorrador(this)">
                                 </label>
-                                <span class="small text-muted">Varias páginas = un borrador. El bot de WhatsApp va a pegar acá; no carga stock.</span>
+                                <button type="button" class="btn btn-outline-primary btn-sm fw-bold" onclick="ocrBorradorFactura()">
+                                    <i class="bi bi-eye"></i> Leer fotos
+                                </button>
+                                <span class="small text-muted">OCR precarga ítems. Sin catálogo = alta desde la fila. No carga stock.</span>
                             </div>
                             <div id="galeriaFotosBorrador" class="d-flex flex-wrap gap-2"></div>
                         </div>
@@ -690,7 +695,7 @@
         }
     </script>
     <script src="js/layout.js?v=1.0.41"></script>
-    <script src="js/app_proveedores.js?v=1.0.47"></script>
+    <script src="js/app_proveedores.js?v=1.0.48"></script>
 </body>
 
 </html>

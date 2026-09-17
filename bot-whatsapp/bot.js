@@ -112,7 +112,7 @@ function postJson(url, payload) {
             });
         });
         req.on('error', reject);
-        req.setTimeout(60000, () => {
+        req.setTimeout(120000, () => {
             req.destroy(new Error('timeout ERP'));
         });
         req.write(data);
@@ -263,11 +263,24 @@ async function mandarFotoAlErp(message) {
     }
     const id = json.borrador_id;
     const n = json.n_fotos || 1;
-    const txt = n === 1
-        ? `Borrador #${id} en el ERP. 1 foto. No se tocó el stock. Mandá las otras páginas acá o abrí Proveedores.`
-        : `Borrador #${id}: ${n} fotos. No se tocó el stock.`;
+    const ocr = json.ocr || {};
+    let txt = n === 1
+        ? `Borrador #${id} en el ERP. 1 foto.`
+        : `Borrador #${id}: ${n} fotos.`;
+    if (ocr.estado === 'ok') {
+        txt += ` OCR: ${ocr.n_items || 0} ítems`;
+        if (ocr.n_huerfanos) txt += `, ${ocr.n_huerfanos} sin catálogo`;
+        txt += '.';
+    } else if (ocr.estado === 'mano') {
+        txt += ' Parece manuscrita: cargá los ítems a mano.';
+    } else if (ocr.estado === 'sin_clave') {
+        txt += ' Foto guardada (OCR no configurado).';
+    } else if (ocr.estado === 'omitido_edicion') {
+        txt += ' Hay ítems cargados a mano; no pisé la grilla.';
+    }
+    txt += ' No se tocó el stock.';
     await message.reply(txt);
-    console.log(`Foto factura → borrador #${id} (${n} fotos) chat=${chatId}`);
+    console.log(`Foto factura → borrador #${id} (${n} fotos) ocr=${ocr.estado || '-'} chat=${chatId}`);
 }
 
 async function onMensajeEntrante(message) {

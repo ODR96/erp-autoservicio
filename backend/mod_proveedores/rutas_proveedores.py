@@ -9,6 +9,8 @@ import re
 import json
 import uuid
 import base64
+import urllib.request
+import urllib.error
 from backend.database import obtener_conexion, RAIZ_PROYECTO
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
 from backend.mod_productos.rutas_productos import compensar_deuda_stock
@@ -1004,6 +1006,298 @@ def confirmar_borrador_factura(borrador_id: int, body: ConfirmarBorrador):
         conexion.close()
 
 
+PROMPT_OCR_FACTURA = """Sos un extractor de facturas/remitos de proveedores de Argentina (autoservicio, corralón, distribuidora).
+Devolvé SOLO JSON válido con esta forma:
+{"mano":false,"proveedor":"","numero_factura":"","fecha":"YYYY-MM-DD o vacio","total_papel":null,"cargos_pie":null,
+ "items":[{"codigo":"","nombre":"","cantidad":1,"unidad":"UN","costo_unitario":0,"confianza":0.0}]}
+Reglas:
+- mano=true si es manuscrita o ilegible: items vacío.
+- codigo solo si se lee un código de barras o SKU claro. No inventes.
+- cantidad y costo_unitario numéricos. unidad UN o CAJA.
+- costo_unitario es el costo de 1 unidad (si el papel trae caja, convertí o marcá unidad CAJA).
+- No incluyas líneas de IVA, impuesto interno, percepción, flete: eso va en cargos_pie o se refleja en total_papel.
+- total_papel es el total a pagar del papel. cargos_pie es lo del pie que NO está en las líneas (si no se puede separar, null).
+- confianza 0 a 1. Omití ítems con confianza < 0.45.
+- No cargues stock. Solo transcribí el papel."""
+
+
+def _ocr_clave_openai() -> str:
+    return (os.getenv("OPENAI_API_KEY") or os.getenv("FACTURA_OCR_KEY") or "").strip()
+
+
+def _item_desde_producto_row(prod: dict, cantidad: float, costo: float, modo: str, origen: str) -> dict:
+    uxb = max(1, int(prod.get("unidades_por_bulto") or 1))
+    precio = float(prod.get("precio_venta_final") or 0)
+    costo = float(costo or 0)
+    if costo <= 0:
+        costo = float(prod.get("costo_sin_iva") or 0)
+    modo = "CAJA" if modo == "CAJA" else "UN"
+    cant = float(cantidad or 1)
+    if cant <= 0:
+        cant = 1
+    return {
+        "producto_id": prod["id"],
+        "nombre": prod.get("nombre") or "",
+        "codigo_barras": prod.get("codigo_barras") or "",
+        "cantidad_ingresada": cant,
+        "modo_cantidad": modo,
+        "cantidad_comprada": cant * uxb if modo == "CAJA" else cant,
+        "costo_unitario": costo,
+        "costo_anterior": float(prod.get("costo_sin_iva") or costo),
+        "costo_caja": costo * uxb,
+        "fecha_vencimiento": "2099-12-31",
+        "nuevo_precio_venta": None,
+        "precio_gondola_actual": precio,
+        "actualizar_gondola": False,
+        "unidades_por_bulto": uxb,
+        "porcentaje_iva": prod.get("porcentaje_iva") if prod.get("porcentaje_iva") is not None else 21,
+        "origen_linea": origen,
+        "huerfano": False,
+    }
+
+
+def _item_huerfano_ocr(linea: dict) -> dict:
+    nombre = (linea.get("nombre") or linea.get("codigo") or "Ítem del papel").strip()[:120]
+    codigo = (linea.get("codigo") or "").strip()
+    modo = "CAJA" if str(linea.get("unidad") or "").upper() == "CAJA" else "UN"
+    cant = float(linea.get("cantidad") or 1)
+    if cant <= 0:
+        cant = 1
+    costo = float(linea.get("costo_unitario") or 0)
+    return {
+        "producto_id": None,
+        "nombre": nombre,
+        "codigo_barras": codigo,
+        "nombre_ocr": nombre,
+        "codigo_ocr": codigo,
+        "cantidad_ingresada": cant,
+        "modo_cantidad": modo,
+        "cantidad_comprada": cant,
+        "costo_unitario": costo,
+        "costo_anterior": costo,
+        "costo_caja": costo,
+        "fecha_vencimiento": "2099-12-31",
+        "nuevo_precio_venta": None,
+        "precio_gondola_actual": 0,
+        "actualizar_gondola": False,
+        "unidades_por_bulto": 1,
+        "porcentaje_iva": 21,
+        "origen_linea": "OCR",
+        "huerfano": True,
+    }
+
+
+def _match_producto_ocr(cursor, codigo: str, nombre: str):
+    codigo = (codigo or "").strip()
+    if codigo:
+        cursor.execute(
+            "SELECT * FROM productos WHERE activo = 1 AND codigo_barras = ? LIMIT 1",
+            (codigo,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+    nombre = (nombre or "").strip()
+    if len(nombre) >= 4:
+        cursor.execute(
+            "SELECT * FROM productos WHERE activo = 1 AND nombre LIKE ? LIMIT 4",
+            (f"%{nombre}%",),
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        if len(rows) == 1:
+            return rows[0]
+        if len(rows) > 1:
+            exact = [r for r in rows if (r.get("nombre") or "").strip().lower() == nombre.lower()]
+            if len(exact) == 1:
+                return exact[0]
+    return None
+
+
+def _match_proveedor_ocr(cursor, nombre: str):
+    nombre = (nombre or "").strip()
+    if len(nombre) < 3:
+        return None
+    cursor.execute(
+        """
+        SELECT id FROM proveedores
+        WHERE IFNULL(activo, 1) = 1 AND nombre_comercial LIKE ?
+        ORDER BY id LIMIT 2
+        """,
+        (f"%{nombre}%",),
+    )
+    rows = cursor.fetchall()
+    if len(rows) == 1:
+        return rows[0]["id"] if isinstance(rows[0], sqlite3.Row) else rows[0][0]
+    return None
+
+
+def _llamar_ocr_openai(imagenes: list) -> dict:
+    key = _ocr_clave_openai()
+    if not key:
+        return {"estado": "sin_clave"}
+    vis = [im for im in imagenes if (im.get("mime") or "").startswith("image/")]
+    if not vis:
+        return {"estado": "sin_imagen"}
+    modelo = (os.getenv("FACTURA_OCR_MODELO") or "gpt-4o-mini").strip()
+    content = [{"type": "text", "text": PROMPT_OCR_FACTURA}]
+    for im in vis[:6]:
+        content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{im['mime']};base64,{im['b64']}",
+                "detail": "high",
+            },
+        })
+    body = json.dumps({
+        "model": modelo,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "max_tokens": 4000,
+        "messages": [{"role": "user", "content": content}],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detalle = e.read().decode("utf-8", "replace")[:300]
+        print(f"OCR factura HTTP {e.code}: {detalle}")
+        return {"estado": "error", "detalle": f"OCR HTTP {e.code}"}
+    except Exception as e:
+        print(f"OCR factura: {e}")
+        return {"estado": "error", "detalle": str(e)[:200]}
+    try:
+        txt = data["choices"][0]["message"]["content"]
+        parsed = json.loads(txt)
+    except Exception:
+        return {"estado": "error", "detalle": "La visión no devolvió JSON."}
+    parsed["estado"] = "ok"
+    return parsed
+
+
+def _fotos_a_imagenes_ocr(cursor, fila) -> list:
+    out = []
+    for foto in _parse_json_list(fila["fotos_json"]):
+        mime = (foto.get("mime") or "image/jpeg").split(";")[0].strip().lower()
+        if not mime.startswith("image/"):
+            continue
+        ruta = _ruta_archivo_foto(fila["id"], foto)
+        if not os.path.isfile(ruta):
+            continue
+        with open(ruta, "rb") as fh:
+            raw = fh.read()
+        if not raw or len(raw) > MAX_FOTO_BYTES:
+            continue
+        out.append({"mime": mime, "b64": base64.b64encode(raw).decode("ascii")})
+    return out
+
+
+def _aplicar_parseo_ocr(cursor, fila, parsed: dict) -> dict:
+    if parsed.get("mano"):
+        return {"estado": "mano", "n_items": 0, "n_huerfanos": 0}
+
+    borrador_id = fila["id"]
+    items_prev = _parse_json_list(fila["items_json"])
+    if items_prev and not any((it.get("origen_linea") == "OCR") for it in items_prev):
+        if any(it.get("producto_id") for it in items_prev):
+            return {"estado": "omitido_edicion", "n_items": len(items_prev), "n_huerfanos": 0}
+
+    manuales = [it for it in items_prev if (it.get("origen_linea") or "") == "MANUAL"]
+
+    ocr_items = []
+    for linea in parsed.get("items") or []:
+        try:
+            conf = float(linea.get("confianza") or 0)
+        except (TypeError, ValueError):
+            conf = 0
+        if conf and conf < 0.45:
+            continue
+        prod = _match_producto_ocr(cursor, linea.get("codigo") or "", linea.get("nombre") or "")
+        modo = "CAJA" if str(linea.get("unidad") or "").upper() == "CAJA" else "UN"
+        cant = linea.get("cantidad") or 1
+        costo = linea.get("costo_unitario") or 0
+        if prod:
+            ocr_items.append(_item_desde_producto_row(prod, cant, costo, modo, "OCR"))
+        else:
+            ocr_items.append(_item_huerfano_ocr(linea))
+
+    nuevos = manuales + ocr_items
+    cab_sets = ["items_json = ?", "updated_at = ?", "modo = ?"]
+    cab_vals = [json.dumps(nuevos, ensure_ascii=False), _ahora_ar_dt(), "stock"]
+
+    if not fila["numero_factura"] and (parsed.get("numero_factura") or "").strip():
+        cab_sets.append("numero_factura = ?")
+        cab_vals.append(str(parsed.get("numero_factura")).strip()[:80])
+    if not fila["proveedor_id"] and parsed.get("proveedor"):
+        pid = _match_proveedor_ocr(cursor, parsed.get("proveedor"))
+        if pid:
+            cab_sets.append("proveedor_id = ?")
+            cab_vals.append(pid)
+    fecha = (parsed.get("fecha") or "").strip()[:10]
+    if fecha and re.match(r"^\d{4}-\d{2}-\d{2}$", fecha) and not (fila["fecha_papel"] or "").strip():
+        cab_sets.append("fecha_papel = ?")
+        cab_vals.append(fecha)
+    total_papel = parsed.get("total_papel")
+    if total_papel is not None and fila["total_papel"] is None:
+        try:
+            cab_sets.append("total_papel = ?")
+            cab_vals.append(float(total_papel))
+        except (TypeError, ValueError):
+            pass
+    cargos = parsed.get("cargos_pie")
+    if cargos is not None:
+        try:
+            cab_sets.append("cargos_extra = ?")
+            cab_vals.append(float(cargos))
+        except (TypeError, ValueError):
+            pass
+
+    cab_vals.append(borrador_id)
+    cursor.execute(
+        f"UPDATE compras_borradores SET {', '.join(cab_sets)} WHERE id = ? AND estado = 'BORRADOR'",
+        cab_vals,
+    )
+    n_h = sum(1 for it in nuevos if it.get("huerfano") or not it.get("producto_id"))
+    return {
+        "estado": "ok",
+        "n_items": len(nuevos),
+        "n_huerfanos": n_h,
+        "mano": False,
+    }
+
+
+def _ocr_borrador_completo(borrador_id: int) -> dict:
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        _asegurar_tablas_borrador(cursor)
+        fila = _fila_borrador(cursor, borrador_id)
+        if not fila:
+            return {"estado": "error", "detalle": "Borrador no encontrado."}
+        imagenes = _fotos_a_imagenes_ocr(cursor, fila)
+        parsed = _llamar_ocr_openai(imagenes)
+        if parsed.get("estado") in ("sin_clave", "sin_imagen", "error"):
+            return parsed
+        res = _aplicar_parseo_ocr(cursor, fila, parsed)
+        conexion.commit()
+        return res
+    except Exception as e:
+        conexion.rollback()
+        print(f"OCR borrador: {e}")
+        return {"estado": "error", "detalle": str(e)[:200]}
+    finally:
+        conexion.close()
+
+
 @router.post("/borradores/desde_whatsapp")
 def borrador_desde_whatsapp(body: FotoWhatsappIn, request: Request):
     """Contrato del bot Node (loopback). Adjunta foto a un borrador. NUNCA carga stock."""
@@ -1069,16 +1363,56 @@ def borrador_desde_whatsapp(body: FotoWhatsappIn, request: Request):
                 (caption[:500], _ahora_ar_dt(), borrador_id),
             )
         conexion.commit()
+        ocr = {"estado": "omitido"}
+        try:
+            ocr = _ocr_borrador_completo(borrador_id)
+        except Exception as e:
+            print(f"OCR post-WhatsApp: {e}")
+            ocr = {"estado": "error", "detalle": str(e)[:200]}
         fila = _fila_borrador(cursor, borrador_id)
+        if fila is None:
+            conexion2 = obtener_conexion()
+            conexion2.row_factory = sqlite3.Row
+            try:
+                fila = _fila_borrador(conexion2.cursor(), borrador_id, incluir_cerrados=True)
+            finally:
+                conexion2.close()
+        n_fotos = len(_parse_json_list(fila["fotos_json"])) if fila else 1
         return {
             "mensaje": "Foto en borrador. No se tocó stock.",
             "borrador_id": borrador_id,
             "foto": meta,
-            "n_fotos": len(_parse_json_list(fila["fotos_json"])) if fila else 1,
+            "n_fotos": n_fotos,
+            "ocr": ocr,
         }
     except HTTPException:
         conexion.rollback()
         raise
+    finally:
+        conexion.close()
+
+
+@router.post("/borradores/{borrador_id}/ocr", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def ocr_borrador_factura(borrador_id: int):
+    """Lee las fotos del borrador y precarga ítems. Nunca toca stock."""
+    if not _ocr_clave_openai():
+        raise HTTPException(
+            status_code=400,
+            detail="Falta OPENAI_API_KEY (o FACTURA_OCR_KEY) en el servidor para leer el papel.",
+        )
+    res = _ocr_borrador_completo(borrador_id)
+    if res.get("estado") == "error":
+        raise HTTPException(status_code=400, detail=res.get("detalle") or "No se pudo leer la factura.")
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        fila = _fila_borrador(cursor, borrador_id, incluir_cerrados=True)
+        if not fila:
+            raise HTTPException(status_code=404, detail="Borrador no encontrado.")
+        payload = _payload_borrador(fila)
+        payload["ocr"] = res
+        return payload
     finally:
         conexion.close()
 
@@ -1118,7 +1452,7 @@ def ingresar_mercaderia(factura: NuevaFacturaCompra, background_tasks: Backgroun
             cursor.execute("SELECT nombre FROM productos WHERE id = ?", (item.producto_id,))
             prod = cursor.fetchone()
             if not prod:
-                raise HTTPException(status_code=400, detail=f"El producto #{item.producto_id} no existe.")
+                raise HTTPException(status_code=400, detail=f"El producto #{item.producto_id} no existe. Vinculá o dales alta a las líneas sin catálogo.")
 
             cursor.execute('''
                 INSERT INTO compras_detalle 
