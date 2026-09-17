@@ -127,11 +127,85 @@ function detalleErp(json) {
     return (json && json.error) || 'ERP rechazó la foto';
 }
 
+function serialIdMensaje(id) {
+    if (!id) return '';
+    if (typeof id === 'string') return id;
+    return id._serialized || id.$1 || '';
+}
+
+function parcheIdWhatsapp(message) {
+    if (!message || !message.id || typeof message.id !== 'object') return;
+    const id = message.id;
+    if (!id._serialized) {
+        if (id.$1) id._serialized = id.$1;
+        else if (id.remote && id.id != null) {
+            id._serialized = `${id.fromMe ? 'true' : 'false'}_${id.remote}_${id.id}`;
+        }
+    }
+    if (!id.$1 && id._serialized) id.$1 = id._serialized;
+}
+
 function esperar(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function bajarMediaViaPagina(message) {
+    const page = client.pupPage;
+    if (!page) throw new Error('WhatsApp sin página interna');
+    parcheIdWhatsapp(message);
+    const payload = {
+        serialized: serialIdMensaje(message.id),
+        fromMe: !!message.id.fromMe,
+        remote: message.id.remote || message.from,
+        id: message.id.id
+    };
+    if (!payload.serialized) throw new Error('mensaje sin id serializado');
+    return await page.evaluate(async (p) => {
+        const collections = window.require ? window.require('WAWebCollections') : null;
+        const Msg = (window.Store && window.Store.Msg) || (collections && collections.Msg);
+        if (!Msg) throw new Error('Store.Msg no disponible');
+        const candidatos = [p.serialized];
+        let msg = null;
+        for (const c of candidatos) {
+            try { msg = Msg.get(c); } catch (e) { /* */ }
+            if (msg) break;
+        }
+        if (!msg && Msg.getMessagesById) {
+            try {
+                const packed = await Msg.getMessagesById([p.serialized]);
+                msg = packed && (packed.messages && packed.messages[0] || packed[0]);
+            } catch (e) { /* */ }
+        }
+        if (!msg && typeof Msg.getModelsArray === 'function') {
+            const arr = Msg.getModelsArray();
+            msg = arr.find((m) => {
+                const sid = m.id && (m.id._serialized || m.id.$1);
+                return sid === p.serialized || (m.id && m.id.id === p.id);
+            });
+        }
+        if (!msg) throw new Error('mensaje no está en Store');
+        if (!window.WWebJS || typeof window.WWebJS.downloadBuffer !== 'function') {
+            throw new Error('WWebJS.downloadBuffer no disponible');
+        }
+        const decrypted = await window.WWebJS.downloadBuffer(msg);
+        if (!decrypted) throw new Error('downloadBuffer vacío');
+        const bytes = decrypted instanceof ArrayBuffer ? new Uint8Array(decrypted) : new Uint8Array(decrypted);
+        let binary = '';
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+        }
+        return {
+            mimetype: msg.mimetype || 'image/jpeg',
+            data: btoa(binary),
+            filename: msg.filename || 'whatsapp.jpg'
+        };
+    }, payload);
+}
+
 async function bajarMedia(message) {
+    parcheIdWhatsapp(message);
+    console.log(`msg.id serial=${serialIdMensaje(message.id) || '-'} $1=${(message.id && message.id.$1) || '-'} remote=${(message.id && message.id.remote) || '-'}`);
     let ultimo = null;
     for (let i = 1; i <= 3; i++) {
         try {
@@ -147,6 +221,17 @@ async function bajarMedia(message) {
             console.error(`downloadMedia intento ${i}:`, (e && e.message) ? e.message : e);
         }
         await esperar(800 * i);
+    }
+    try {
+        console.log('Bajando foto vía Store interno...');
+        const media = await bajarMediaViaPagina(message);
+        if (media && media.data) {
+            console.log(`Foto bajada (Store) mime=${media.mimetype || '-'} bytes_b64=${String(media.data).length}`);
+            return media;
+        }
+    } catch (e) {
+        console.error('Store interno:', (e && e.message) ? e.message : e);
+        ultimo = e;
     }
     throw ultimo || new Error('No se pudo bajar la foto de WhatsApp');
 }
@@ -186,6 +271,7 @@ async function mandarFotoAlErp(message) {
 }
 
 async function onMensajeEntrante(message) {
+    parcheIdWhatsapp(message);
     if (message.fromMe && (message.type || '') === 'chat') return;
     const from = message.from || '';
     console.log(`MSG from=${from} type=${message.type || '-'} media=${!!message.hasMedia} author=${message.author || '-'} body=${String(message.body || '').slice(0, 80)}`);
