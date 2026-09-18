@@ -622,12 +622,21 @@ def detalle_ventas_por_hora(hora: str):
 
 
 @router.get("/cierres", dependencies=[Depends(VerificarRol(["ADMIN"]))])
-def listar_cierres_mes(mes: str = None):
+def listar_cierres_mes(mes: str = None, incluir_oficina: bool = False):
     mes = _mes_ar(mes)
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
+        cursor.execute('''
+            SELECT COUNT(*)
+            FROM turnos_caja t
+            LEFT JOIN cajas_fisicas cf ON t.caja_id = cf.id
+            WHERE strftime('%Y-%m', t.fecha_hora_apertura) = ?
+              AND IFNULL(cf.solo_admin, 0) = 1
+        ''', (mes,))
+        ocultos_oficina = cursor.fetchone()[0] or 0
+
         cursor.execute('''
             WITH ventas_turno AS (
                 SELECT turno_id,
@@ -651,6 +660,7 @@ def listar_cierres_mes(mes: str = None):
                    t.diferencia, t.estado_turno,
                    IFNULL(u.nombre_completo, '—') as cajero,
                    IFNULL(cf.nombre, '') as caja_nombre,
+                   IFNULL(cf.solo_admin, 0) as solo_admin,
                    IFNULL(vt.tickets, 0) as tickets,
                    IFNULL(vt.ventas, 0) as ventas,
                    IFNULL(ct.cmv, 0) as cmv,
@@ -661,9 +671,14 @@ def listar_cierres_mes(mes: str = None):
             LEFT JOIN ventas_turno vt ON vt.turno_id = t.id
             LEFT JOIN cmv_turno ct ON ct.turno_id = t.id
             WHERE strftime('%Y-%m', t.fecha_hora_apertura) = ?
+              AND (? = 1 OR IFNULL(cf.solo_admin, 0) = 0)
             ORDER BY t.fecha_hora_apertura DESC
-        ''', (mes,))
-        return {"cierres": [dict(r) for r in cursor.fetchall()], "mes": mes}
+        ''', (mes, 1 if incluir_oficina else 0))
+        return {
+            "cierres": [dict(r) for r in cursor.fetchall()],
+            "mes": mes,
+            "ocultos_oficina": 0 if incluir_oficina else ocultos_oficina,
+        }
     finally:
         conexion.close()
 

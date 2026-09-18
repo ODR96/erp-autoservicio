@@ -242,7 +242,8 @@ async function cargarCierres() {
     const resumen = document.getElementById('resumenCierres');
     tbody.innerHTML = filaVacia(10, 'Cargando...');
     if (resumen) resumen.innerText = '—';
-    const data = await apiReportes(`/reportes/cierres?mes=${encodeURIComponent(mes)}`);
+    const oficina = document.getElementById('chkCierresOficina')?.checked ? '1' : '0';
+    const data = await apiReportes(`/reportes/cierres?mes=${encodeURIComponent(mes)}&incluir_oficina=${oficina}`);
     const lista = (data && data.cierres) || [];
     cacheCierres = [['Id', 'Cajero', 'Caja', 'Apertura', 'Cierre', 'Estado', 'Tickets', 'Ventas', 'CMV', 'Margen', 'Faltante']];
     if (data.error || !lista.length) {
@@ -274,6 +275,7 @@ async function cargarCierres() {
             ? '<span class="badge text-bg-warning">ABIERTO</span>'
             : '<span class="badge text-bg-secondary">CERRADO</span>';
         const avisos = [
+            Number(t.solo_admin) ? '<span class="badge text-bg-dark">OFICINA</span>' : '',
             perdida ? '<span class="badge text-bg-danger">PÉRDIDA</span>' : '',
             faltante ? '<span class="badge text-bg-danger">FALTANTE</span>' : '',
         ].join(' ');
@@ -293,7 +295,9 @@ async function cargarCierres() {
         </tr>`;
     }).join('');
     if (resumen) {
-        resumen.innerHTML = `${lista.length} turnos · ${nPerdida} con margen negativo · ${nFaltante} con faltante · margen mes ${plata(totMargen)} · faltantes ${plata(totFaltante)}`;
+        const nOficina = Number(data.ocultos_oficina) || 0;
+        const extra = nOficina ? ` · ${nOficina} de oficina ocultos` : '';
+        resumen.innerHTML = `${lista.length} turnos · ${nPerdida} con margen negativo · ${nFaltante} con faltante · margen mes ${plata(totMargen)} · faltantes ${plata(totFaltante)}${extra}`;
         resumen.className = `small fw-bold mb-2 ${(nPerdida || nFaltante) ? 'text-danger' : 'text-muted'}`;
     }
 }
