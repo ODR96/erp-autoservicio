@@ -238,6 +238,9 @@
                             <button type="button" class="btn btn-outline-primary btn-sm fw-bold" onclick="nuevoBorradorFactura()">
                                 <i class="bi bi-plus-lg"></i> Nuevo
                             </button>
+                            <button type="button" class="btn btn-outline-danger btn-sm fw-bold" id="btnBorrarBorrador" onclick="anularCargaFactura()" disabled>
+                                <i class="bi bi-trash"></i> Borrar
+                            </button>
                             <span id="estadoBorradorFactura" class="small fw-bold text-primary">Sin borrador.</span>
                         </div>
                         <div class="mb-3">
@@ -695,7 +698,7 @@
         }
     </script>
     <script src="js/layout.js?v=1.0.42"></script>
-    <script src="js/app_proveedores.js?v=1.0.48"></script>
+    <script src="js/app_proveedores.js?v=1.0.49"></script>
 </body>
 
 </html>

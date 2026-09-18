@@ -240,6 +240,8 @@ function leerCabeceraFactura() {
 function marcarEstadoBorradorFactura(texto) {
     const el = document.getElementById('estadoBorradorFactura');
     if (el) el.textContent = texto;
+    const btn = document.getElementById('btnBorrarBorrador');
+    if (btn) btn.disabled = !borradorServidorId && !borradorTieneContenido();
 }
 
 function payloadBorradorActual() {
@@ -530,20 +532,25 @@ async function nuevoBorradorFactura() {
 }
 
 async function anularCargaFactura() {
+    if (!borradorServidorId && !borradorTieneContenido()) {
+        return Swal.fire('Borrador', 'No hay nada para borrar.', 'info');
+    }
     const ok = await Swal.fire({
-        title: '¿Anular esta carga?',
-        text: 'El borrador se cierra en el servidor. Las fotos quedan archivadas, el stock no se toca.',
+        title: '¿Borrar este borrador?',
+        text: 'Sale de la lista. Las fotos quedan archivadas. El stock no se toca.',
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonText: 'Anular',
+        confirmButtonText: 'Borrar',
         cancelButtonText: 'Seguir editando',
         confirmButtonColor: '#d33'
     });
     if (!ok.isConfirmed) return;
     if (borradorServidorId) {
-        try {
-            await fetch(`${obtenerBaseUrl()}/proveedores/borradores/${borradorServidorId}/anular`, { method: 'POST' });
-        } catch (e) { /* si no hay red, igual limpiamos la pantalla */ }
+        const res = await fetch(`${obtenerBaseUrl()}/proveedores/borradores/${borradorServidorId}/anular`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            return Swal.fire('Borrador', detalleApi(data) || 'No se pudo borrar.', 'error');
+        }
     }
     borradorServidorId = null;
     localStorage.removeItem(CLAVE_BORRADOR_FACTURA);
