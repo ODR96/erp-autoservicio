@@ -17,11 +17,12 @@ VERSIÓN:
 - Cache JS/CSS reciente: layout/login ?v=1.0.41 — no es release de tienda.
 - Admin hoy: http://185.249.225.63:8000
 
-SAVE STATE (2026-09-15):
-- GitHub main al armar este corte: d756df4 (pago proveedor ≠ gasto). Este commit suma CMV + frente HTTP JS + Nginx conf.
+SAVE STATE (2026-09-17):
+- GitHub main: 1a4a14b (borrar borrador de factura). Reportes ya está (1106bf7 + 8422f2e).
 - Se sigue vendiendo sin stock (VENTA_SIN_STOCK). El CMV no bloquea el POS.
 - facturar_afip en /ventas/cobrar es STUB: CAE SIMULADO. No es factura fiscal.
 - Encargado: sin dashboard / RRHH / gastos / monitor de cajas. POS, productos, clientes, proveedores sí.
+- Nginx 80 en paralelo a :8000 (ops). Uvicorn sigue 0.0.0.0:8000. UFW 8000 abierto.
 
 HITOS RECIENTES (ya no son tareas):
 - Dashboard: piso operativo del mes (ganancia bruta vs gastos reales + sueldos).
@@ -34,14 +35,19 @@ HITOS RECIENTES (ya no son tareas):
 - Corte 1 tesorería: POS F10 → Pago a proveedor = POST /proveedores/pagar (caja + saldo, SIN gastos_operativos). Categorías con "proveedor" fuera del gasto. Contado pregunta origen de la plata.
 - CMV: ventas_detalle.costo_unitario_historico al cobrar (FIFO lote / fallback costo_sin_iva). ganancia_neta usa eso; NULL = maestro. VENTA_SIN_STOCK ya no guarda precio de venta como costo. Remito depósito todavía no.
 - Frente HTTP (JS listo): obtenerBaseUrl() mismo origen en 80/443; en :8000 no cambia. Electron file:// sigue :8000. Conf: deploy/nginx-erpetto.conf. git pull NO instala Nginx ni cierra UFW.
+- Reportes admin: mes, ranking, mix, clavos, ventas/día, cierres (margen/faltante, sin cajas solo_admin).
+- Proveedores: OCR al borrador + Borrar (ANULADO). No carga stock.
 
 COLA (prioridad):
-1. En el VPS: git pull, hard refresh, probar :8000 (una venta + F10 pago proveedor).
-2. Nginx 80 en PARALELO al :8000 (copiar deploy/nginx-erpetto.conf). NO uvicorn 127.0.0.1. NO cerrar UFW 8000.
-3. AFIP REAL (prioridad de negocio): WSAA + homologación + CAE de verdad en el ticket + qué hacer si AFIP cae. El toggle del POS ya existe; el backend no. No es un corte de un día.
-4. Reportes (menú href=#). El dato (merma, ganancia) ya está.
-5. Electron 1.0.31 que abra http://IP/ (o HTTPS) → recién ahí uvicorn --host 127.0.0.1 y UFW sin 8000.
-6. CMV en remito depósito; Gastos pulgar; conteo cíclico (post-HTTPS); tesorería de cheques (NO mezclar cheques/préstamos en gastos_operativos).
+1. VPS: git pull + hard refresh (Reportes + borrar borrador). F10 pago proveedor si no se probó en prod.
+2. Fiados v2 (no mezclar con AFIP ni OCR):
+   - Corte 1 (local, a subir): dia_vencimiento 1–31. NULL = sin pactar. No bloquea el POS.
+   - Corte 2: aging + pagos FIFO (mora vs período abierto). Día 31 en meses cortos = último día.
+   - Corte 3: bloqueo en /ventas/cobrar si hay saldo vencido; override Encargado con motivo.
+   - Corte 4: UI deudores (solo con saldo, mora visible, lista sin innerHTML += en loop).
+3. AFIP REAL (prioridad de negocio, no es un corte de un día): WSAA + homologación + CAE de verdad + qué hacer si AFIP cae. El toggle del POS ya existe; el backend no.
+4. Electron 1.0.31 que abra http://IP/ (o HTTPS) → recién ahí uvicorn --host 127.0.0.1 y UFW sin 8000.
+5. CMV en remito depósito; Gastos pulgar; conteo cíclico (post-HTTPS); tesorería de cheques (NO mezclar cheques/préstamos en gastos_operativos).
 
 DIFERIDO TÉCNICO:
 - Versionar el bot: producción es PM2 bot-whatsapp/bot.js; un git pull no actualiza Node.
