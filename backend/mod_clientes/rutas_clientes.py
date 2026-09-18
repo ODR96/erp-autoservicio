@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date, timezone, timedelta
+import calendar
+import re
 import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
+
+ZONA_AR = timezone(timedelta(hours=-3))
 
 router = APIRouter()
 
@@ -32,12 +36,162 @@ def _normalizar_dia_vencimiento(valor):
         raise ValueError("El día de cobro debe estar entre 1 y 31.")
     return dia
 
+
+def _hoy_ar():
+    return datetime.now(ZONA_AR).date()
+
+
+def _parse_fecha_mov(valor):
+    s = str(valor or "").replace("T", " ")[:10]
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError:
+        return _hoy_ar()
+
+
+def _ultimo_cierre(dia, hoy):
+    dia = int(dia)
+
+    def cierre_mes(y, m):
+        return date(y, m, min(dia, calendar.monthrange(y, m)[1]))
+
+    c_este = cierre_mes(hoy.year, hoy.month)
+    if hoy >= c_este:
+        return c_este
+    if hoy.month == 1:
+        return cierre_mes(hoy.year - 1, 12)
+    return cierre_mes(hoy.year, hoy.month - 1)
+
+
+def _ticket_detalle(detalle):
+    m = re.search(r"#(\d+)", detalle or "")
+    return m.group(1) if m else None
+
+
+def _aplicar_a_cargos(cargos, monto, ticket=None):
+    resto = float(monto or 0)
+    if resto <= 0:
+        return
+    if ticket:
+        for c in cargos:
+            if resto <= 0:
+                break
+            if c["ticket"] == ticket and c["restante"] > 0:
+                toma = min(c["restante"], resto)
+                c["restante"] -= toma
+                resto -= toma
+    for c in cargos:
+        if resto <= 0:
+            break
+        if c["restante"] <= 0:
+            continue
+        toma = min(c["restante"], resto)
+        c["restante"] -= toma
+        resto -= toma
+
+
+def _metodo_desde_detalle(detalle):
+    m = re.search(r"\(([^)]+)\)\s*$", detalle or "")
+    return (m.group(1) if m else "PAGO").strip() or "PAGO"
+
+
+def _nombre_cliente(cliente):
+    try:
+        return cliente["nombre_completo"] if "nombre_completo" in cliente.keys() else ""
+    except Exception:
+        return str(cliente.get("nombre_completo") or "") if hasattr(cliente, "get") else ""
+
+
+def _estado_cuenta_de(cursor, cliente, hasta_id=None, al=None):
+    saldo_cache = round(float(cliente["saldo_actual_deudor"] or 0), 2)
+    try:
+        dia = int(cliente["dia_vencimiento"]) if cliente["dia_vencimiento"] not in (None, "", 0) else None
+        if dia < 1 or dia > 31:
+            dia = None
+    except (TypeError, ValueError, KeyError):
+        dia = None
+
+    hoy = al or _hoy_ar()
+    sql = """
+        SELECT id, fecha_hora, tipo_movimiento, monto, IFNULL(detalle, '') as detalle
+        FROM movimientos_clientes
+        WHERE cliente_id = ?
+    """
+    params = [cliente["id"]]
+    if hasta_id is not None:
+        sql += " AND id <= ?"
+        params.append(int(hasta_id))
+    sql += " ORDER BY fecha_hora ASC, id ASC"
+    cursor.execute(sql, params)
+
+    cargos = []
+    saldo_recon = 0.0
+    for m in cursor.fetchall():
+        tipo = (m["tipo_movimiento"] or "").upper()
+        monto = float(m["monto"] or 0)
+        if tipo in ("CARGO", "RECARGO"):
+            saldo_recon += monto
+            cargos.append({
+                "fecha": _parse_fecha_mov(m["fecha_hora"]),
+                "restante": monto,
+                "ticket": _ticket_detalle(m["detalle"]),
+            })
+        elif tipo in ("PAGO", "PAGO_ANULACION"):
+            saldo_recon -= monto
+            tick = _ticket_detalle(m["detalle"]) if tipo == "PAGO_ANULACION" else None
+            _aplicar_a_cargos(cargos, monto, tick)
+
+    saldo = round(saldo_recon, 2) if hasta_id is not None else saldo_cache
+    a_favor = round(-saldo, 2) if saldo < 0 else 0.0
+    base = {
+        "cliente_id": cliente["id"],
+        "nombre": _nombre_cliente(cliente),
+        "dia_vencimiento": dia,
+        "sin_pactar": dia is None,
+        "ultimo_cierre": None,
+        "saldo": saldo,
+        "vencido": 0.0,
+        "abierto": 0.0,
+        "a_favor": a_favor,
+    }
+    if saldo <= 0:
+        return base
+
+    vencido = 0.0
+    abierto = 0.0
+    if dia:
+        ultimo = _ultimo_cierre(dia, hoy)
+        base["ultimo_cierre"] = ultimo.isoformat()
+        for c in cargos:
+            if c["restante"] <= 0:
+                continue
+            if c["fecha"] < ultimo:
+                vencido += c["restante"]
+            else:
+                abierto += c["restante"]
+    else:
+        abierto = sum(c["restante"] for c in cargos if c["restante"] > 0)
+
+    recon = round(vencido + abierto, 2)
+    if recon > 0.009 and abs(recon - saldo) > 0.05:
+        factor = saldo / recon
+        vencido *= factor
+        abierto *= factor
+    elif recon <= 0.009:
+        abierto = saldo
+        vencido = 0.0
+
+    base["vencido"] = round(max(vencido, 0), 2)
+    base["abierto"] = round(max(abierto, 0), 2)
+    return base
+
 class PagoDeuda(BaseModel):
     monto_pago: float
     metodo_pago: str 
     observaciones: Optional[str] = ""
     usuario_id: int = 1
     afecta_caja: bool = False  # <-- EL SWITCH INTELIGENTE
+    turno_id: Optional[int] = None
 
 # --- FUNCIÓN DE ARRANQUE (Mantenimiento Automático) ---
 def inicializar_tabla_movimientos():
@@ -136,13 +290,89 @@ def listar_clientes():
     conexion.close()
     return {"clientes": clientes}
 
+
+@router.get("/estado_cuenta/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
+def estado_cuenta_cliente(cliente_id: int):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute("SELECT * FROM clientes WHERE id = ?", (cliente_id,))
+        cliente = cursor.fetchone()
+        if not cliente:
+            raise HTTPException(status_code=404, detail="Cliente no encontrado.")
+        return _estado_cuenta_de(cursor, cliente)
+    finally:
+        conexion.close()
+
+
+@router.get("/recibo_pago/{movimiento_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
+def recibo_pago_historico(movimiento_id: int):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT id, cliente_id, fecha_hora, tipo_movimiento, monto, IFNULL(detalle, '') as detalle
+            FROM movimientos_clientes WHERE id = ?
+            """,
+            (movimiento_id,),
+        )
+        mov = cursor.fetchone()
+        if not mov:
+            raise HTTPException(status_code=404, detail="Movimiento no encontrado.")
+        if (mov["tipo_movimiento"] or "").upper() != "PAGO":
+            raise HTTPException(status_code=400, detail="Solo se reimprime un cobro (PAGO).")
+        cursor.execute("SELECT * FROM clientes WHERE id = ?", (mov["cliente_id"],))
+        cliente = cursor.fetchone()
+        if not cliente:
+            raise HTTPException(status_code=404, detail="Cliente no encontrado.")
+        al = _parse_fecha_mov(mov["fecha_hora"])
+        est = _estado_cuenta_de(cursor, cliente, hasta_id=mov["id"], al=al)
+        return {
+            "movimiento_id": mov["id"],
+            "fecha": mov["fecha_hora"],
+            "monto": float(mov["monto"] or 0),
+            "metodo": _metodo_desde_detalle(mov["detalle"]),
+            "detalle": mov["detalle"],
+            **est,
+        }
+    finally:
+        conexion.close()
+
+
+@router.get("/deudores", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
+def listar_deudores():
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute(
+            "SELECT * FROM clientes WHERE IFNULL(saldo_actual_deudor, 0) != 0 ORDER BY nombre_completo"
+        )
+        filas = []
+        for c in cursor.fetchall():
+            est = _estado_cuenta_de(cursor, c)
+            item = dict(c)
+            item["vencido"] = est["vencido"]
+            item["abierto"] = est["abierto"]
+            item["a_favor"] = est["a_favor"]
+            item["ultimo_cierre"] = est["ultimo_cierre"]
+            item["sin_pactar"] = est["sin_pactar"]
+            filas.append(item)
+        filas.sort(key=lambda r: (-float(r["vencido"] or 0), -abs(float(r["saldo_actual_deudor"] or 0))))
+        return {"deudores": filas}
+    finally:
+        conexion.close()
+
 # --- 3. COBRO DE DEUDA (Multiuso: Admin o POS) ---
 @router.put("/pagar_deuda/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
         # 1. Le descontamos la deuda al cliente
         cursor.execute("UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor - ? WHERE id = ?", (pago.monto_pago, cliente_id))
@@ -156,13 +386,18 @@ def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
         
         # 3. EL SWITCH: Si afecta caja y es en efectivo, recién ahí inflamos el cajón del turno
         if pago.afecta_caja and pago.metodo_pago.upper() == "EFECTIVO":
-            cursor.execute("SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO'")
-            turno = cursor.fetchone()
-            if turno:
+            turno_id = pago.turno_id
+            if not turno_id:
+                cursor.execute(
+                    "SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO' ORDER BY id DESC LIMIT 1"
+                )
+                turno = cursor.fetchone()
+                turno_id = turno[0] if turno else None
+            if turno_id:
                 cursor.execute('''
-                    INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones)
-                    VALUES (?, ?, 'INGRESO', ?, ?)
-                ''', (fecha_actual, pago.usuario_id, pago.monto_pago, f"Cobro Deuda Cliente ID: {cliente_id}"))
+                    INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+                    VALUES (?, ?, 'INGRESO', ?, ?, ?)
+                ''', (fecha_actual, pago.usuario_id, pago.monto_pago, f"Cobro Deuda Cliente ID: {cliente_id}", turno_id))
 
         conexion.commit()
         return {"mensaje": "Pago procesado correctamente."}
@@ -190,10 +425,10 @@ def ver_historial_cliente(cliente_id: int):
     cursor = conexion.cursor()
     try:
         cursor.execute('''
-            SELECT fecha_hora, tipo_movimiento, monto, detalle, usuario_id 
+            SELECT id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id 
             FROM movimientos_clientes 
             WHERE cliente_id = ? 
-            ORDER BY fecha_hora DESC
+            ORDER BY fecha_hora DESC, id DESC
         ''', (cliente_id,))
         movimientos = [dict(m) for m in cursor.fetchall()]
         return {"movimientos": movimientos}

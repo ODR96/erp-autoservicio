@@ -1,7 +1,7 @@
 // ========================================================
 // CONFIGURACIÓN GLOBAL
 // ========================================================
-const APP_VERSION = "v1.0.30"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
+const APP_VERSION = "v1.0.31"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
 
 function obtenerBaseUrl() {
     const protocolo = window.location.protocol;
@@ -12,7 +12,7 @@ function obtenerBaseUrl() {
         return 'http://localhost:8000';
     }
 
-    // Electron (file://): el instalador 1.0.30 no pasa por Nginx. Sigue :8000 hasta un release nuevo.
+    // Electron (file://): el instalador 1.0.31 sigue :8000. Nginx :80 es el admin en browser.
     if (protocolo === 'file:' || !host) {
         return 'http://185.249.225.63:8000';
     }
@@ -201,6 +201,140 @@ document.addEventListener("DOMContentLoaded", () => {
     inyectarLayout();
     cargarDolar();
 });
+
+let ultimoReciboPagoCtaCte = null;
+
+function plataTicket(n) {
+    return Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function escaparHtmlTicket(texto) {
+    return String(texto || '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+function imprimirHtmlTermico(html) {
+    try {
+        if (typeof require !== 'undefined') {
+            require('electron').ipcRenderer.send('imprimir-silencioso', html);
+            return;
+        }
+    } catch (e) { /* Chrome u otro navegador */ }
+    const vent = window.open('', '_blank', 'width=300,height=560');
+    if (!vent) return;
+    vent.document.write(html);
+    vent.document.close();
+    vent.focus();
+    setTimeout(() => { vent.print(); vent.close(); }, 400);
+}
+
+function formatearFechaTicket(valor) {
+    if (!valor) {
+        return `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    const s = String(valor).replace('T', ' ');
+    const partes = s.slice(0, 10).split('-');
+    const hora = s.length >= 16 ? s.slice(11, 16) : '';
+    if (partes.length === 3 && partes[0].length === 4) {
+        return `${partes[2]}/${partes[1]}/${partes[0]}${hora ? ' ' + hora : ''}`;
+    }
+    return s;
+}
+
+function htmlReciboPagoCtaCte(datos) {
+    const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: 'ERPetto' };
+    const negocio = (config.nombre_negocio || 'ERPetto').toUpperCase();
+    const fecha = formatearFechaTicket(datos.fecha);
+    const monto = Number(datos.monto) || 0;
+    const saldo = Number(datos.saldo) || 0;
+    const vencido = Number(datos.vencido) || 0;
+    const abierto = Number(datos.abierto) || 0;
+    const saldoTxt = saldo < 0 ? `A FAVOR $ ${plataTicket(Math.abs(saldo))}` : `$ ${plataTicket(saldo)}`;
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Recibo de Pago</title>
+    <style>
+        @page { margin: 0; }
+        body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 600; color: #000; margin: 0; padding: 2mm 4mm; width: 72mm; -webkit-font-smoothing: none; text-rendering: crispEdges; }
+        .center { text-align: center; } .bold { font-weight: bold; }
+        .divisor { border-top: 1px dashed #000; margin: 6px 0; }
+        .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 6px 0; }
+        .fila { display: flex; justify-content: space-between; margin-bottom: 4px; gap: 8px; }
+    </style></head><body>
+        <div class="center bold" style="font-size: 15px;">${escaparHtmlTicket(negocio)}</div>
+        <div class="center bold" style="font-size: 14px; margin-top: 4px;">RECIBO DE PAGO</div>
+        <div class="center" style="font-size: 11px;">Cuenta corriente · copia cliente</div>
+        <div class="divisor-doble"></div>
+        <div class="fila"><span>Fecha:</span><span>${fecha}</span></div>
+        <div class="fila"><span>Cliente:</span><span>${escaparHtmlTicket(datos.cliente)}</span></div>
+        <div class="divisor-doble"></div>
+        <div class="center bold" style="font-size: 13px; margin: 8px 0 4px;">IMPORTE ABONADO</div>
+        <div class="center bold" style="font-size: 24px; border: 1px solid #000; padding: 6px;">$ ${plataTicket(monto)}</div>
+        <div class="divisor"></div>
+        <div class="fila"><span>Medio:</span><span>${escaparHtmlTicket(datos.metodo)}</span></div>
+        <div class="divisor"></div>
+        <div class="center bold" style="font-size: 11px; margin-bottom: 4px;">${escaparHtmlTicket(datos.tituloSaldo || 'SALDO LUEGO DE ESTE COBRO')}</div>
+        <div class="fila"><span>Vencido:</span><span>$ ${plataTicket(vencido)}</span></div>
+        <div class="fila"><span>Período:</span><span>$ ${plataTicket(abierto)}</span></div>
+        <div class="fila bold" style="font-size: 14px;"><span>TOTAL:</span><span>${saldoTxt}</span></div>
+        ${saldo <= 0 ? '<div class="center bold" style="margin-top:8px;">CUENTA AL DÍA</div>' : ''}
+        <div class="center" style="font-size: 10px; margin-top: 16px;">Comprobante no válido como factura.</div>
+        <div style="margin-bottom: 25mm;"></div>
+    </body></html>`;
+}
+
+function imprimirReciboPagoCtaCte(datos) {
+    if (!datos) return;
+    ultimoReciboPagoCtaCte = datos;
+    imprimirHtmlTermico(htmlReciboPagoCtaCte(datos));
+}
+
+async function preguntarImprimirReciboPagoCtaCte(datos) {
+    ultimoReciboPagoCtaCte = datos;
+    const saldo = Number(datos.saldo) || 0;
+    const r = await Swal.fire({
+        title: 'Pago registrado',
+        html: `<div class="text-start small">Abonó <b>$ ${plataTicket(datos.monto)}</b> (${escaparHtmlTicket(datos.metodo)})<br>
+            Vencido $ ${plataTicket(datos.vencido)} · Período $ ${plataTicket(datos.abierto)}<br>
+            Saldo: <b>${saldo < 0 ? 'A favor $ ' + plataTicket(Math.abs(saldo)) : '$ ' + plataTicket(saldo)}</b></div>`,
+        icon: 'success',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-printer"></i> Ticketera',
+        cancelButtonText: 'No imprimir',
+        confirmButtonColor: '#198754',
+        reverseButtons: true
+    });
+    if (r.isConfirmed) imprimirReciboPagoCtaCte(datos);
+}
+
+async function imprimirReciboPagoPorMovimiento(movimientoId) {
+    const id = parseInt(movimientoId, 10);
+    if (!id) return Swal.fire('Atención', 'Ese cobro no se puede reimprimir.', 'info');
+    Swal.fire({ title: 'Armando recibo...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    try {
+        const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/recibo_pago/${id}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        const data = await res.json();
+        if (!res.ok || data.error || data.detail) {
+            throw new Error(data.error || data.detail || 'No se pudo armar el recibo.');
+        }
+        Swal.close();
+        imprimirReciboPagoCtaCte({
+            clienteId: data.cliente_id,
+            cliente: data.nombre,
+            monto: data.monto,
+            metodo: data.metodo,
+            saldo: data.saldo,
+            vencido: data.vencido,
+            abierto: data.abierto,
+            fecha: data.fecha,
+            tituloSaldo: 'SALDO LUEGO DE ESTE COBRO'
+        });
+    } catch (e) {
+        Swal.fire('Error', e.message || 'No se pudo armar el recibo.', 'error');
+    }
+}
 
 if (typeof require !== 'undefined') {
     const { ipcRenderer } = require('electron');

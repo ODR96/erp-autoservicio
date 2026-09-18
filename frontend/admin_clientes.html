@@ -92,27 +92,39 @@
                                         <div class="small text-muted mt-1" id="diaCobroClienteDetalle">Sin día de cobro</div>
                                     </div>
                                     <div class="text-end">
-                                        <div class="small text-muted text-uppercase fw-bold">Saldo Actual</div>
+                                        <div class="small text-muted text-uppercase fw-bold">Saldo</div>
                                         <h2 id="saldoClienteDetalle" class="fw-bold text-danger mb-0">$ 0.00</h2>
+                                        <div class="small mt-1"><span class="text-danger fw-bold" id="vencidoClienteDetalle">Vencido $ 0</span>
+                                            · <span id="abiertoClienteDetalle">Período $ 0</span></div>
                                         <button class="btn btn-sm btn-outline-secondary mt-2 w-100 fw-bold shadow-sm" onclick="imprimirResumenCuenta()">
-                                            <i class="bi bi-printer"></i> Imprimir Resumen
+                                            <i class="bi bi-printer"></i> Resumen A4
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-dark mt-1 w-100 fw-bold shadow-sm" id="btnImprimirReciboCliente" onclick="imprimirReciboClienteAhora()">
+                                            <i class="bi bi-printer"></i> Recibo 80mm
                                         </button>
                                     </div>
                                 </div>
 
                                 <div class="card bg-light border-0 mb-4 shadow-sm">
                                     <div class="card-body">
-                                        <h6 class="fw-bold mb-3"><i class="bi bi-cash-stack text-success"></i> Registrar Pago a Cuenta</h6>
+                                        <h6 class="fw-bold mb-2"><i class="bi bi-cash-stack text-success"></i> Registrar Pago a Cuenta</h6>
+                                        <p class="small text-muted mb-3">Vencido = períodos ya cerrados. Período = desde el último día de cobro.</p>
                                         <div class="row g-2">
+                                            <div class="col-12 d-flex gap-2">
+                                                <button type="button" class="btn btn-outline-danger fw-bold flex-fill" id="btnCobrarVencidoAdmin" onclick="sugerirPagoCliente('vencido')">Cobrar vencido</button>
+                                                <button type="button" class="btn btn-outline-secondary fw-bold flex-fill" onclick="sugerirPagoCliente('todo')">Cobrar todo</button>
+                                            </div>
                                             <div class="col-sm-6">
+                                                <label class="form-label fw-bold mb-1">Monto a cobrar</label>
                                                 <div class="input-group input-group-lg shadow-sm">
                                                     <span class="input-group-text bg-success text-white fw-bold">$</span>
                                                     <input type="number" id="inputMontoPago" class="form-control fw-bold" placeholder="Monto" onkeypress="if(event.key === 'Enter') registrarPagoCliente()">
                                                 </div>
                                             </div>
                                             <div class="col-sm-6">
-                                                <select id="metodoPagoCliente" class="form-select form-select-lg shadow-sm fw-bold text-primary">
-                                                    <option value="EFECTIVO">Efectivo Caja</option>
+                                                <label class="form-label fw-bold mb-1">Medio</label>
+                                                <select id="metodoPagoCliente" class="form-select form-select-lg shadow-sm fw-bold text-primary" onchange="sincronizarAfectaCaja()">
+                                                    <option value="EFECTIVO">Efectivo (entra a caja)</option>
                                                     <option value="TRANSFERENCIA">Transferencia / QR</option>
                                                     <option value="TARJETA">Tarjeta Débito/Crédito</option>
                                                     <option value="CHEQUE">Cheque de Terceros</option>
@@ -234,7 +246,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="js/layout.js?v=1.0.42"></script>
-    <script src="js/app_clientes.js?v=1.0.30"></script>
+    <script src="js/layout.js?v=1.0.44"></script>
+    <script src="js/app_clientes.js?v=1.0.34"></script>
 </body>
 </html>

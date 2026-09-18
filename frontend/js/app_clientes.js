@@ -34,6 +34,7 @@ window.fetch = async function() {
 // ---------------------------------------
 
 let clientesGlobales = [];
+let deudoresGlobales = [];
 let clienteSeleccionadoId = null;
 let clienteEditandoId = null;
 let modalClienteInstance;
@@ -70,12 +71,21 @@ document.addEventListener('DOMContentLoaded', () => {
     iniciarNavegacionTeclado();
 });
 
+function plataCli(n) {
+    return `$ ${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
+}
+
 async function cargarClientes() {
     try {
-        const res = await fetch(`${obtenerBaseUrl()}/clientes/listado`);
-        const data = await res.json();
+        const [resCli, resDeu] = await Promise.all([
+            fetch(`${obtenerBaseUrl()}/clientes/listado`),
+            fetch(`${obtenerBaseUrl()}/clientes/deudores`),
+        ]);
+        const data = await resCli.json();
+        const deu = await resDeu.json().catch(() => ({ deudores: [] }));
         clientesGlobales = data.clientes || [];
-        filtrarClientesUI(); 
+        deudoresGlobales = deu.deudores || [];
+        filtrarClientesUI();
     } catch (e) {
         console.error("Error al cargar clientes", e);
     }
@@ -92,63 +102,59 @@ function dibujarTablaDirectorio(lista) {
         return;
     }
 
-    lista.forEach(c => {
-        let badgeIva = c.condicion_iva === 'Responsable Inscripto' 
-            ? '<span class="badge bg-primary">Resp. Inscripto</span>' 
+    tbody.innerHTML = lista.map((c) => {
+        const badgeIva = c.condicion_iva === 'Responsable Inscripto'
+            ? '<span class="badge bg-primary">Resp. Inscripto</span>'
             : `<span class="badge bg-secondary">${c.condicion_iva || 'Consumidor Final'}</span>`;
-
         const limite = parseFloat(c.limite_credito) || 0;
-        const diaTxt = textoDiaCobro(c.dia_vencimiento);
-
-        tbody.innerHTML += `
-            <tr>
+        return `<tr>
                 <td class="fw-bold text-dark">${c.nombre_completo}</td>
                 <td class="text-muted">${c.cuit || '---'}</td>
                 <td>${badgeIva}</td>
                 <td>${c.telefono_whatsapp || '---'}</td>
                 <td class="text-end fw-bold text-danger">$ ${limite.toFixed(2)}</td>
-                <td class="text-center small">${diaTxt}</td>
+                <td class="text-center small">${textoDiaCobro(c.dia_vencimiento)}</td>
                 <td class="text-center">
                     <button class="btn btn-sm btn-outline-primary shadow-sm" onclick="abrirEditarCliente(${c.id})" title="Editar Ficha">
                         <i class="bi bi-pencil-square"></i> Editar
                     </button>
                 </td>
-            </tr>
-        `;
-    });
+            </tr>`;
+    }).join('');
 }
 
 function dibujarListaSaldos(lista) {
     const contenedor = document.getElementById('listaSaldosClientes');
     if(!contenedor) return;
     contenedor.innerHTML = '';
-    if (lista.length === 0) { contenedor.innerHTML = '<div class="p-3 text-center text-muted">No hay resultados.</div>'; return; }
+    if (lista.length === 0) { contenedor.innerHTML = '<div class="p-3 text-center text-muted">Nadie debe. Cuenta corriente al día.</div>'; return; }
 
-    lista.forEach(c => {
+    contenedor.innerHTML = lista.map((c) => {
         const saldo = parseFloat(c.saldo_actual_deudor) || 0;
+        const vencido = parseFloat(c.vencido) || 0;
+        const abierto = parseFloat(c.abierto) || 0;
         let colorClase = 'text-success opacity-75';
-        let textoSaldo = `$ ${saldo.toFixed(2)}`;
-        
-        // LA LÓGICA DE ANTICIPOS: Si es negativo, es a favor
-        if (saldo > 0) { colorClase = 'text-danger fw-bold'; }
-        else if (saldo < 0) { 
-            colorClase = 'text-success fw-bold'; 
-            textoSaldo = `A Favor: $${Math.abs(saldo).toFixed(2)}`; 
+        let textoSaldo = plataCli(saldo);
+        if (saldo > 0) colorClase = 'text-danger fw-bold';
+        else if (saldo < 0) {
+            colorClase = 'text-success fw-bold';
+            textoSaldo = `A favor ${plataCli(Math.abs(saldo))}`;
         }
-        
-        contenedor.innerHTML += `
-            <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-3 item-cliente-lista" 
+        const mora = vencido > 0
+            ? `<div class="small text-danger fw-bold">Vencido ${plataCli(vencido)}</div>`
+            : (abierto > 0
+                ? `<div class="small text-muted">Período ${plataCli(abierto)}</div>`
+                : `<div class="small text-muted">${textoDiaCobro(c.dia_vencimiento)}</div>`);
+        return `<button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-3 item-cliente-lista"
                 onclick="seleccionarCliente(${c.id})" tabindex="0" data-id="${c.id}">
                 <div class="text-start">
                     <div class="fw-bold text-primary">${c.nombre_completo}</div>
-                    <small class="text-muted">CUIT/DNI: ${c.cuit || '---'} · ${textoDiaCobro(c.dia_vencimiento)}</small>
+                    <small class="text-muted">${c.cuit || '---'}</small>
+                    ${mora}
                 </div>
-                <div class="text-end">
-                    <div class="fs-5 ${colorClase}">${textoSaldo}</div>
-                </div>
-            </button>
-        `;
-    });
+                <div class="text-end fs-5 ${colorClase}">${textoSaldo}</div>
+            </button>`;
+    }).join('');
 }
 
 // --- BUSCADOR UNIFICADO ---
@@ -159,15 +165,15 @@ function filtrarClientesUI() {
     if(!inputBusqueda) return;
 
     const query = inputBusqueda.value.toLowerCase().trim();
-    
-    const filtrados = clientesGlobales.filter(c => {
+    const match = (c) => {
         const nombre = (c.nombre_completo || "").toLowerCase();
         const cuit = c.cuit ? String(c.cuit).toLowerCase() : "";
         return nombre.includes(query) || cuit.includes(query);
-    });
+    };
 
-    dibujarTablaDirectorio(filtrados);
-    dibujarListaSaldos(filtrados);
+    dibujarTablaDirectorio(clientesGlobales.filter(match));
+    const deudas = (deudoresGlobales.length ? deudoresGlobales : clientesGlobales.filter((c) => (parseFloat(c.saldo_actual_deudor) || 0) !== 0));
+    dibujarListaSaldos(deudas.filter(match));
 }
 
 // --- NAVEGACIÓN POR TECLADO PARA LA LISTA ---
@@ -219,25 +225,61 @@ async function seleccionarCliente(id) {
     document.getElementById('nombreClienteDetalle').innerText = cliente.nombre_completo;
     document.getElementById('dniClienteDetalle').innerText = `DNI/CUIT: ${cliente.cuit || '---'}`;
     const etqDia = document.getElementById('diaCobroClienteDetalle');
-    if (etqDia) etqDia.innerText = textoDiaCobro(cliente.dia_vencimiento);
-    
-    // EL CARTEL GRANDE: Rojo (Debe) o Verde (A Favor)
-    const saldoFinal = parseFloat(cliente.saldo_actual_deudor) || 0;
     const cajaSaldo = document.getElementById('saldoClienteDetalle');
-    if (saldoFinal > 0) {
-        cajaSaldo.className = "fw-bold text-danger mb-0";
-        cajaSaldo.innerText = `$ ${saldoFinal.toFixed(2)}`;
-    } else if (saldoFinal < 0) {
-        cajaSaldo.className = "fw-bold text-success mb-0";
-        cajaSaldo.innerText = `A favor: $ ${Math.abs(saldoFinal).toFixed(2)}`;
-    } else {
-        cajaSaldo.className = "fw-bold text-success mb-0 opacity-75";
-        cajaSaldo.innerText = `$ 0.00`;
-    }
-    
+    const cajaVencido = document.getElementById('vencidoClienteDetalle');
+    const cajaAbierto = document.getElementById('abiertoClienteDetalle');
     document.getElementById('inputMontoPago').value = '';
+
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/estado_cuenta/${id}`);
+        const est = await res.json();
+        cliente.estado_cuenta = est;
+        const saldoFinal = parseFloat(est.saldo) || 0;
+        const vencido = parseFloat(est.vencido) || 0;
+        const abierto = parseFloat(est.abierto) || 0;
+        if (etqDia) {
+            etqDia.innerText = est.sin_pactar
+                ? 'Sin día de cobro (no hay mora)'
+                : `Cobra el día ${est.dia_vencimiento}` + (est.ultimo_cierre ? ` · último cierre ${est.ultimo_cierre}` : '');
+        }
+        if (saldoFinal > 0) {
+            cajaSaldo.className = "fw-bold text-danger mb-0";
+            cajaSaldo.innerText = plataCli(saldoFinal);
+        } else if (saldoFinal < 0) {
+            cajaSaldo.className = "fw-bold text-success mb-0";
+            cajaSaldo.innerText = `A favor: ${plataCli(Math.abs(saldoFinal))}`;
+        } else {
+            cajaSaldo.className = "fw-bold text-success mb-0 opacity-75";
+            cajaSaldo.innerText = plataCli(0);
+        }
+        if (cajaVencido) cajaVencido.innerText = `Vencido ${plataCli(vencido)}`;
+        if (cajaAbierto) cajaAbierto.innerText = `Período ${plataCli(abierto)}`;
+        const btnV = document.getElementById('btnCobrarVencidoAdmin');
+        if (btnV) btnV.disabled = vencido <= 0;
+        if (vencido > 0) document.getElementById('inputMontoPago').value = vencido.toFixed(2);
+        else if (saldoFinal > 0) document.getElementById('inputMontoPago').value = saldoFinal.toFixed(2);
+        sincronizarAfectaCaja();
+    } catch (e) {
+        if (etqDia) etqDia.innerText = textoDiaCobro(cliente.dia_vencimiento);
+    }
+
     setTimeout(() => document.getElementById('inputMontoPago').focus(), 100);
     cargarHistorialCliente(id);
+}
+
+function sugerirPagoCliente(cual) {
+    const cliente = clientesGlobales.find(c => c.id === clienteSeleccionadoId) || deudoresGlobales.find(c => c.id === clienteSeleccionadoId);
+    const est = (cliente && cliente.estado_cuenta) || cliente || {};
+    const n = cual === 'vencido' ? Number(est.vencido) : Number(est.saldo != null ? est.saldo : est.saldo_actual_deudor);
+    document.getElementById('inputMontoPago').value = (n > 0 ? n : 0).toFixed(2);
+    document.getElementById('inputMontoPago').focus();
+}
+
+function sincronizarAfectaCaja() {
+    const metodo = document.getElementById('metodoPagoCliente');
+    const check = document.getElementById('checkAfectaCaja');
+    if (!metodo || !check) return;
+    check.checked = metodo.value === 'EFECTIVO';
 }
 
 async function cargarHistorialCliente(id) {
@@ -254,32 +296,30 @@ async function cargarHistorialCliente(id) {
             return;
         }
 
-        data.movimientos.forEach(m => {
-            const esPago = m.tipo_movimiento === 'PAGO';
+        tbody.innerHTML = data.movimientos.map((m) => {
+            const esPago = m.tipo_movimiento === 'PAGO' || m.tipo_movimiento === 'PAGO_ANULACION';
             const colorMonto = esPago ? 'text-success' : 'text-danger';
             const signo = esPago ? '-' : '+';
             const montoValido = parseFloat(m.monto) || 0;
-            
-            // LA MAGIA: Si el movimiento es una deuda por venta de ticket, le ponemos el botón para chusmearlo
+            const matchTicket = (m.detalle || '').match(/#(\d+)/);
             let btnAccion = '<span class="text-muted small">---</span>';
-            let matchTicket = m.detalle.match(/#(\d+)/); 
-            
-            if (matchTicket && !esPago) {
+            if (m.tipo_movimiento === 'PAGO' && m.id) {
+                btnAccion = `<button class="btn btn-sm btn-outline-dark py-0 shadow-sm" onclick="imprimirReciboPagoPorMovimiento(${m.id})" title="Reimprimir recibo de este cobro">
+                                <i class="bi bi-printer"></i> Recibo
+                             </button>`;
+            } else if (matchTicket && !esPago) {
                 btnAccion = `<button class="btn btn-sm btn-outline-primary py-0 shadow-sm" onclick="verDetalleTicketAdmin(${matchTicket[1]})" title="Ver Ticket">
                                 <i class="bi bi-eye"></i> Ver
                              </button>`;
             }
-            
-            tbody.innerHTML += `
-                <tr>
-                    <td class="text-muted align-middle text-start">${m.fecha_hora.split(' ')[0]}</td>
+            return `<tr>
+                    <td class="text-muted align-middle text-start">${String(m.fecha_hora || '').split(' ')[0]}</td>
                     <td class="align-middle"><span class="badge ${esPago ? 'bg-success' : 'bg-danger'}">${m.tipo_movimiento}</span></td>
-                    <td class="small align-middle text-start">${m.detalle}</td>
+                    <td class="small align-middle text-start">${m.detalle || ''}</td>
                     <td class="text-end fw-bold ${colorMonto} align-middle">${signo} $${montoValido.toFixed(2)}</td>
                     <td class="text-center align-middle">${btnAccion}</td>
-                </tr>
-            `;
-        });
+                </tr>`;
+        }).join('');
     } catch (e) {
         tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Error al cargar historial</td></tr>';
     }
@@ -349,30 +389,26 @@ async function registrarPagoCliente() {
         
         const data = await res.json();
         if(data.error) throw new Error(data.error);
-        
-        const clienteObj = clientesGlobales.find(c => c.id === clienteSeleccionadoId);
-        const saldoRestante = clienteObj.saldo_actual_deudor - monto;
-
-        await Swal.fire({title: '¡Pago Exitoso!', text: 'El saldo del cliente ha sido actualizado.', icon: 'success', timer: 1000, showConfirmButton: false});
-        
-        const imprimir = await Swal.fire({
-            title: '¿Imprimir Recibo de Pago?',
-            text: `El cliente entregó $${monto.toFixed(2)}`,
-            icon: 'question',
-            showCancelButton: true,
-            confirmButtonColor: '#198754',
-            confirmButtonText: '<i class="bi bi-printer"></i> Sí, imprimir',
-            cancelButtonText: 'No'
-        });
-
-        if(imprimir.isConfirmed) {
-            imprimirReciboCtaCte(clienteObj.nombre_completo, monto, metodo, saldoRestante);
-        }
 
         document.getElementById('inputMontoPago').value = '';
-        document.getElementById('checkAfectaCaja').checked = false; // Lo apagamos por seguridad
         await cargarClientes();
-        seleccionarCliente(clienteSeleccionadoId);
+        await seleccionarCliente(clienteSeleccionadoId);
+        sincronizarAfectaCaja();
+
+        const clienteObj = clientesGlobales.find(c => c.id === clienteSeleccionadoId);
+        const est = (clienteObj && clienteObj.estado_cuenta) || {};
+        const datosRecibo = {
+            clienteId: clienteSeleccionadoId,
+            cliente: clienteObj ? clienteObj.nombre_completo : '',
+            monto: monto,
+            metodo: metodo,
+            saldo: est.saldo,
+            vencido: est.vencido,
+            abierto: est.abierto,
+            tituloSaldo: 'SALDO LUEGO DE ESTE COBRO'
+        };
+        ultimoReciboPagoCtaCte = datosRecibo;
+        await preguntarImprimirReciboPagoCtaCte(datosRecibo);
         
     } catch (e) {
         Swal.fire('Error', e.message, 'error');
@@ -650,49 +686,31 @@ async function recalcularDeudaInflacion() {
 // ==========================================
 // IMPRESIÓN DEL RECIBO DE PAGO (TICKET 80mm)
 // ==========================================
+function imprimirReciboClienteAhora() {
+    if (!clienteSeleccionadoId) return;
+    if (ultimoReciboPagoCtaCte && ultimoReciboPagoCtaCte.clienteId === clienteSeleccionadoId) {
+        imprimirReciboPagoCtaCte(ultimoReciboPagoCtaCte);
+        return;
+    }
+    fetch(`${obtenerBaseUrl()}/clientes/historial/${clienteSeleccionadoId}`)
+        .then((r) => r.json())
+        .then((data) => {
+            const ultimoPago = (data.movimientos || []).find((m) => m.tipo_movimiento === 'PAGO' && m.id);
+            if (!ultimoPago) {
+                return Swal.fire('Atención', 'Este cliente todavía no tiene un cobro para reimprimir.', 'info');
+            }
+            return imprimirReciboPagoPorMovimiento(ultimoPago.id);
+        })
+        .catch(() => Swal.fire('Error', 'No se pudo armar el recibo.', 'error'));
+}
+
 function imprimirReciboCtaCte(cliente, montoPagado, metodo, saldoRestante) {
-    let fechaActual = `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
-
-    let html = `
-    <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Recibo de Pago</title>
-    <style>
-        @page { margin: 0; }
-        body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 600; color: #000; margin: 0; padding: 2mm 4mm; width: 72mm; -webkit-font-smoothing: none; text-rendering: crispEdges; }
-        .center { text-align: center; } .right { text-align: right; } .left { text-align: left; } .bold { font-weight: bold; }
-        .divisor { border-top: 1px dashed #000; margin: 6px 0; }
-        .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 6px 0; }
-        .fila { display: flex; justify-content: space-between; margin-bottom: 4px; }
-    </style>
-    </head><body>
-        <div class="center bold" style="font-size: 16px;">AUTOSERVICIO 20 DE JUNIO</div>
-        <div class="center" style="font-size: 14px; margin-top: 4px;">RECIBO DE PAGO</div>
-        <div class="center" style="font-size: 11px;">COPIA CLIENTE</div>
-        
-        <div class="divisor-doble"></div>
-        <div class="fila"><span>Fecha:</span> <span>${fechaActual}</span></div>
-        <div class="fila"><span>Cliente:</span> <span class="right">${cliente}</span></div>
-        <div class="divisor-doble"></div>
-        
-        <div class="center bold" style="font-size: 15px; margin: 10px 0;">IMPORTE ABONADO</div>
-        <div class="center bold" style="font-size: 26px; border: 1px solid #000; padding: 5px; border-radius: 5px;">$ ${montoPagado.toFixed(2)}</div>
-        
-        <div class="divisor" style="margin-top: 15px;"></div>
-        <div class="fila"><span>Medio de Pago:</span> <span>${metodo}</span></div>
-        <div class="fila mt-2" style="font-size: 14px;">
-            <span>SALDO RESTANTE:</span> 
-            <span class="bold ${saldoRestante <= 0 ? '' : ''}">${saldoRestante <= 0 ? '$ 0.00' : '$ ' + saldoRestante.toFixed(2)}</span>
-        </div>
-        
-        <br><br><br>
-        <div class="center divisor" style="width: 70%; margin: 0 auto;"></div>
-        <div class="center small">Firma y Aclaración (Cajero)</div>
-        
-        <div class="center" style="font-size: 10px; margin-top:20px;">Comprobante no válido como factura.</div>
-        <div style="margin-bottom: 25mm;"></div>
-    </body></html>
-    `;
-
-    let vent = window.open('', '_blank', 'width=300,height=500');
-    vent.document.write(html); vent.document.close(); vent.focus();
-    setTimeout(() => { vent.print(); vent.close(); }, 500);
+    imprimirReciboPagoCtaCte({
+        cliente: cliente,
+        monto: montoPagado,
+        metodo: metodo,
+        saldo: saldoRestante,
+        vencido: 0,
+        abierto: Math.max(Number(saldoRestante) || 0, 0)
+    });
 }

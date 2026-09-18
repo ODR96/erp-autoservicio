@@ -1267,40 +1267,97 @@ let clienteFiadoActual = null;
 
 // --- 1. SECCIÓN: COBRAR DEUDA (BOTÓN AMARILLO Y MODAL) ---
 
+function plataFiado(n) {
+    return `$ ${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
+}
+
 async function abrirModalCobroFiado() {
     document.getElementById("inputBuscarFiado").value = "";
     document.getElementById("cajaInfoFiado").classList.add("d-none");
     document.getElementById("dropdownFiado").classList.add("d-none");
     document.getElementById("tablaDetalleFiado").innerHTML = '<tr><td colspan="5" class="text-muted py-5 text-center">Busque un cliente para ver su historial.</td></tr>';
+    const btnRecibo = document.getElementById('btnImprimirReciboFiado');
+    if (btnRecibo) btnRecibo.disabled = true;
 
     modalDeuda.show();
 
     try {
-        const res = await apiFetch(`${obtenerBaseUrl()}/clientes/listado`);
+        const [res, resDeu] = await Promise.all([
+            apiFetch(`${obtenerBaseUrl()}/clientes/listado`),
+            apiFetch(`${obtenerBaseUrl()}/clientes/deudores`).catch(() => null)
+        ]);
         const data = await res.json();
-        clientesGlobalesPOS = data.clientes || data; // Soporta ambos formatos
+        clientesGlobalesPOS = data.clientes || data || [];
+        if (resDeu && resDeu.ok) {
+            const deu = await resDeu.json();
+            const mapa = {};
+            (deu.deudores || []).forEach((d) => { mapa[d.id] = d; });
+            clientesGlobalesPOS = clientesGlobalesPOS.map((c) => mapa[c.id] ? { ...c, ...mapa[c.id] } : c);
+        }
         setTimeout(() => document.getElementById("inputBuscarFiado").focus(), 500);
     } catch (e) {
         console.error("Error al cargar clientes", e);
     }
 }
 
-function seleccionarClienteDeuda(id) {
+async function seleccionarClienteDeuda(id) {
     document.getElementById("dropdownFiado").classList.add("d-none");
     const cliente = clientesGlobalesPOS.find(c => c.id === id);
     if (!cliente) return;
 
     clienteFiadoActual = cliente;
     document.getElementById("inputBuscarFiado").value = cliente.nombre_completo;
-
     document.getElementById("cajaInfoFiado").classList.remove("d-none");
     document.getElementById("nombreClienteFiado").innerText = cliente.nombre_completo;
     document.getElementById("limiteClienteFiado").innerText = (cliente.limite_credito || 0).toLocaleString();
-    const etqDia = document.getElementById("diaCobroClienteFiado");
-    if (etqDia) etqDia.innerText = textoDiaCobro(cliente.dia_vencimiento);
-    document.getElementById("deudaClienteFiado").innerText = `$ ${cliente.saldo_actual_deudor.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-
+    await refrescarEstadoFiado();
     cargarHistorialTabla(cliente.id);
+    const btnRecibo = document.getElementById('btnImprimirReciboFiado');
+    if (btnRecibo) {
+        btnRecibo.disabled = !(ultimoReciboPagoCtaCte && ultimoReciboPagoCtaCte.clienteId === cliente.id);
+    }
+    setTimeout(() => document.getElementById("montoPagoFiado").focus(), 150);
+}
+
+async function refrescarEstadoFiado() {
+    if (!clienteFiadoActual) return;
+    const etqDia = document.getElementById("diaCobroClienteFiado");
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/clientes/estado_cuenta/${clienteFiadoActual.id}`);
+        const est = await res.json();
+        if (est.detail || est.error) throw new Error(est.detail || est.error);
+        clienteFiadoActual.estado_cuenta = est;
+        clienteFiadoActual.saldo_actual_deudor = est.saldo;
+        if (etqDia) {
+            etqDia.innerText = est.sin_pactar
+                ? 'Sin día de cobro (no hay mora)'
+                : `Cobra el día ${est.dia_vencimiento}` + (est.ultimo_cierre ? ` · cierre ${est.ultimo_cierre}` : '');
+        }
+        const vencido = Number(est.vencido) || 0;
+        const abierto = Number(est.abierto) || 0;
+        const saldo = Number(est.saldo) || 0;
+        document.getElementById("vencidoClienteFiado").innerText = plataFiado(vencido);
+        document.getElementById("abiertoClienteFiado").innerText = plataFiado(abierto);
+        const tot = document.getElementById("deudaClienteFiado");
+        tot.innerText = saldo < 0 ? `A favor ${plataFiado(-saldo)}` : plataFiado(saldo);
+        tot.className = saldo < 0 ? 'fw-bold text-success' : 'fw-bold';
+        const btnV = document.getElementById("btnCobrarVencidoFiado");
+        if (btnV) btnV.disabled = vencido <= 0;
+        if (vencido > 0) document.getElementById("montoPagoFiado").value = vencido.toFixed(2);
+        else if (saldo > 0) document.getElementById("montoPagoFiado").value = saldo.toFixed(2);
+        else document.getElementById("montoPagoFiado").value = "";
+    } catch (e) {
+        if (etqDia) etqDia.innerText = textoDiaCobro(clienteFiadoActual.dia_vencimiento);
+        document.getElementById("deudaClienteFiado").innerText = plataFiado(clienteFiadoActual.saldo_actual_deudor);
+    }
+}
+
+function sugerirPagoFiado(cual) {
+    if (!clienteFiadoActual) return;
+    const est = clienteFiadoActual.estado_cuenta || {};
+    const n = cual === 'vencido' ? Number(est.vencido) : Number(est.saldo);
+    document.getElementById("montoPagoFiado").value = (n > 0 ? n : 0).toFixed(2);
+    document.getElementById("montoPagoFiado").focus();
 }
 
 // Variables globales para controlar la paginación del historial
@@ -1316,6 +1373,9 @@ async function cargarHistorialTabla(clienteId) {
 
         if (!data.movimientos || data.movimientos.length === 0) {
             tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-success fw-bold">Cuenta al día.</td></tr>`;
+            movimientosHistorialGlobal = [];
+            const btnRecibo = document.getElementById('btnImprimirReciboFiado');
+            if (btnRecibo) btnRecibo.disabled = true;
             return;
         }
 
@@ -1324,6 +1384,10 @@ async function cargarHistorialTabla(clienteId) {
         limiteMostrarHistorial = 15; // Reiniciamos el límite a 15 cada vez que buscamos un cliente
 
         dibujarFilasHistorial();
+        const btnRecibo = document.getElementById('btnImprimirReciboFiado');
+        if (btnRecibo) {
+            btnRecibo.disabled = !movimientosHistorialGlobal.some((m) => m.tipo_movimiento === 'PAGO' && m.id);
+        }
 
     } catch (e) {
         tbody.innerHTML = "<tr><td colspan='5'>Error al cargar historial.</td></tr>";
@@ -1337,33 +1401,34 @@ function dibujarFilasHistorial() {
     // Cortamos la lista para mostrar solo la cantidad permitida (los primeros 15)
     const listaVisible = movimientosHistorialGlobal.slice(0, limiteMostrarHistorial);
 
-    listaVisible.forEach(m => {
-        let esPago = m.tipo_movimiento === 'PAGO';
-        let numTicket = m.detalle.includes('#') ? m.detalle.split('#')[1] : '-';
-
-        tbody.innerHTML += `
-        <tr>
-            <td class="text-muted small align-middle">${m.fecha_hora.split(' ')[0]}</td>
+    tbody.innerHTML = listaVisible.map((m) => {
+        const esPago = m.tipo_movimiento === 'PAGO' || m.tipo_movimiento === 'PAGO_ANULACION';
+        const matchTicket = (m.detalle || '').match(/#(\d+)/);
+        const numTicket = matchTicket ? matchTicket[1] : '-';
+        let acciones = '';
+        if (!esPago && numTicket !== '-') {
+            acciones = `<div class="btn-group">
+                    <button class="btn btn-sm btn-outline-info py-0" onclick="verDetalleTicketFiado(${parseInt(numTicket, 10)})" title="Ver Detalle"><i class="bi bi-eye"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary py-0" onclick="imprimirTicket80mm(${parseInt(numTicket, 10)})" title="Imprimir ticket"><i class="bi bi-printer"></i></button>
+                </div>`;
+        } else if (m.tipo_movimiento === 'PAGO' && m.id) {
+            acciones = `<button class="btn btn-sm btn-outline-dark py-0" onclick="imprimirReciboPagoPorMovimiento(${m.id})" title="Reimprimir recibo de este cobro"><i class="bi bi-printer"></i></button>`;
+        }
+        return `<tr>
+            <td class="text-muted small align-middle">${String(m.fecha_hora || '').split(' ')[0]}</td>
             <td class="align-middle"><span class="badge ${esPago ? 'bg-success' : 'bg-danger'}">${m.tipo_movimiento}</span></td>
-            <td class="text-start small align-middle">${m.detalle}</td>
-            <td class="fw-bold ${esPago ? 'text-success' : 'text-danger'} align-middle">${esPago ? '-' : ''}$${m.monto.toFixed(2)}</td>
-            <td class="text-end align-middle">
-                ${!esPago && numTicket !== '-' ? `
-                <div class="btn-group">
-                    <button class="btn btn-sm btn-outline-info py-0" onclick="verDetalleTicketFiado(${numTicket})" title="Ver Detalle"><i class="bi bi-eye"></i></button>
-                    <button class="btn btn-sm btn-outline-secondary py-0" onclick="imprimirTicket80mm(${numTicket})" title="Imprimir"><i class="bi bi-printer"></i></button>
-                </div>` : ''}
-            </td>
+            <td class="text-start small align-middle">${m.detalle || ''}</td>
+            <td class="fw-bold ${esPago ? 'text-success' : 'text-danger'} align-middle">${esPago ? '-' : ''}$${Number(m.monto || 0).toFixed(2)}</td>
+            <td class="text-end align-middle">${acciones}</td>
         </tr>`;
-    });
+    }).join('');
 
-    // Si quedaron movimientos afuera de los 15, mostramos el botón "Ver más" al final
     if (movimientosHistorialGlobal.length > limiteMostrarHistorial) {
         tbody.innerHTML += `
         <tr>
             <td colspan="5" class="text-center py-2 bg-light border-0">
                 <button class="btn btn-sm btn-outline-secondary fw-bold shadow-sm" onclick="mostrarMasHistorial()">
-                    <i class="bi bi-arrow-down-circle"></i> Cargar más movimientos antiguos
+                    <i class="bi bi-arrow-down-circle"></i> Cargar más
                 </button>
             </td>
         </tr>`;
@@ -1421,19 +1486,21 @@ function buscarClienteFiado() {
         return palabras.every(p => fuente.includes(p));
     });
 
-    dropdown.innerHTML = "";
-    if (resultados.length === 0) {
-        dropdown.innerHTML = '<div class="list-group-item text-muted">No se encontraron clientes</div>';
-    } else {
-        resultados.forEach(c => {
-            // EL ARREGLO 1: Le agregamos la clase 'span-nombre' para poder ubicarlo después
-            dropdown.innerHTML += `
-            <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="seleccionarClienteDeuda(${c.id})">
-                <span class="fw-bold span-nombre text-primary">${c.nombre_completo}</span>
-                <span class="badge bg-light text-dark border">DNI: ${c.cuit || '-'}</span>
+    dropdown.innerHTML = resultados.length === 0
+        ? '<div class="list-group-item text-muted">No se encontraron clientes</div>'
+        : resultados.map((c) => {
+            const deuda = Number(c.saldo_actual_deudor) || 0;
+            const vencido = Number(c.vencido) || 0;
+            const badge = vencido > 0
+                ? `<span class="badge bg-danger">Venc. $${vencido.toFixed(0)}</span>`
+                : (deuda > 0
+                    ? `<span class="badge bg-warning text-dark">$${deuda.toFixed(0)}</span>`
+                    : (deuda < 0 ? `<span class="badge bg-success">A favor</span>` : `<span class="badge bg-secondary">$0</span>`));
+            return `<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="seleccionarClienteDeuda(${c.id})">
+                <span class="fw-bold span-nombre text-primary">${c.nombre_completo}<br><small class="text-muted">${textoDiaCobro(c.dia_vencimiento)}</small></span>
+                ${badge}
             </button>`;
-        });
-    }
+        }).join('');
     dropdown.classList.remove("d-none");
 }
 
@@ -1482,6 +1549,18 @@ function navegarDropdownFiado(e) {
     }
 }
 
+function imprimirUltimoReciboFiado() {
+    if (ultimoReciboPagoCtaCte && clienteFiadoActual && ultimoReciboPagoCtaCte.clienteId === clienteFiadoActual.id) {
+        imprimirReciboPagoCtaCte(ultimoReciboPagoCtaCte);
+        return;
+    }
+    const pagos = (movimientosHistorialGlobal || []).filter((m) => m.tipo_movimiento === 'PAGO' && m.id);
+    if (!pagos.length) {
+        return Swal.fire('Atención', 'Este cliente no tiene cobros para reimprimir.', 'info');
+    }
+    imprimirReciboPagoPorMovimiento(pagos[0].id);
+}
+
 async function registrarPagoFiado() {
     const pago = parseFloat(document.getElementById("montoPagoFiado").value);
     const metodo = document.getElementById("metodoPagoFiado").value; // <-- CAPTURAMOS EL MÉTODO ELEGIDO
@@ -1500,21 +1579,33 @@ async function registrarPagoFiado() {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 monto_pago: pago,
-                metodo_pago: metodo, // <-- SE LO MANDAMOS A PYTHON
-                usuario_id: empleadoLogueado ? empleadoLogueado.id : 1
+                metodo_pago: metodo,
+                usuario_id: empleadoLogueado ? empleadoLogueado.id : 1,
+                afecta_caja: metodo === 'EFECTIVO',
+                turno_id: turnoActualId
             })
         });
 
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
-        clienteFiadoActual.saldo_actual_deudor -= pago;
-        document.getElementById("montoPagoFiado").value = "";
-        document.getElementById("deudaClienteFiado").innerText = `$ ${clienteFiadoActual.saldo_actual_deudor.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-
-        await Swal.fire({ title: 'PAGO REGISTRADO', text: `Acreditado mediante ${metodo}`, icon: 'success', timer: 2000, showConfirmButton: false });
-
+        await refrescarEstadoFiado();
+        const est = clienteFiadoActual.estado_cuenta || {};
+        const datosRecibo = {
+            clienteId: clienteFiadoActual.id,
+            cliente: clienteFiadoActual.nombre_completo,
+            monto: pago,
+            metodo: metodo,
+            saldo: est.saldo,
+            vencido: est.vencido,
+            abierto: est.abierto,
+            tituloSaldo: 'SALDO LUEGO DE ESTE COBRO'
+        };
+        ultimoReciboPagoCtaCte = datosRecibo;
+        const btnRecibo = document.getElementById('btnImprimirReciboFiado');
+        if (btnRecibo) btnRecibo.disabled = false;
         cargarHistorialTabla(clienteFiadoActual.id);
+        await preguntarImprimirReciboPagoCtaCte(datosRecibo);
     } catch (e) {
         Swal.fire('Error', e.message, 'error');
     }

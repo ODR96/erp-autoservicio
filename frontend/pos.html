@@ -685,43 +685,59 @@
 
                             <div id="cajaInfoFiado" class="d-none">
                                 <h4 id="nombreClienteFiado" class="text-primary fw-bold mb-0">Nombre</h4>
-                                <p class="text-muted small mb-1">Límite: $<span id="limiteClienteFiado">0</span></p>
-                                <p class="text-muted small" id="diaCobroClienteFiado">Sin día de cobro</p>
-                                <div class="alert alert-danger text-center my-3 shadow-sm"><small
-                                        class="text-uppercase fw-bold">Deuda Total</small>
-                                    <h2 class="mb-0 fw-bold" id="deudaClienteFiado">$ 0.00</h2>
-
-                                    <button class="btn btn-outline-primary btn-sm w-100 fw-bold mb-3 shadow-sm"
-                                        onclick="verResumenDetalladoFiado()">
-                                        <i class="bi bi-list-check"></i> Ver Resumen de Artículos
-                                    </button>
-
-                                </div><label class="form-label fw-bold">Monto a Entregar</label>
+                                <p class="text-muted small mb-2">Límite $<span id="limiteClienteFiado">0</span> · <span id="diaCobroClienteFiado">Sin día de cobro</span></p>
+                                <div class="row g-2 mb-3">
+                                    <div class="col-4">
+                                        <div class="border rounded p-2 text-center h-100">
+                                            <div class="small text-muted text-uppercase fw-bold">Vencido</div>
+                                            <div class="fw-bold text-danger" id="vencidoClienteFiado">$ 0</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="border rounded p-2 text-center h-100">
+                                            <div class="small text-muted text-uppercase fw-bold">Período</div>
+                                            <div class="fw-bold" id="abiertoClienteFiado">$ 0</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="border rounded p-2 text-center h-100">
+                                            <div class="small text-muted text-uppercase fw-bold">Total</div>
+                                            <div class="fw-bold" id="deudaClienteFiado">$ 0</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p class="small text-muted mb-2">Vencido = períodos ya cerrados. Período = desde el último día de cobro. La venta no se corta.</p>
+                                <div class="d-flex gap-2 mb-2">
+                                    <button type="button" class="btn btn-outline-danger btn-sm fw-bold flex-fill" id="btnCobrarVencidoFiado" onclick="sugerirPagoFiado('vencido')">Cobrar vencido</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold flex-fill" onclick="sugerirPagoFiado('todo')">Cobrar todo</button>
+                                </div>
+                                <button type="button" class="btn btn-outline-primary btn-sm w-100 fw-bold mb-3" onclick="verResumenDetalladoFiado()">
+                                    <i class="bi bi-list-check"></i> Artículos impagos
+                                </button>
+                                <label class="form-label fw-bold mb-1">Monto a cobrar</label>
                                 <div class="input-group input-group-lg mb-3">
                                     <span class="input-group-text fw-bold">$</span>
                                     <input type="number" id="montoPagoFiado" class="form-control" placeholder="0.00"
                                         onkeypress="if(event.key === 'Enter') registrarPagoFiado()">
                                 </div>
 
-                                <div class="mb-3 text-start">
-                                    <label class="form-label fw-bold small text-muted">MÉTODO DE PAGO</label>
-                                    <select id="metodoPagoFiado"
-                                        class="form-select form-select-lg fw-bold text-primary">
-                                        <option value="EFECTIVO">EFECTIVO CAJA</option>
-                                        <option value="TRANSFERENCIA">TRANSFERENCIA / QR</option>
-                                        <option value="TARJETA">TARJETA DEB/CRED</option>
-                                    </select>
-                                </div>
+                                <select id="metodoPagoFiado" class="form-select fw-bold mb-3">
+                                    <option value="EFECTIVO">Efectivo (entra a caja)</option>
+                                    <option value="TRANSFERENCIA">Transferencia / QR</option>
+                                    <option value="TARJETA">Tarjeta</option>
+                                </select>
 
                                 <button class="btn btn-warning btn-lg w-100 fw-bold shadow-sm"
                                     onclick="registrarPagoFiado()">
-                                    <i class="bi bi-cash-coin"></i> REGISTRAR PAGO
+                                    <i class="bi bi-cash-coin"></i> COBRAR
+                                </button>
+                                <button type="button" class="btn btn-outline-dark btn-sm w-100 fw-bold mt-2" id="btnImprimirReciboFiado" onclick="imprimirUltimoReciboFiado()" disabled>
+                                    <i class="bi bi-printer"></i> Imprimir recibo
                                 </button>
                             </div>
                         </div>
                         <div class="col-md-7 ps-3">
-                            <h6 class="fw-bold text-muted mb-3"><i class="bi bi-clock-history"></i> HISTORIAL IMPAGO
-                            </h6>
+                            <h6 class="fw-bold text-muted mb-3"><i class="bi bi-clock-history"></i> Movimientos</h6>
                             <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
                                 <table class="table table-sm table-hover table-bordered align-middle text-center">
                                     <thead class="table-light sticky-top">
@@ -907,8 +923,8 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <!-- ===== ARCHIVOS JS SEPARADOS ===== -->
-    <script src="js/layout.js?v=1.0.42"></script>
-    <script src="js/app_pos.js?v=1.0.43"></script>
+    <script src="js/layout.js?v=1.0.44"></script>
+    <script src="js/app_pos.js?v=1.0.47"></script>
 
 </body>
 

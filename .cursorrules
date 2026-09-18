@@ -13,12 +13,12 @@ HITOS Y ARQUITECTURA ACTUAL:
 4. Fechas de negocio: zona Argentina (UTC-3), no date('now') UTC ni toISOString() a ciegas.
 
 VERSIÓN:
-- Release Electron / badge: v1.0.30 (file:// pega a http://185.249.225.63:8000)
-- Cache JS/CSS reciente: layout/login ?v=1.0.41 — no es release de tienda.
-- Admin hoy: http://185.249.225.63:8000
+- Release Electron / badge: v1.0.31 (file:// pega a http://185.249.225.63:8000)
+- Cache JS/CSS reciente: layout ?v=1.0.44 — POS 1.0.47 / clientes 1.0.34.
+- Admin hoy: http://185.249.225.63:8000  (Nginx :80 en paralelo)
 
-SAVE STATE (2026-09-17):
-- GitHub main: 1a4a14b (borrar borrador de factura). Reportes ya está (1106bf7 + 8422f2e).
+SAVE STATE (2026-09-18):
+- Fiados corte 2a: estado_cuenta vencido/período, cobro POS/clientes, recibo 80mm reimprimible. Sin bloquear venta.
 - Se sigue vendiendo sin stock (VENTA_SIN_STOCK). El CMV no bloquea el POS.
 - facturar_afip en /ventas/cobrar es STUB: CAE SIMULADO. No es factura fiscal.
 - Encargado: sin dashboard / RRHH / gastos / monitor de cajas. POS, productos, clientes, proveedores sí.
@@ -39,14 +39,14 @@ HITOS RECIENTES (ya no son tareas):
 - Proveedores: OCR al borrador + Borrar (ANULADO). No carga stock.
 
 COLA (prioridad):
-1. VPS: git pull + hard refresh (Reportes + borrar borrador). F10 pago proveedor si no se probó en prod.
+1. VPS: git pull + restart FastAPI (fiados 2a + recibo). Hard refresh admin. Cajas: instalador Electron 1.0.31.
 2. Fiados v2 (no mezclar con AFIP ni OCR):
-   - Corte 1 (local, a subir): dia_vencimiento 1–31. NULL = sin pactar. No bloquea el POS.
-   - Corte 2: aging + pagos FIFO (mora vs período abierto). Día 31 en meses cortos = último día.
+   - Corte 1 y 2a: hechos. Día de cobro + aging read-only + cobro/recibo.
+   - Corte 2b: FIFO persistente al pagar (no solo al armar el recibo).
    - Corte 3: bloqueo en /ventas/cobrar si hay saldo vencido; override Encargado con motivo.
-   - Corte 4: UI deudores (solo con saldo, mora visible, lista sin innerHTML += en loop).
+   - Corte 4: UI deudores ya usa /deudores; pulir si hace falta.
 3. AFIP REAL (prioridad de negocio, no es un corte de un día): WSAA + homologación + CAE de verdad + qué hacer si AFIP cae. El toggle del POS ya existe; el backend no.
-4. Electron 1.0.31 que abra http://IP/ (o HTTPS) → recién ahí uvicorn --host 127.0.0.1 y UFW sin 8000.
+4. Electron que abra http://IP/ (o HTTPS) → recién ahí uvicorn --host 127.0.0.1 y UFW sin 8000. 1.0.31 todavía es file:// :8000.
 5. CMV en remito depósito; Gastos pulgar; conteo cíclico (post-HTTPS); tesorería de cheques (NO mezclar cheques/préstamos en gastos_operativos).
 
 DIFERIDO TÉCNICO:
