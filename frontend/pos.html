@@ -640,6 +640,9 @@
                             <div class="input-group"><span class="input-group-text">$</span><input type="number"
                                     id="nuevoClienteLimite" class="form-control" value="50000"></div>
                         </div>
+                        <div class="col-6"><label class="form-label small fw-bold">Día de cobro</label>
+                            <select id="nuevoClienteDiaVencimiento" class="form-select"></select>
+                        </div>
                     </div>
                     <div class="alert alert-warning border-warning p-3 mb-0"><label
                             class="form-label small fw-bold text-dark"><i class="bi bi-shield-lock-fill"></i>
@@ -682,7 +685,8 @@
 
                             <div id="cajaInfoFiado" class="d-none">
                                 <h4 id="nombreClienteFiado" class="text-primary fw-bold mb-0">Nombre</h4>
-                                <p class="text-muted small">Límite: $<span id="limiteClienteFiado">0</span></p>
+                                <p class="text-muted small mb-1">Límite: $<span id="limiteClienteFiado">0</span></p>
+                                <p class="text-muted small" id="diaCobroClienteFiado">Sin día de cobro</p>
                                 <div class="alert alert-danger text-center my-3 shadow-sm"><small
                                         class="text-uppercase fw-bold">Deuda Total</small>
                                     <h2 class="mb-0 fw-bold" id="deudaClienteFiado">$ 0.00</h2>
@@ -903,8 +907,8 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <!-- ===== ARCHIVOS JS SEPARADOS ===== -->
-    <script src="js/layout.js?v=1.0.41"></script>
-    <script src="js/app_pos.js?v=1.0.42"></script>
+    <script src="js/layout.js?v=1.0.42"></script>
+    <script src="js/app_pos.js?v=1.0.43"></script>
 
 </body>
 

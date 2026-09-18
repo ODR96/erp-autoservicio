@@ -62,6 +62,7 @@
                                     <th>Condición AFIP</th>
                                     <th>Teléfono</th>
                                     <th class="text-end">Límite Fiado</th>
+                                    <th class="text-center">Cobra</th>
                                     <th class="text-center">Acciones</th>
                                 </tr>
                             </thead>
@@ -88,6 +89,7 @@
                                     <div>
                                         <h4 id="nombreClienteDetalle" class="fw-bold mb-1 text-primary">---</h4>
                                         <span class="badge bg-secondary" id="dniClienteDetalle">DNI: ---</span>
+                                        <div class="small text-muted mt-1" id="diaCobroClienteDetalle">Sin día de cobro</div>
                                     </div>
                                     <div class="text-end">
                                         <div class="small text-muted text-uppercase fw-bold">Saldo Actual</div>
@@ -214,6 +216,11 @@
                         </div>
                         <small class="text-muted">Si supera este límite, la caja pedirá autorización.</small>
                     </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-bold small text-primary">Día de cobro</label>
+                        <select id="cliDiaVencimiento" class="form-select fw-bold"></select>
+                        <small class="text-muted">Cada mes, ese día. Si el mes no llega (31), vence el último. Todavía no bloquea la caja.</small>
+                    </div>
                 </div>
                 <div class="modal-footer bg-white">
                     <button type="button" class="btn btn-secondary fw-bold" data-bs-dismiss="modal">Cancelar</button>
@@ -227,7 +234,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="js/layout.js?v=1.0.41"></script>
-    <script src="js/app_clientes.js?v=1.0.29"></script>
+    <script src="js/layout.js?v=1.0.42"></script>
+    <script src="js/app_clientes.js?v=1.0.30"></script>
 </body>
 </html>

@@ -16,6 +16,21 @@ class ClienteNuevo(BaseModel):
     telefono_whatsapp: Optional[str] = ""
     direccion: Optional[str] = ""
     limite_credito: float = 50000.0
+    dia_vencimiento: Optional[int] = None
+
+
+def _normalizar_dia_vencimiento(valor):
+    if valor is None or valor == "":
+        return None
+    try:
+        dia = int(valor)
+    except (TypeError, ValueError):
+        raise ValueError("El día de cobro debe ser un número del 1 al 31.")
+    if dia == 0:
+        return None
+    if dia < 1 or dia > 31:
+        raise ValueError("El día de cobro debe estar entre 1 y 31.")
+    return dia
 
 class PagoDeuda(BaseModel):
     monto_pago: float
@@ -43,7 +58,11 @@ def inicializar_tabla_movimientos():
         cursor.execute("ALTER TABLE clientes ADD COLUMN condicion_iva TEXT DEFAULT 'Consumidor Final'")
     except sqlite3.OperationalError:
         pass # Si tira error es porque ya existe, seguimos de largo
-        
+    try:
+        cursor.execute("ALTER TABLE clientes ADD COLUMN dia_vencimiento INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
     conexion.commit()
     conexion.close()
 
@@ -55,10 +74,11 @@ def registrar_cliente(cli: ClienteNuevo):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
+        dia_cobro = _normalizar_dia_vencimiento(cli.dia_vencimiento)
         cursor.execute('''
-            INSERT INTO clientes (nombre_completo, cuit, condicion_iva, telefono_whatsapp, direccion, limite_credito, saldo_actual_deudor)
-            VALUES (?, ?, ?, ?, ?, ?, 0)
-        ''', (cli.nombre_completo, cli.cuit, cli.condicion_iva, cli.telefono_whatsapp, cli.direccion, cli.limite_credito))
+            INSERT INTO clientes (nombre_completo, cuit, condicion_iva, telefono_whatsapp, direccion, limite_credito, saldo_actual_deudor, dia_vencimiento)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+        ''', (cli.nombre_completo, cli.cuit, cli.condicion_iva, cli.telefono_whatsapp, cli.direccion, cli.limite_credito, dia_cobro))
         conexion.commit()
         return {"mensaje": f"Cliente {cli.nombre_completo} dado de alta con éxito."}
     except Exception as e:
@@ -82,11 +102,12 @@ def actualizar_cliente(cliente_id: int, cli: ClienteNuevo):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
+        dia_cobro = _normalizar_dia_vencimiento(cli.dia_vencimiento)
         cursor.execute('''
             UPDATE clientes 
-            SET nombre_completo = ?, cuit = ?, condicion_iva = ?, telefono_whatsapp = ?, direccion = ?, limite_credito = ?
+            SET nombre_completo = ?, cuit = ?, condicion_iva = ?, telefono_whatsapp = ?, direccion = ?, limite_credito = ?, dia_vencimiento = ?
             WHERE id = ?
-        ''', (cli.nombre_completo, cli.cuit, cli.condicion_iva, cli.telefono_whatsapp, cli.direccion, cli.limite_credito, cliente_id))
+        ''', (cli.nombre_completo, cli.cuit, cli.condicion_iva, cli.telefono_whatsapp, cli.direccion, cli.limite_credito, dia_cobro, cliente_id))
         conexion.commit()
         return {"mensaje": f"Ficha de {cli.nombre_completo} actualizada."}
     except Exception as e:

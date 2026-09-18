@@ -38,8 +38,34 @@ let clienteSeleccionadoId = null;
 let clienteEditandoId = null;
 let modalClienteInstance;
 
+function textoDiaCobro(dia) {
+    const d = parseInt(dia, 10);
+    if (!d || d < 1 || d > 31) return 'Sin día de cobro';
+    return `Cobra el día ${d}`;
+}
+
+function leerDiaCobro(id) {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    const d = parseInt(el.value, 10);
+    return (d >= 1 && d <= 31) ? d : null;
+}
+
+function armarSelectDiaCobro(id, valor) {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    if (sel.options.length < 2) {
+        let html = '<option value="">Sin pactar</option>';
+        for (let i = 1; i <= 31; i++) html += `<option value="${i}">Día ${i}</option>`;
+        sel.innerHTML = html;
+    }
+    const d = parseInt(valor, 10);
+    sel.value = (d >= 1 && d <= 31) ? String(d) : '';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     modalClienteInstance = new bootstrap.Modal(document.getElementById('modalEdicionCliente'));
+    armarSelectDiaCobro('cliDiaVencimiento', '');
     cargarClientes();
     iniciarNavegacionTeclado();
 });
@@ -62,7 +88,7 @@ function dibujarTablaDirectorio(lista) {
     tbody.innerHTML = '';
     
     if (lista.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No se encontraron clientes.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No se encontraron clientes.</td></tr>';
         return;
     }
 
@@ -72,6 +98,7 @@ function dibujarTablaDirectorio(lista) {
             : `<span class="badge bg-secondary">${c.condicion_iva || 'Consumidor Final'}</span>`;
 
         const limite = parseFloat(c.limite_credito) || 0;
+        const diaTxt = textoDiaCobro(c.dia_vencimiento);
 
         tbody.innerHTML += `
             <tr>
@@ -80,6 +107,7 @@ function dibujarTablaDirectorio(lista) {
                 <td>${badgeIva}</td>
                 <td>${c.telefono_whatsapp || '---'}</td>
                 <td class="text-end fw-bold text-danger">$ ${limite.toFixed(2)}</td>
+                <td class="text-center small">${diaTxt}</td>
                 <td class="text-center">
                     <button class="btn btn-sm btn-outline-primary shadow-sm" onclick="abrirEditarCliente(${c.id})" title="Editar Ficha">
                         <i class="bi bi-pencil-square"></i> Editar
@@ -113,7 +141,7 @@ function dibujarListaSaldos(lista) {
                 onclick="seleccionarCliente(${c.id})" tabindex="0" data-id="${c.id}">
                 <div class="text-start">
                     <div class="fw-bold text-primary">${c.nombre_completo}</div>
-                    <small class="text-muted">CUIT/DNI: ${c.cuit || '---'}</small>
+                    <small class="text-muted">CUIT/DNI: ${c.cuit || '---'} · ${textoDiaCobro(c.dia_vencimiento)}</small>
                 </div>
                 <div class="text-end">
                     <div class="fs-5 ${colorClase}">${textoSaldo}</div>
@@ -190,6 +218,8 @@ async function seleccionarCliente(id) {
     document.getElementById('panelDetalleCliente').classList.remove('d-none');
     document.getElementById('nombreClienteDetalle').innerText = cliente.nombre_completo;
     document.getElementById('dniClienteDetalle').innerText = `DNI/CUIT: ${cliente.cuit || '---'}`;
+    const etqDia = document.getElementById('diaCobroClienteDetalle');
+    if (etqDia) etqDia.innerText = textoDiaCobro(cliente.dia_vencimiento);
     
     // EL CARTEL GRANDE: Rojo (Debe) o Verde (A Favor)
     const saldoFinal = parseFloat(cliente.saldo_actual_deudor) || 0;
@@ -362,7 +392,8 @@ function abrirModalCliente() {
     setValorSeguro('cliIva', 'Consumidor Final');
     setValorSeguro('cliLimite', '50000');
     setValorSeguro('cliTel', '');
-    setValorSeguro('cliDireccion', ''); 
+    setValorSeguro('cliDireccion', '');
+    armarSelectDiaCobro('cliDiaVencimiento', '');
     
     const titulo = document.getElementById('tituloModalCliente');
     if (titulo) titulo.innerHTML = '<i class="bi bi-person-plus"></i> Nuevo Cliente';
@@ -381,6 +412,7 @@ function abrirEditarCliente(id) {
     setValorSeguro('cliLimite', cliente.limite_credito || '50000');
     setValorSeguro('cliTel', cliente.telefono_whatsapp || '');
     setValorSeguro('cliDireccion', cliente.direccion || '');
+    armarSelectDiaCobro('cliDiaVencimiento', cliente.dia_vencimiento);
     
     const titulo = document.getElementById('tituloModalCliente');
     if (titulo) titulo.innerHTML = '<i class="bi bi-pencil"></i> Editar Cliente';
@@ -402,7 +434,8 @@ async function guardarCliente() {
         condicion_iva: document.getElementById('cliIva').value,
         telefono_whatsapp: document.getElementById('cliTel').value.trim(),
         direccion: document.getElementById('cliDireccion').value.trim(),
-        limite_credito: parseFloat(document.getElementById('cliLimite').value) || 50000
+        limite_credito: parseFloat(document.getElementById('cliLimite').value) || 50000,
+        dia_vencimiento: leerDiaCobro('cliDiaVencimiento')
     };
 
     if (!payload.nombre_completo) {
@@ -420,11 +453,11 @@ async function guardarCliente() {
                 body: JSON.stringify(payload)
             });
         } else {
-            res = await fetch(`${obtenerBaseUrl()}/clientes/registrar', {
+            res = await fetch(`${obtenerBaseUrl()}/clientes/registrar`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
-            }`);
+            });
         }
 
         const data = await res.json();
@@ -503,7 +536,7 @@ async function imprimirResumenCuenta() {
                 <p style="margin:5px 0 0 0; color:#666;">Resumen de Cuenta Corriente</p>
             </div>
             <div style="display:flex; justify-content: space-between; margin-bottom: 20px;">
-                <div><strong>Cliente:</strong> ${cliente.nombre_completo}<br><strong>DNI/CUIT:</strong> ${cliente.cuit || 'S/N'}</div>
+                <div><strong>Cliente:</strong> ${cliente.nombre_completo}<br><strong>DNI/CUIT:</strong> ${cliente.cuit || 'S/N'}<br><strong>Vencimiento:</strong> ${textoDiaCobro(cliente.dia_vencimiento)}</div>
                 <div class="text-end"><strong>Fecha Emisión:</strong> ${new Date().toLocaleDateString('es-AR')}<br>
                 <strong>Saldo Final:</strong> ${cliente.saldo_actual_deudor > 0 ? '$'+cliente.saldo_actual_deudor.toFixed(2) : 'A Favor $'+Math.abs(cliente.saldo_actual_deudor).toFixed(2)}</div>
             </div>

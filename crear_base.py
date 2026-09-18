@@ -91,7 +91,8 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS clientes (
     condicion_iva TEXT,
     telefono_whatsapp TEXT,
     limite_credito REAL,
-    saldo_actual_deudor REAL DEFAULT 0
+    saldo_actual_deudor REAL DEFAULT 0,
+    dia_vencimiento INTEGER
 )''')
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS ventas_cabecera (

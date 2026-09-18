@@ -18,6 +18,31 @@ function normalizarTexto(texto) {
     return texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
+function textoDiaCobro(dia) {
+    const d = parseInt(dia, 10);
+    if (!d || d < 1 || d > 31) return 'Sin día de cobro';
+    return `Cobra el día ${d}`;
+}
+
+function leerDiaCobro(id) {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    const d = parseInt(el.value, 10);
+    return (d >= 1 && d <= 31) ? d : null;
+}
+
+function armarSelectDiaCobro(id, valor) {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    if (sel.options.length < 2) {
+        let html = '<option value="">Sin pactar</option>';
+        for (let i = 1; i <= 31; i++) html += `<option value="${i}">Día ${i}</option>`;
+        sel.innerHTML = html;
+    }
+    const d = parseInt(valor, 10);
+    sel.value = (d >= 1 && d <= 31) ? String(d) : '';
+}
+
 setInterval(() => {
     const d = new Date();
     // Le agregamos el hour12: false para forzar el formato militar/24hs
@@ -37,6 +62,7 @@ const modalGestion = new bootstrap.Modal(document.getElementById('modalGestionCa
 const modalDeuda = new bootstrap.Modal(document.getElementById('modalCobrarDeuda'));
 const modalBuscador = new bootstrap.Modal(document.getElementById('modalBuscador'));
 const modalNuevoCliente = new bootstrap.Modal(document.getElementById('modalNuevoCliente'));
+armarSelectDiaCobro('nuevoClienteDiaVencimiento', '');
 const modalCobroEfectivo = new bootstrap.Modal(document.getElementById('modalCobroEfectivo'));
 const modalSeleccionCliente = new bootstrap.Modal(document.getElementById('modalSeleccionCliente'));
 
@@ -1270,6 +1296,8 @@ function seleccionarClienteDeuda(id) {
     document.getElementById("cajaInfoFiado").classList.remove("d-none");
     document.getElementById("nombreClienteFiado").innerText = cliente.nombre_completo;
     document.getElementById("limiteClienteFiado").innerText = (cliente.limite_credito || 0).toLocaleString();
+    const etqDia = document.getElementById("diaCobroClienteFiado");
+    if (etqDia) etqDia.innerText = textoDiaCobro(cliente.dia_vencimiento);
     document.getElementById("deudaClienteFiado").innerText = `$ ${cliente.saldo_actual_deudor.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
 
     cargarHistorialTabla(cliente.id);
@@ -1536,7 +1564,7 @@ function filtrarClientesAsignacion() {
 
         contenedor.innerHTML += `
         <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="asignarClienteAlTicket('${c.nombre_completo}', ${c.id}, ${limite}, ${deuda})">
-            <span><i class="bi bi-person-check"></i> ${c.nombre_completo}</span>
+            <span><i class="bi bi-person-check"></i> ${c.nombre_completo}<br><small class="text-muted">${textoDiaCobro(c.dia_vencimiento)}</small></span>
             ${badgeDeuda}
         </button>`;
     });
@@ -1601,6 +1629,7 @@ async function guardarNuevoCliente() {
     const nombre = document.getElementById("nuevoClienteNombre").value;
     const pin = document.getElementById("pinAutorizacion").value;
     const limite = parseFloat(document.getElementById("nuevoClienteLimite").value) || 50000;
+    const diaVencimiento = leerDiaCobro("nuevoClienteDiaVencimiento");
 
     if (!nombre || !dni) return Swal.fire('Error', 'El nombre y el DNI son obligatorios.', 'error');
 
@@ -1620,7 +1649,7 @@ async function guardarNuevoCliente() {
     try {
         const res = await apiFetch(`${obtenerBaseUrl()}/clientes/registrar`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nombre_completo: nombre, cuit: dni, telefono_whatsapp: "", limite_credito: limite })
+            body: JSON.stringify({ nombre_completo: nombre, cuit: dni, telefono_whatsapp: "", limite_credito: limite, dia_vencimiento: diaVencimiento })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -1629,6 +1658,7 @@ async function guardarNuevoCliente() {
 
         document.getElementById("nuevoClienteDni").value = ""; document.getElementById("nuevoClienteNombre").value = "";
         document.getElementById("pinAutorizacion").value = ""; document.getElementById("nuevoClienteLimite").value = "50000";
+        armarSelectDiaCobro("nuevoClienteDiaVencimiento", "");
         modalNuevoCliente.hide(); abrirSeleccionCliente();
     } catch (e) { Swal.fire('Error', e.message, 'error'); }
 }
