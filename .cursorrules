@@ -13,8 +13,8 @@ HITOS Y ARQUITECTURA ACTUAL:
 4. Fechas de negocio: zona Argentina (UTC-3), no date('now') UTC ni toISOString() a ciegas.
 
 VERSIÓN:
-- Release Electron / badge: v1.0.31 (file:// pega a http://185.249.225.63:8000)
-- Cache JS/CSS reciente: layout ?v=1.0.44 — POS 1.0.47 / clientes 1.0.34.
+- Release Electron / badge: v1.0.32 (file:// pega a http://185.249.225.63:8000)
+- Cache JS/CSS reciente: layout ?v=1.0.46 — POS 1.0.49 / clientes 1.0.36.
 - Admin hoy: http://185.249.225.63:8000  (Nginx :80 en paralelo)
 
 SAVE STATE (2026-09-18):
@@ -39,14 +39,14 @@ HITOS RECIENTES (ya no son tareas):
 - Proveedores: OCR al borrador + Borrar (ANULADO). No carga stock.
 
 COLA (prioridad):
-1. VPS: git pull + restart FastAPI (fiados 2a + recibo). Hard refresh admin. Cajas: instalador Electron 1.0.31.
+1. VPS: git pull + restart FastAPI. Cajas: Electron 1.0.32 (ticket y recibo de cobro salen solos a la térmica).
 2. Fiados v2 (no mezclar con AFIP ni OCR):
    - Corte 1 y 2a: hechos. Día de cobro + aging read-only + cobro/recibo.
    - Corte 2b: FIFO persistente al pagar (no solo al armar el recibo).
    - Corte 3: bloqueo en /ventas/cobrar si hay saldo vencido; override Encargado con motivo.
    - Corte 4: UI deudores ya usa /deudores; pulir si hace falta.
 3. AFIP REAL (prioridad de negocio, no es un corte de un día): WSAA + homologación + CAE de verdad + qué hacer si AFIP cae. El toggle del POS ya existe; el backend no.
-4. Electron que abra http://IP/ (o HTTPS) → recién ahí uvicorn --host 127.0.0.1 y UFW sin 8000. 1.0.31 todavía es file:// :8000.
+4. Electron que abra http://IP/ (o HTTPS) → recién ahí uvicorn --host 127.0.0.1 y UFW sin 8000. 1.0.32 todavía es file:// :8000.
 5. CMV en remito depósito; Gastos pulgar; conteo cíclico (post-HTTPS); tesorería de cheques (NO mezclar cheques/préstamos en gastos_operativos).
 
 DIFERIDO TÉCNICO:

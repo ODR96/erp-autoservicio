@@ -1023,6 +1023,10 @@ function imprimirResumenFiado(cliente, deudaTotal, articulos) {
         <div style="margin-bottom: 25mm;"></div>
     </body></html>`;
 
+    if (typeof imprimirHtmlTermico === 'function') {
+        imprimirHtmlTermico(html);
+        return;
+    }
     let vent = window.open('', '_blank', 'width=300,height=500');
     vent.document.write(html); vent.document.close(); vent.focus();
     setTimeout(() => { vent.print(); vent.close(); }, 500);
@@ -1216,11 +1220,14 @@ async function confirmarCobroEfectivo() {
 
     // 4. Si todo salió bien, mostramos el cartel de Venta Exitosa
     if (resultado) {
-        let msjHTML = `Abonó con: $${pagaCon.toFixed(2)}<br><b>Entregar vuelto: $${resultado.vuelto.toFixed(2)}</b><br><br>Ticket N°: <b>${resultado.numero_ticket}</b><br><br><small class="text-muted">Presione <b>Enter</b> para Imprimir o <b>Esc</b> para Siguiente</small>`;
-        const result = await Swal.fire({ title: '✅ Venta Exitosa', html: msjHTML, icon: 'success', showCancelButton: true, confirmButtonColor: '#198754', cancelButtonColor: '#6c757d', confirmButtonText: '<i class="bi bi-printer"></i> Imprimir (Enter)', cancelButtonText: 'Siguiente Cliente (Esc)' });
-
-        if (result.isConfirmed) { imprimirTicket80mm(resultado.numero_ticket, pagaCon, resultado.vuelto, resultado.ahorro_total); }
-        limpiarMostrador();
+        imprimirTicket80mm(resultado.numero_ticket, pagaCon, resultado.vuelto, resultado.ahorro_total);
+        await Swal.fire({
+            title: 'Venta exitosa',
+            html: `Abonó con: $${pagaCon.toFixed(2)}<br><b>Entregar vuelto: $${resultado.vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b><br><small class="text-muted">Ticket enviado a la ticketera.</small>`,
+            icon: 'success',
+            timer: 2200,
+            showConfirmButton: false
+        });
     }
 }
 
@@ -1252,9 +1259,14 @@ async function cerrarVentaBasica(metodo) {
     const resultado = await procesarVentaBackend(metodo, totalVenta);
 
     if (resultado) {
-        const result = await Swal.fire({ title: `✅ Cobrado con ${metodo}`, html: `Ticket N°: <b>${resultado.numero_ticket}</b><br><br><small class="text-muted">Presione <b>Enter</b> para Imprimir o <b>Esc</b> para Siguiente</small>`, icon: 'success', showCancelButton: true, confirmButtonColor: '#198754', cancelButtonColor: '#6c757d', confirmButtonText: '<i class="bi bi-printer"></i> Imprimir (Enter)', cancelButtonText: 'Siguiente Cliente (Esc)' });
-        if (result.isConfirmed) { imprimirTicket80mm(resultado.numero_ticket, totalVenta, 0, resultado.ahorro_total); }
-        limpiarMostrador();
+        imprimirTicket80mm(resultado.numero_ticket, totalVenta, 0, resultado.ahorro_total);
+        await Swal.fire({
+            title: `Cobrado con ${metodo}`,
+            html: `Ticket N°: <b>${resultado.numero_ticket}</b><br><small class="text-muted">Ticket enviado a la ticketera.</small>`,
+            icon: 'success',
+            timer: 1800,
+            showConfirmButton: false
+        });
     }
 }
 
@@ -1276,8 +1288,6 @@ async function abrirModalCobroFiado() {
     document.getElementById("cajaInfoFiado").classList.add("d-none");
     document.getElementById("dropdownFiado").classList.add("d-none");
     document.getElementById("tablaDetalleFiado").innerHTML = '<tr><td colspan="5" class="text-muted py-5 text-center">Busque un cliente para ver su historial.</td></tr>';
-    const btnRecibo = document.getElementById('btnImprimirReciboFiado');
-    if (btnRecibo) btnRecibo.disabled = true;
 
     modalDeuda.show();
 
@@ -1312,10 +1322,6 @@ async function seleccionarClienteDeuda(id) {
     document.getElementById("limiteClienteFiado").innerText = (cliente.limite_credito || 0).toLocaleString();
     await refrescarEstadoFiado();
     cargarHistorialTabla(cliente.id);
-    const btnRecibo = document.getElementById('btnImprimirReciboFiado');
-    if (btnRecibo) {
-        btnRecibo.disabled = !(ultimoReciboPagoCtaCte && ultimoReciboPagoCtaCte.clienteId === cliente.id);
-    }
     setTimeout(() => document.getElementById("montoPagoFiado").focus(), 150);
 }
 
@@ -1374,8 +1380,6 @@ async function cargarHistorialTabla(clienteId) {
         if (!data.movimientos || data.movimientos.length === 0) {
             tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-success fw-bold">Cuenta al día.</td></tr>`;
             movimientosHistorialGlobal = [];
-            const btnRecibo = document.getElementById('btnImprimirReciboFiado');
-            if (btnRecibo) btnRecibo.disabled = true;
             return;
         }
 
@@ -1384,10 +1388,6 @@ async function cargarHistorialTabla(clienteId) {
         limiteMostrarHistorial = 15; // Reiniciamos el límite a 15 cada vez que buscamos un cliente
 
         dibujarFilasHistorial();
-        const btnRecibo = document.getElementById('btnImprimirReciboFiado');
-        if (btnRecibo) {
-            btnRecibo.disabled = !movimientosHistorialGlobal.some((m) => m.tipo_movimiento === 'PAGO' && m.id);
-        }
 
     } catch (e) {
         tbody.innerHTML = "<tr><td colspan='5'>Error al cargar historial.</td></tr>";
@@ -1412,7 +1412,7 @@ function dibujarFilasHistorial() {
                     <button class="btn btn-sm btn-outline-secondary py-0" onclick="imprimirTicket80mm(${parseInt(numTicket, 10)})" title="Imprimir ticket"><i class="bi bi-printer"></i></button>
                 </div>`;
         } else if (m.tipo_movimiento === 'PAGO' && m.id) {
-            acciones = `<button class="btn btn-sm btn-outline-dark py-0" onclick="imprimirReciboPagoPorMovimiento(${m.id})" title="Reimprimir recibo de este cobro"><i class="bi bi-printer"></i></button>`;
+            acciones = `<button class="btn btn-sm btn-success py-0 fw-bold" onclick="imprimirReciboPagoPorMovimiento(${m.id}, {preguntar:false})" title="Reimprimir recibo de este cobro"><i class="bi bi-printer"></i> Recibo</button>`;
         }
         return `<tr>
             <td class="text-muted small align-middle">${String(m.fecha_hora || '').split(' ')[0]}</td>
@@ -1558,7 +1558,7 @@ function imprimirUltimoReciboFiado() {
     if (!pagos.length) {
         return Swal.fire('Atención', 'Este cliente no tiene cobros para reimprimir.', 'info');
     }
-    imprimirReciboPagoPorMovimiento(pagos[0].id);
+    imprimirReciboPagoPorMovimiento(pagos[0].id, { preguntar: false });
 }
 
 async function registrarPagoFiado() {
@@ -1602,10 +1602,16 @@ async function registrarPagoFiado() {
             tituloSaldo: 'SALDO LUEGO DE ESTE COBRO'
         };
         ultimoReciboPagoCtaCte = datosRecibo;
-        const btnRecibo = document.getElementById('btnImprimirReciboFiado');
-        if (btnRecibo) btnRecibo.disabled = false;
         cargarHistorialTabla(clienteFiadoActual.id);
-        await preguntarImprimirReciboPagoCtaCte(datosRecibo);
+        imprimirReciboPagoCtaCte(datosRecibo);
+        const saldo = Number(datosRecibo.saldo) || 0;
+        await Swal.fire({
+            title: saldo <= 0 ? 'Cuenta al día' : 'Pago registrado',
+            text: 'Recibo enviado a la ticketera.',
+            icon: 'success',
+            timer: 1600,
+            showConfirmButton: false
+        });
     } catch (e) {
         Swal.fire('Error', e.message, 'error');
     }
@@ -1708,8 +1714,14 @@ async function mandarACtaCte() {
 
     if (resultado) {
         const nombreLimpio = document.getElementById("nombreClienteTicket").innerText.split(' Debe')[0].split(' A favor')[0].trim();
-        const result = await Swal.fire({ title: '✅ Cuenta Corriente Actualizada', html: `Se cargaron <b>$${totalVenta.toFixed(2)}</b> a la cuenta de ${nombreLimpio}.<br><br>¿Imprimir remito para firma?`, icon: 'success', showCancelButton: true, confirmButtonColor: '#198754', cancelButtonColor: '#6c757d', confirmButtonText: '<i class="bi bi-printer"></i> Imprimir', cancelButtonText: 'Cerrar' });
-        if (result.isConfirmed) { imprimirRemitoFiado(nombreLimpio, totalVenta, [...carrito]); }
+        imprimirRemitoFiado(nombreLimpio, totalVenta, [...carrito]);
+        await Swal.fire({
+            title: 'Cuenta corriente',
+            html: `Se cargaron <b>$${totalVenta.toFixed(2)}</b> a ${nombreLimpio}.<br><small class="text-muted">Remito enviado a la ticketera.</small>`,
+            icon: 'success',
+            timer: 1800,
+            showConfirmButton: false
+        });
         limpiarMostrador();
     }
 }
@@ -2799,6 +2811,10 @@ function imprimirRemitoFiado(cliente, total, articulos) {
         </body></html>
         `;
 
+    if (typeof imprimirHtmlTermico === 'function') {
+        imprimirHtmlTermico(html);
+        return;
+    }
     let vent = window.open('', '_blank', 'width=300,height=500');
     vent.document.write(html); vent.document.close(); vent.focus();
     setTimeout(() => { vent.print(); vent.close(); }, 500);
@@ -2904,11 +2920,14 @@ async function procesarPagoMixto() {
     const resultado = await procesarVentaBackend('MIXTO', suma, desglosePagos);
 
     if (resultado) {
-        let msjHTML = `Venta dividida cobrada con éxito.<br><b>Entregar vuelto en Efectivo: $${vuelto.toFixed(2)}</b><br><br>Ticket N°: <b>${resultado.numero_ticket}</b><br><br><small class="text-muted">Presione <b>Enter</b> para Imprimir o <b>Esc</b> para Siguiente</small>`;
-        const result = await Swal.fire({ title: '✅ Venta Exitosa', html: msjHTML, icon: 'success', showCancelButton: true, confirmButtonColor: '#198754', cancelButtonColor: '#6c757d', confirmButtonText: '<i class="bi bi-printer"></i> Imprimir (Enter)', cancelButtonText: 'Siguiente Cliente (Esc)' });
-
-        if (result.isConfirmed) { imprimirTicket80mm(resultado.numero_ticket, suma, vuelto, resultado.ahorro_total); }
-        limpiarMostrador();
+        imprimirTicket80mm(resultado.numero_ticket, suma, vuelto, resultado.ahorro_total);
+        await Swal.fire({
+            title: 'Venta exitosa',
+            html: `Venta dividida cobrada.<br><b>Entregar vuelto en efectivo: $${vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b><br><small class="text-muted">Ticket enviado a la ticketera.</small>`,
+            icon: 'success',
+            timer: 2200,
+            showConfirmButton: false
+        });
     }
 }
 

@@ -304,7 +304,7 @@ async function cargarHistorialCliente(id) {
             const matchTicket = (m.detalle || '').match(/#(\d+)/);
             let btnAccion = '<span class="text-muted small">---</span>';
             if (m.tipo_movimiento === 'PAGO' && m.id) {
-                btnAccion = `<button class="btn btn-sm btn-outline-dark py-0 shadow-sm" onclick="imprimirReciboPagoPorMovimiento(${m.id})" title="Reimprimir recibo de este cobro">
+                btnAccion = `<button class="btn btn-sm btn-success py-0 fw-bold shadow-sm" onclick="imprimirReciboPagoPorMovimiento(${m.id})" title="Reimprimir recibo de este cobro">
                                 <i class="bi bi-printer"></i> Recibo
                              </button>`;
             } else if (matchTicket && !esPago) {
@@ -689,7 +689,7 @@ async function recalcularDeudaInflacion() {
 function imprimirReciboClienteAhora() {
     if (!clienteSeleccionadoId) return;
     if (ultimoReciboPagoCtaCte && ultimoReciboPagoCtaCte.clienteId === clienteSeleccionadoId) {
-        imprimirReciboPagoCtaCte(ultimoReciboPagoCtaCte);
+        preguntarImprimirReciboPagoCtaCte(ultimoReciboPagoCtaCte);
         return;
     }
     fetch(`${obtenerBaseUrl()}/clientes/historial/${clienteSeleccionadoId}`)

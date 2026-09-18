@@ -711,9 +711,14 @@
                                     <button type="button" class="btn btn-outline-danger btn-sm fw-bold flex-fill" id="btnCobrarVencidoFiado" onclick="sugerirPagoFiado('vencido')">Cobrar vencido</button>
                                     <button type="button" class="btn btn-outline-secondary btn-sm fw-bold flex-fill" onclick="sugerirPagoFiado('todo')">Cobrar todo</button>
                                 </div>
-                                <button type="button" class="btn btn-outline-primary btn-sm w-100 fw-bold mb-3" onclick="verResumenDetalladoFiado()">
-                                    <i class="bi bi-list-check"></i> Artículos impagos
-                                </button>
+                                <div class="d-flex gap-2 mb-3">
+                                    <button type="button" class="btn btn-primary btn-sm fw-bold flex-fill" onclick="verResumenDetalladoFiado()">
+                                        <i class="bi bi-list-check"></i> Impagos
+                                    </button>
+                                    <button type="button" class="btn btn-success btn-sm fw-bold flex-fill" id="btnImprimirReciboFiado" onclick="imprimirUltimoReciboFiado()">
+                                        <i class="bi bi-printer"></i> Recibo
+                                    </button>
+                                </div>
                                 <label class="form-label fw-bold mb-1">Monto a cobrar</label>
                                 <div class="input-group input-group-lg mb-3">
                                     <span class="input-group-text fw-bold">$</span>
@@ -730,9 +735,6 @@
                                 <button class="btn btn-warning btn-lg w-100 fw-bold shadow-sm"
                                     onclick="registrarPagoFiado()">
                                     <i class="bi bi-cash-coin"></i> COBRAR
-                                </button>
-                                <button type="button" class="btn btn-outline-dark btn-sm w-100 fw-bold mt-2" id="btnImprimirReciboFiado" onclick="imprimirUltimoReciboFiado()" disabled>
-                                    <i class="bi bi-printer"></i> Imprimir recibo
                                 </button>
                             </div>
                         </div>
@@ -923,8 +925,8 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <!-- ===== ARCHIVOS JS SEPARADOS ===== -->
-    <script src="js/layout.js?v=1.0.44"></script>
-    <script src="js/app_pos.js?v=1.0.47"></script>
+    <script src="js/layout.js?v=1.0.46"></script>
+    <script src="js/app_pos.js?v=1.0.49"></script>
 
 </body>
 

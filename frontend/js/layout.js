@@ -1,7 +1,7 @@
 // ========================================================
 // CONFIGURACIÓN GLOBAL
 // ========================================================
-const APP_VERSION = "v1.0.31"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
+const APP_VERSION = "v1.0.32"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
 
 function obtenerBaseUrl() {
     const protocolo = window.location.protocol;
@@ -12,7 +12,7 @@ function obtenerBaseUrl() {
         return 'http://localhost:8000';
     }
 
-    // Electron (file://): el instalador 1.0.31 sigue :8000. Nginx :80 es el admin en browser.
+    // Electron (file://): el instalador 1.0.32 sigue :8000. Nginx :80 es el admin en browser.
     if (protocolo === 'file:' || !host) {
         return 'http://185.249.225.63:8000';
     }
@@ -250,7 +250,15 @@ function htmlReciboPagoCtaCte(datos) {
     const saldo = Number(datos.saldo) || 0;
     const vencido = Number(datos.vencido) || 0;
     const abierto = Number(datos.abierto) || 0;
+    const alDia = saldo <= 0;
     const saldoTxt = saldo < 0 ? `A FAVOR $ ${plataTicket(Math.abs(saldo))}` : `$ ${plataTicket(saldo)}`;
+    const bloqueSaldo = alDia
+        ? `<div class="center bold" style="font-size: 16px; border: 2px solid #000; padding: 8px; margin: 10px 0;">CUENTA AL DÍA</div>
+        ${saldo < 0 ? `<div class="center bold">SALDO A FAVOR $ ${plataTicket(Math.abs(saldo))}</div>` : ''}`
+        : `<div class="center bold" style="font-size: 11px; margin-bottom: 4px;">${escaparHtmlTicket(datos.tituloSaldo || 'SALDO LUEGO DE ESTE COBRO')}</div>
+        <div class="fila"><span>Vencido:</span><span>$ ${plataTicket(vencido)}</span></div>
+        <div class="fila"><span>Período:</span><span>$ ${plataTicket(abierto)}</span></div>
+        <div class="fila bold" style="font-size: 14px;"><span>TOTAL:</span><span>${saldoTxt}</span></div>`;
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Recibo de Pago</title>
     <style>
         @page { margin: 0; }
@@ -261,7 +269,7 @@ function htmlReciboPagoCtaCte(datos) {
         .fila { display: flex; justify-content: space-between; margin-bottom: 4px; gap: 8px; }
     </style></head><body>
         <div class="center bold" style="font-size: 15px;">${escaparHtmlTicket(negocio)}</div>
-        <div class="center bold" style="font-size: 14px; margin-top: 4px;">RECIBO DE PAGO</div>
+        <div class="center bold" style="font-size: 14px; margin-top: 4px;">${alDia ? 'LIBRE DE DEUDA' : 'RECIBO DE PAGO'}</div>
         <div class="center" style="font-size: 11px;">Cuenta corriente · copia cliente</div>
         <div class="divisor-doble"></div>
         <div class="fila"><span>Fecha:</span><span>${fecha}</span></div>
@@ -272,11 +280,7 @@ function htmlReciboPagoCtaCte(datos) {
         <div class="divisor"></div>
         <div class="fila"><span>Medio:</span><span>${escaparHtmlTicket(datos.metodo)}</span></div>
         <div class="divisor"></div>
-        <div class="center bold" style="font-size: 11px; margin-bottom: 4px;">${escaparHtmlTicket(datos.tituloSaldo || 'SALDO LUEGO DE ESTE COBRO')}</div>
-        <div class="fila"><span>Vencido:</span><span>$ ${plataTicket(vencido)}</span></div>
-        <div class="fila"><span>Período:</span><span>$ ${plataTicket(abierto)}</span></div>
-        <div class="fila bold" style="font-size: 14px;"><span>TOTAL:</span><span>${saldoTxt}</span></div>
-        ${saldo <= 0 ? '<div class="center bold" style="margin-top:8px;">CUENTA AL DÍA</div>' : ''}
+        ${bloqueSaldo}
         <div class="center" style="font-size: 10px; margin-top: 16px;">Comprobante no válido como factura.</div>
         <div style="margin-bottom: 25mm;"></div>
     </body></html>`;
@@ -291,11 +295,11 @@ function imprimirReciboPagoCtaCte(datos) {
 async function preguntarImprimirReciboPagoCtaCte(datos) {
     ultimoReciboPagoCtaCte = datos;
     const saldo = Number(datos.saldo) || 0;
+    const alDia = saldo <= 0;
     const r = await Swal.fire({
-        title: 'Pago registrado',
+        title: alDia ? 'Cuenta al día' : 'Imprimir recibo',
         html: `<div class="text-start small">Abonó <b>$ ${plataTicket(datos.monto)}</b> (${escaparHtmlTicket(datos.metodo)})<br>
-            Vencido $ ${plataTicket(datos.vencido)} · Período $ ${plataTicket(datos.abierto)}<br>
-            Saldo: <b>${saldo < 0 ? 'A favor $ ' + plataTicket(Math.abs(saldo)) : '$ ' + plataTicket(saldo)}</b></div>`,
+            ${alDia ? '<b>No debe nada.</b>' : `Vencido $ ${plataTicket(datos.vencido)} · Período $ ${plataTicket(datos.abierto)}<br>Saldo: <b>$ ${plataTicket(saldo)}</b>`}</div>`,
         icon: 'success',
         showCancelButton: true,
         confirmButtonText: '<i class="bi bi-printer"></i> Ticketera',
@@ -306,8 +310,9 @@ async function preguntarImprimirReciboPagoCtaCte(datos) {
     if (r.isConfirmed) imprimirReciboPagoCtaCte(datos);
 }
 
-async function imprimirReciboPagoPorMovimiento(movimientoId) {
+async function imprimirReciboPagoPorMovimiento(movimientoId, opciones) {
     const id = parseInt(movimientoId, 10);
+    const preguntar = !opciones || opciones.preguntar !== false;
     if (!id) return Swal.fire('Atención', 'Ese cobro no se puede reimprimir.', 'info');
     Swal.fire({ title: 'Armando recibo...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     try {
@@ -320,7 +325,7 @@ async function imprimirReciboPagoPorMovimiento(movimientoId) {
             throw new Error(data.error || data.detail || 'No se pudo armar el recibo.');
         }
         Swal.close();
-        imprimirReciboPagoCtaCte({
+        const datos = {
             clienteId: data.cliente_id,
             cliente: data.nombre,
             monto: data.monto,
@@ -330,7 +335,26 @@ async function imprimirReciboPagoPorMovimiento(movimientoId) {
             abierto: data.abierto,
             fecha: data.fecha,
             tituloSaldo: 'SALDO LUEGO DE ESTE COBRO'
-        });
+        };
+        if (preguntar) {
+            ultimoReciboPagoCtaCte = datos;
+            const saldo = Number(datos.saldo) || 0;
+            const alDia = saldo <= 0;
+            const r = await Swal.fire({
+                title: alDia ? 'Reimprimir · cuenta al día' : 'Reimprimir recibo',
+                html: `<div class="text-start small">Abonó <b>$ ${plataTicket(datos.monto)}</b> (${escaparHtmlTicket(datos.metodo)})<br>
+                    ${alDia ? '<b>Quedó al día en ese cobro.</b>' : `Saldo luego del cobro: <b>$ ${plataTicket(saldo)}</b>`}</div>`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-printer"></i> Ticketera',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#198754',
+                reverseButtons: true
+            });
+            if (r.isConfirmed) imprimirReciboPagoCtaCte(datos);
+            return;
+        }
+        imprimirReciboPagoCtaCte(datos);
     } catch (e) {
         Swal.fire('Error', e.message || 'No se pudo armar el recibo.', 'error');
     }
