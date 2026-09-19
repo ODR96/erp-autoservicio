@@ -392,18 +392,27 @@ function imprimirTodo(filtroSeleccionado) {
     
     let html = `
         <style>
+            .hoja-cenefas { width: 210mm; display: flex; flex-wrap: wrap; justify-content: flex-start; align-content: flex-start; text-align: left; background: #fff; }
+            .cenefa { page-break-after: auto; box-sizing: border-box; overflow: hidden; }
+            .cenefa-normal { display: flex; flex-direction: column; width: 50%; height: 42mm; padding: 1.5mm; margin: 0; }
+            .cenefa-doble { display: flex; width: 100%; height: 42mm; margin: 2mm 0; padding: 0 5mm; }
+            .cenefa-normal > .cenefa-cuerpo, .cenefa-doble > .cenefa-cuerpo { width: 100%; height: 100%; }
             @media print {
                 @page { size: A4 portrait; margin: 0; }
                 body { margin: 0; background: white !important; font-family: Arial, sans-serif; }
                 #app-container, .main-wrapper, .modal, .d-print-none, .swal2-container { display: none !important; }
-                #zonaImpresion { display: block !important; visibility: visible !important; position: absolute; left: 0; top: 0; width: 100%; }
-                .cartel { page-break-after: always; page-break-inside: avoid; box-sizing: border-box; overflow: hidden; background: white !important; margin: 0 auto; }
-                .cenefa { page-break-after: auto; display: inline-flex; margin: 5mm; }
+                #zonaImpresion { display: block !important; visibility: visible !important; position: absolute; left: 0; top: 0; width: 210mm; }
+                .cartel { page-break-inside: avoid; box-sizing: border-box; overflow: hidden; background: white !important; }
+                .cartel:not(.cenefa) { page-break-after: always; margin: 0 auto; }
+                .hoja-cenefas { width: 210mm; }
                 .bg-print { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                 .truncate-lines { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; }
             }
         </style>
     `;
+
+    let htmlCenefas = '';
+    let htmlA4s = '';
 
     listaAImprimir.forEach((item, idx) => {
         const pF = fmtPrecioCartel(item.precio);
@@ -420,14 +429,16 @@ function imprimirTodo(filtroSeleccionado) {
 
         for (let i = 0; i < item.copias; i++) {
             if (item.formato === "Cenefa_Normal") {
-                html += `
-                    <div class="cartel cenefa" style="width: 100mm; height: 40mm; border: 1px solid #ddd; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;">
+                htmlCenefas += `
+                    <div class="cartel cenefa cenefa-normal">
+                        <div class="cenefa-cuerpo" style="border: 1px solid #ddd; display:flex; flex-direction:column; align-items:center; justify-content:flex-start;">
                         <div class="bg-print" style="width: 100%; background: ${colorInstitucional}; color: white; font-size: 8px; font-weight: bold; text-align: center; text-transform: uppercase; padding: 1.5mm 0; letter-spacing: 1px;">${htmlTxtCartel(local)}</div>
                         <div style="padding: 1mm 2mm; width: 100%; display: flex; flex-direction: column; align-items: center; height: 100%;">
                             ${txExtra}
                             <div class="truncate-lines" style="font-size: 11px; font-weight: bold; text-align: center; color: #333; line-height:1.1; margin-top:1mm; min-height: 8mm;">${htmlTxtCartel(item.nombre)}</div>
                             <div style="margin-top:auto; color: #000; padding-bottom:1mm; text-align:center;">${bloquePrecioCenefa}</div>
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:9mm; width:65mm; margin:0; margin-top:auto;"></svg>` : ''}
+                        </div>
                         </div>
                     </div>
                 `;
@@ -445,8 +456,9 @@ function imprimirTodo(filtroSeleccionado) {
                            ${htmlUxB_print}
                        </div>`;
 
-                html += `
-                    <div class="cartel cenefa" style="width: 200mm; height: 40mm; border: 2px solid #333; display: flex; flex-direction: row; border-radius: 4px;">
+                htmlCenefas += `
+                    <div class="cartel cenefa cenefa-doble">
+                        <div class="cenefa-cuerpo" style="border: 2px solid #333; display:flex; flex-direction: row; border-radius: 4px;">
                         <div style="width: 50%; padding: 2mm; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 2px dashed #999; background: white;">
                             ${txExtra}
                             <div style="font-size: 10px; text-transform:uppercase; color: #666; font-weight:bold; background: #f0f0f0; padding: 2px 8px; border-radius: 4px; margin-bottom: 2mm;">PRECIO NORMAL</div>
@@ -455,6 +467,7 @@ function imprimirTodo(filtroSeleccionado) {
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:7mm; width:45mm; margin:0;"></svg>` : ''}
                         </div>
                         ${mitadDer}
+                        </div>
                     </div>
                 `;
             }
@@ -473,7 +486,7 @@ function imprimirTodo(filtroSeleccionado) {
                 let fontSizePrecioBase = pF.length > 8 ? 100 : (pF.length > 6 ? 120 : 150);
                 let fontSizePrecio = tieneFoto ? `${fontSizePrecioBase}px` : `${fontSizePrecioBase + 50}px`;
 
-                html += `
+                htmlA4s += `
                     <div class="cartel" style="width: 195mm; height: 280mm; border: 6px solid ${colorInstitucional}; border-radius: 20px; display: flex; flex-direction: column; align-items: center; padding: 0; text-align:center; position:relative; box-shadow: 0 0 20px rgba(0,0,0,0.1);">
                         <div class="bg-print" style="width: 100%; padding: 10mm; border-bottom: 2px solid ${colorInstitucional}; display:flex; justify-content:center; align-items:center; background-color: #f8f9fa;">
                             ${logoHTML}
@@ -496,6 +509,8 @@ function imprimirTodo(filtroSeleccionado) {
         }
     });
 
+    if (htmlCenefas) html += `<div class="hoja-cenefas">${htmlCenefas}</div>`;
+    html += htmlA4s;
     zona.innerHTML = html;
     zona.classList.remove('d-none');
 
@@ -516,12 +531,14 @@ function imprimirTodo(filtroSeleccionado) {
         Swal.fire({
             title: '<i class="bi bi-eye"></i> Vista Previa de Impresión',
             html: `
-                <div style="background: #525659; padding: 20px; max-height: 55vh; overflow-y: auto; border-radius: 5px; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);">
+                <div style="background: #525659; padding: 12px; max-height: 60vh; overflow: auto; border-radius: 5px; text-align: left;">
+                    <div style="width: 210mm; max-width: 100%; margin: 0; background: #fff; text-align: left;">
                     ${zona.innerHTML}
+                    </div>
                 </div>
-                <div class="text-muted small mt-2">Asegurate de que tu impresora esté configurada en tamaño A4 y sin márgenes.</div>
+                <div class="text-muted small mt-2">A4 sin márgenes. Las cenefas normales van de a dos por fila.</div>
             `,
-            width: '800px',
+            width: '860px',
             showCancelButton: true,
             confirmButtonText: '<i class="bi bi-printer"></i> Imprimir Ahora',
             cancelButtonText: 'Cancelar',
