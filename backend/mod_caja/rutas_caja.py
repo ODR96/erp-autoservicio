@@ -507,20 +507,27 @@ def auditar_turno(turno_id: int):
                 "monto": turno['monto_inicial']
             })
 
-        # EL ARREGLO: Usamos "id" en vez de "numero_ticket"
         cursor.execute('''
-            SELECT id, fecha_hora, metodo_pago, total_venta, estado 
-            FROM ventas_cabecera 
-            WHERE turno_id = ?
+            SELECT v.id, v.fecha_hora, v.metodo_pago, v.total_venta, v.estado,
+                   COALESCE(NULLIF(TRIM(c.nombre_completo), ''), NULLIF(TRIM(v.nombre_cliente_factura), '')) AS nombre_cliente
+            FROM ventas_cabecera v
+            LEFT JOIN clientes c ON c.id = v.cliente_id
+            WHERE v.turno_id = ?
         ''', (turno_id,))
         for v in cursor.fetchall():
             estado_str = "VENTA ANULADA" if v['estado'] == 'ANULADA' else "VENTA"
+            metodo = (v['metodo_pago'] or '').upper()
+            nombre_fiado = (v['nombre_cliente'] or '').strip()
+            if metodo in ('FIADO', 'CUENTA CORRIENTE') and nombre_fiado:
+                detalle_venta = f"Fiado a {nombre_fiado} · Cobró: {nombre_cajero}"
+            else:
+                detalle_venta = f"Venta de mostrador - Cobró: {nombre_cajero}"
             linea_tiempo.append({
                 "fecha_hora_cruda": v['fecha_hora'],
                 "hora": v['fecha_hora'][11:16] if v['fecha_hora'] else "-",
                 "tipo": estado_str,
                 "accion": f"Ticket #{v['id']}",
-                "detalle": f"Venta de mostrador - Cobró: {nombre_cajero}",
+                "detalle": detalle_venta,
                 "metodo": v['metodo_pago'],
                 "monto": v['total_venta']
             })

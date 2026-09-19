@@ -1,7 +1,7 @@
 // ========================================================
 // CONFIGURACIÓN GLOBAL
 // ========================================================
-const APP_VERSION = "v1.0.33"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
+const APP_VERSION = "v1.0.34"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
 
 function obtenerBaseUrl() {
     const protocolo = window.location.protocol;
@@ -12,7 +12,7 @@ function obtenerBaseUrl() {
         return 'http://localhost:8000';
     }
 
-    // Electron (file://): el instalador 1.0.33 sigue :8000. Nginx :80 es el admin en browser.
+    // Electron (file://): el instalador 1.0.34 sigue :8000. Nginx :80 es el admin en browser.
     if (protocolo === 'file:' || !host) {
         return 'http://185.249.225.63:8000';
     }
@@ -264,8 +264,11 @@ function formatearFechaTicket(valor) {
 }
 
 function htmlReciboPagoCtaCte(datos) {
-    const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: 'ERPetto' };
-    const negocio = (config.nombre_negocio || 'ERPetto').toUpperCase();
+    const cfg = leerConfigNegocio();
+    const negocio = String(cfg.nombre_negocio || '').trim();
+    const direccion = String(cfg.direccion || '').trim();
+    const cuit = String(cfg.cuit || '').trim();
+    const pie = String(cfg.mensaje_ticket || '').trim();
     const fecha = formatearFechaTicket(datos.fecha);
     const monto = Number(datos.monto) || 0;
     const saldo = Number(datos.saldo) || 0;
@@ -273,37 +276,54 @@ function htmlReciboPagoCtaCte(datos) {
     const abierto = Number(datos.abierto) || 0;
     const alDia = saldo <= 0;
     const saldoTxt = saldo < 0 ? `A FAVOR $ ${plataTicket(Math.abs(saldo))}` : `$ ${plataTicket(saldo)}`;
+    const lineaLocal = [direccion, cuit ? `CUIT ${cuit}` : ''].filter(Boolean).join(' | ');
+    const encabezado = [
+        negocio ? `<div class="center bold" style="font-size: 14px; margin-bottom: 2px;">${escaparHtmlTicket(negocio.toUpperCase())}</div>` : '',
+        lineaLocal ? `<div class="center" style="font-size: 10px; margin-bottom: 4px;">${escaparHtmlTicket(lineaLocal)}</div>` : ''
+    ].join('');
     const bloqueSaldo = alDia
-        ? `<div class="center bold" style="font-size: 16px; border: 2px solid #000; padding: 8px; margin: 10px 0;">CUENTA AL DÍA</div>
+        ? `<div class="center bold" style="font-size: 13px; border: 1px solid #000; padding: 4px 2px; margin: 6px 0;">CUENTA AL DÍA</div>
         ${saldo < 0 ? `<div class="center bold">SALDO A FAVOR $ ${plataTicket(Math.abs(saldo))}</div>` : ''}`
-        : `<div class="center bold" style="font-size: 11px; margin-bottom: 4px;">${escaparHtmlTicket(datos.tituloSaldo || 'SALDO LUEGO DE ESTE COBRO')}</div>
-        <div class="fila"><span>Vencido:</span><span>$ ${plataTicket(vencido)}</span></div>
-        <div class="fila"><span>Período:</span><span>$ ${plataTicket(abierto)}</span></div>
-        <div class="fila bold" style="font-size: 14px;"><span>TOTAL:</span><span>${saldoTxt}</span></div>`;
+        : `<div class="center bold" style="font-size: 10px; margin: 4px 0;">${escaparHtmlTicket(datos.tituloSaldo || 'SALDO LUEGO DE ESTE COBRO')}</div>
+        <table>
+            <tr><td class="k">Vencido</td><td class="v">$ ${plataTicket(vencido)}</td></tr>
+            <tr><td class="k">Período</td><td class="v">$ ${plataTicket(abierto)}</td></tr>
+            <tr><td class="k bold">TOTAL</td><td class="v bold">${saldoTxt}</td></tr>
+        </table>`;
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Recibo de Pago</title>
     <style>
-        @page { margin: 0; }
-        body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 600; color: #000; margin: 0; padding: 2mm 4mm; width: 72mm; -webkit-font-smoothing: none; text-rendering: crispEdges; }
+        @page { size: 80mm auto; margin: 0; }
+        html, body { width: 76mm; max-width: 76mm; }
+        body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 600; color: #000; margin: 0; padding: 2mm 6mm 2mm 0; box-sizing: border-box; -webkit-font-smoothing: none; text-rendering: crispEdges; }
         .center { text-align: center; } .bold { font-weight: bold; }
-        .divisor { border-top: 1px dashed #000; margin: 6px 0; }
-        .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 6px 0; }
-        .fila { display: flex; justify-content: space-between; margin-bottom: 4px; gap: 8px; }
+        .divisor { border-top: 1px dashed #000; margin: 4px 0; }
+        .divisor-doble { border-top: 2px solid #000; border-bottom: 2px solid #000; height: 2px; margin: 4px 0; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        td { vertical-align: top; padding: 1px 0; word-wrap: break-word; overflow-wrap: anywhere; }
+        td.k { width: 36%; text-align: left; }
+        td.v { width: 64%; text-align: right; }
+        .monto { font-size: 16px; text-align: center; border: 1px solid #000; padding: 4px 2px; margin: 4px 0; box-sizing: border-box; }
     </style></head><body>
-        <div class="center bold" style="font-size: 15px;">${escaparHtmlTicket(negocio)}</div>
-        <div class="center bold" style="font-size: 14px; margin-top: 4px;">${alDia ? 'LIBRE DE DEUDA' : 'RECIBO DE PAGO'}</div>
-        <div class="center" style="font-size: 11px;">Cuenta corriente · copia cliente</div>
+        ${encabezado}
+        <div class="center bold" style="font-size: 13px;">${alDia ? 'LIBRE DE DEUDA' : 'RECIBO DE PAGO'}</div>
+        <div class="center" style="font-size: 10px;">Cuenta corriente</div>
         <div class="divisor-doble"></div>
-        <div class="fila"><span>Fecha:</span><span>${fecha}</span></div>
-        <div class="fila"><span>Cliente:</span><span>${escaparHtmlTicket(datos.cliente)}</span></div>
+        <table>
+            <tr><td class="k">Fecha</td><td class="v">${escaparHtmlTicket(fecha)}</td></tr>
+            <tr><td class="k">Cliente</td><td class="v">${escaparHtmlTicket(datos.cliente)}</td></tr>
+        </table>
         <div class="divisor-doble"></div>
-        <div class="center bold" style="font-size: 13px; margin: 8px 0 4px;">IMPORTE ABONADO</div>
-        <div class="center bold" style="font-size: 24px; border: 1px solid #000; padding: 6px;">$ ${plataTicket(monto)}</div>
+        <div class="center bold" style="font-size: 11px;">IMPORTE ABONADO</div>
+        <div class="monto bold">$ ${plataTicket(monto)}</div>
         <div class="divisor"></div>
-        <div class="fila"><span>Medio:</span><span>${escaparHtmlTicket(datos.metodo)}</span></div>
+        <table>
+            <tr><td class="k">Medio</td><td class="v">${escaparHtmlTicket(datos.metodo)}</td></tr>
+        </table>
         <div class="divisor"></div>
         ${bloqueSaldo}
-        <div class="center" style="font-size: 10px; margin-top: 16px;">Comprobante no válido como factura.</div>
-        <div style="margin-bottom: 25mm;"></div>
+        ${pie ? `<div class="center" style="font-size: 10px; margin-top: 10px; white-space: pre-wrap;">${escaparHtmlTicket(pie)}</div>` : ''}
+        <div class="center" style="font-size: 9px; margin-top: 8px;">Comprobante no válido como factura.</div>
+        <div style="margin-bottom: 20mm;"></div>
     </body></html>`;
 }
 

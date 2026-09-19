@@ -299,6 +299,12 @@ function actualizarInfoCabecera(turnoId) {
 // ==========================================
 const modalHistorial = new bootstrap.Modal(document.getElementById('modalHistorialVentas'));
 
+function escHtmlPos(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
 async function abrirHistorialTurno() {
     if (!turnoActualId) return Swal.fire('Error', 'No hay turno abierto.', 'error');
 
@@ -311,32 +317,32 @@ async function abrirHistorialTurno() {
         if (data.error) throw new Error(data.error);
 
         const tbody = document.getElementById('tablaHistorialVentas');
-        tbody.innerHTML = '';
 
         if (data.ventas.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Aún no hay ventas en este turno.</td></tr>';
         } else {
-            data.ventas.forEach(v => {
+            tbody.innerHTML = data.ventas.map(v => {
                 const esAnulada = v.estado === 'ANULADA';
                 const colorFila = esAnulada ? 'text-muted text-decoration-line-through' : '';
                 const badge = esAnulada ? '<span class="badge bg-danger">Anulada</span>' : '<span class="badge bg-success">Ok</span>';
-
                 const btnVer = `<button class="btn btn-sm btn-outline-info me-1" onclick="verDetalleTicketGlobal(${v.id})" title="Ver Detalle"><i class="bi bi-eye"></i></button>`;
-
-                // EL PARCHE: Agregamos el botón de imprimir que llama a tu propia función
                 const btnImprimir = `<button class="btn btn-sm btn-outline-primary me-1" onclick="imprimirTicket80mm(${v.id})" title="Reimprimir Ticket"><i class="bi bi-printer"></i></button>`;
-
                 const btnAnular = esAnulada
                     ? '<button class="btn btn-sm btn-secondary" disabled><i class="bi bi-x-circle"></i></button>'
                     : `<button class="btn btn-sm btn-outline-danger" onclick="confirmarAnulacion(${v.id}, '${v.numero_ticket}')" title="Anular Venta"><i class="bi bi-trash"></i></button>`;
-
                 const hora = new Date(v.fecha_hora).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+                const metodo = String(v.metodo_pago || '');
+                const esFiado = ['FIADO', 'CUENTA CORRIENTE'].includes(metodo.toUpperCase());
+                const nombreFiado = String(v.nombre_cliente || '').trim();
+                const celdaMetodo = esFiado && nombreFiado
+                    ? `${metodo}<div class="small text-warning fw-bold">${escHtmlPos(nombreFiado)}</div>`
+                    : metodo;
 
-                tbody.innerHTML += `
+                return `
     <tr class="${colorFila}">
         <td class="align-middle">${hora}</td>
         <td class="align-middle fw-bold">${v.numero_ticket}</td>
-        <td class="align-middle">${v.metodo_pago}</td>
+        <td class="align-middle">${celdaMetodo}</td>
         <td class="align-middle text-end fw-bold">$${v.total_venta.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
         <td class="align-middle text-center">${badge}</td>
         <td class="align-middle text-center">
@@ -345,9 +351,9 @@ async function abrirHistorialTurno() {
             ${btnImprimir}
             ${btnAnular}
         </div>
-    </tr>
-`;
-            });
+        </td>
+    </tr>`;
+            }).join('');
         }
         modalHistorial.show();
     } catch (e) {
@@ -373,9 +379,17 @@ async function verDetalleTicketGlobal(ventaId) {
             </tr>`;
         });
 
+        const clienteTicket = (data.encabezado && data.encabezado.cliente) ? String(data.encabezado.cliente).trim() : '';
+        const metodoTicket = String(data.totales.metodo_pago || '');
+        const esFiadoTicket = ['FIADO', 'CUENTA CORRIENTE'].includes(metodoTicket.toUpperCase());
+        const lineaCliente = (esFiadoTicket && clienteTicket)
+            ? `<div class="text-start small mt-1">Cuenta corriente: <b>${escHtmlPos(clienteTicket)}</b></div>`
+            : '';
+
         html += `</tbody></table></div>
                  <div class="text-end fw-bold fs-5 mt-2 text-primary">Total: $${data.totales.total_a_pagar.toFixed(2)}</div>
-                 <div class="text-start text-muted small mt-2">Método: ${data.totales.metodo_pago}</div>`;
+                 <div class="text-start text-muted small mt-2">Método: ${escHtmlPos(metodoTicket)}</div>
+                 ${lineaCliente}`;
 
         Swal.fire({
             title: `<i class="bi bi-receipt text-primary"></i> Ticket #${ventaId}`,
@@ -1200,6 +1214,26 @@ document.addEventListener("DOMContentLoaded", () => {
     sincronizarVentasOffline();
 });
 
+async function preguntarTicketDespuesDeVenta({ titulo, html, imprimir }) {
+    const r = await Swal.fire({
+        title: titulo,
+        html,
+        icon: 'success',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-printer"></i> Imprimir',
+        cancelButtonText: 'No imprimir',
+        confirmButtonColor: '#198754',
+        cancelButtonColor: '#6c757d',
+        reverseButtons: true,
+        allowOutsideClick: false,
+        focusConfirm: true
+    });
+    if (r.isConfirmed && typeof imprimir === 'function') {
+        await imprimir();
+    }
+    limpiarMostrador();
+}
+
 // ===== BOTÓN COBRO EFECTIVO CONECTADO =====
 async function confirmarCobroEfectivo() {
     let inputPaga = document.getElementById("inputPagaCon").value;
@@ -1220,13 +1254,10 @@ async function confirmarCobroEfectivo() {
 
     // 4. Si todo salió bien, mostramos el cartel de Venta Exitosa
     if (resultado) {
-        imprimirTicket80mm(resultado.numero_ticket, pagaCon, resultado.vuelto, resultado.ahorro_total);
-        await Swal.fire({
-            title: 'Venta exitosa',
-            html: `Abonó con: $${pagaCon.toFixed(2)}<br><b>Entregar vuelto: $${resultado.vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b><br><small class="text-muted">Ticket enviado a la ticketera.</small>`,
-            icon: 'success',
-            timer: 2200,
-            showConfirmButton: false
+        await preguntarTicketDespuesDeVenta({
+            titulo: 'Venta exitosa',
+            html: `Abonó con: $${pagaCon.toFixed(2)}<br><b>Entregar vuelto: $${resultado.vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b>`,
+            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, pagaCon, resultado.vuelto, resultado.ahorro_total)
         });
     }
 }
@@ -1259,13 +1290,10 @@ async function cerrarVentaBasica(metodo) {
     const resultado = await procesarVentaBackend(metodo, totalVenta);
 
     if (resultado) {
-        imprimirTicket80mm(resultado.numero_ticket, totalVenta, 0, resultado.ahorro_total);
-        await Swal.fire({
-            title: `Cobrado con ${metodo}`,
-            html: `Ticket N°: <b>${resultado.numero_ticket}</b><br><small class="text-muted">Ticket enviado a la ticketera.</small>`,
-            icon: 'success',
-            timer: 1800,
-            showConfirmButton: false
+        await preguntarTicketDespuesDeVenta({
+            titulo: `Cobrado con ${metodo}`,
+            html: `Ticket N°: <b>${resultado.numero_ticket}</b>`,
+            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, totalVenta, 0, resultado.ahorro_total)
         });
     }
 }
@@ -1714,15 +1742,13 @@ async function mandarACtaCte() {
 
     if (resultado) {
         const nombreLimpio = document.getElementById("nombreClienteTicket").innerText.split(' Debe')[0].split(' A favor')[0].trim();
-        imprimirRemitoFiado(nombreLimpio, totalVenta, [...carrito]);
-        await Swal.fire({
-            title: 'Cuenta corriente',
-            html: `Se cargaron <b>$${totalVenta.toFixed(2)}</b> a ${nombreLimpio}.<br><small class="text-muted">Remito enviado a la ticketera.</small>`,
-            icon: 'success',
-            timer: 1800,
-            showConfirmButton: false
+        const articulosRemito = [...carrito];
+        const totalRemito = totalVenta;
+        await preguntarTicketDespuesDeVenta({
+            titulo: 'Cuenta corriente',
+            html: `Se cargaron <b>$${totalRemito.toFixed(2)}</b> a ${escHtmlPos(nombreLimpio)}.`,
+            imprimir: () => imprimirRemitoFiado(nombreLimpio, totalRemito, articulosRemito)
         });
-        limpiarMostrador();
     }
 }
 
@@ -2717,9 +2743,6 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
             setTimeout(() => { ventanaPrint.print(); ventanaPrint.close(); }, 500);
         }
 
-        // Limpiamos el mostrador para el siguiente cliente
-        limpiarMostrador();
-
     } catch (e) {
         console.error(e);
         Swal.fire('Error', 'No se pudo generar el ticket para imprimir.', 'error');
@@ -2929,13 +2952,10 @@ async function procesarPagoMixto() {
     const resultado = await procesarVentaBackend('MIXTO', suma, desglosePagos);
 
     if (resultado) {
-        imprimirTicket80mm(resultado.numero_ticket, suma, vuelto, resultado.ahorro_total);
-        await Swal.fire({
-            title: 'Venta exitosa',
-            html: `Venta dividida cobrada.<br><b>Entregar vuelto en efectivo: $${vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b><br><small class="text-muted">Ticket enviado a la ticketera.</small>`,
-            icon: 'success',
-            timer: 2200,
-            showConfirmButton: false
+        await preguntarTicketDespuesDeVenta({
+            titulo: 'Venta exitosa',
+            html: `Venta dividida cobrada.<br><b>Entregar vuelto en efectivo: $${vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b>`,
+            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, suma, vuelto, resultado.ahorro_total)
         });
     }
 }

@@ -323,8 +323,13 @@ def historial_ventas_turno(turno_id: int):
         turno = cursor.fetchone()
         if not turno: raise Exception("El turno no existe.")
         cursor.execute('''
-            SELECT id, id AS numero_ticket, fecha_hora, total_venta, metodo_pago, estado 
-            FROM ventas_cabecera WHERE turno_id = ? ORDER BY id DESC
+            SELECT v.id, v.id AS numero_ticket, v.fecha_hora, v.total_venta, v.metodo_pago, v.estado,
+                   v.cliente_id,
+                   COALESCE(NULLIF(TRIM(c.nombre_completo), ''), NULLIF(TRIM(v.nombre_cliente_factura), '')) AS nombre_cliente
+            FROM ventas_cabecera v
+            LEFT JOIN clientes c ON c.id = v.cliente_id
+            WHERE v.turno_id = ?
+            ORDER BY v.id DESC
         ''', (turno_id,))
         return {"ventas": [dict(row) for row in cursor.fetchall()]}
     except Exception as e:
