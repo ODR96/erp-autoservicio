@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+from typing import Optional
 from datetime import date, datetime, timezone, timedelta
 import sqlite3
 import os
@@ -31,7 +32,29 @@ def asegurar_tabla_mermas():
     conexion.close()
 
 
+def asegurar_tabla_conteos():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS conteos_inventario (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_hora DATETIME,
+            producto_id INTEGER,
+            stock_sistema REAL,
+            cantidad_contada REAL,
+            diferencia REAL,
+            tipo TEXT,
+            usuario_id INTEGER,
+            observaciones TEXT,
+            costo_perdido REAL DEFAULT 0
+        )
+    ''')
+    conexion.commit()
+    conexion.close()
+
+
 asegurar_tabla_mermas()
+asegurar_tabla_conteos()
 
 # --- MODELOS DE DATOS ---
 class LoteNuevo(BaseModel):
@@ -311,3 +334,323 @@ def consultar_stock_total(producto_id: int):
     
     stock_total = resultado if resultado else 0
     return {"producto_id": producto_id, "stock_total": stock_total}
+
+
+# --- 6. INVENTARIO: NEGATIVOS + CONTEO (no pisa el catálogo) ---
+TIPOS_AJUSTE = ("NEGATIVO_CERO", "NEGATIVO_FISICO", "CONTEO")
+
+
+class AjusteInventario(BaseModel):
+    producto_id: int
+    cantidad_contada: Optional[float] = None
+    tipo: str
+    observaciones: str = ""
+
+
+def _usuario_id(payload: dict) -> int:
+    try:
+        return int(payload.get("sub") or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _ahora_ar() -> str:
+    return datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _hoy_ar() -> str:
+    return datetime.now(ZONA_AR).strftime("%Y-%m-%d")
+
+
+def _stock_neto(cursor, producto_id: int) -> float:
+    cursor.execute(
+        "SELECT COALESCE(SUM(cantidad_disponible), 0) FROM lotes_stock WHERE producto_id = ?",
+        (producto_id,),
+    )
+    return float(cursor.fetchone()[0] or 0)
+
+
+def _costo_maestro(cursor, producto_id: int) -> float:
+    cursor.execute("SELECT IFNULL(costo_sin_iva, 0) FROM productos WHERE id = ?", (producto_id,))
+    fila = cursor.fetchone()
+    return float(fila[0] or 0) if fila else 0.0
+
+
+def _costo_lote(cursor, lote_id: int, producto_id: int, fallback: float) -> float:
+    cursor.execute("SELECT IFNULL(costo_real_ingreso, 0) FROM lotes_stock WHERE id = ?", (lote_id,))
+    fila = cursor.fetchone()
+    costo = float(fila[0] or 0) if fila else 0.0
+    return costo if costo > 0 else float(fallback or 0)
+
+
+def _perdonar_negativos(cursor, producto_id: int, usuario_id: int, fecha: str, motivo: str) -> float:
+    """Borra lotes en negativo. Devuelve cuánta deuda se perdonó (número positivo)."""
+    cursor.execute(
+        """SELECT id, cantidad_disponible FROM lotes_stock
+           WHERE producto_id = ? AND cantidad_disponible < 0""",
+        (producto_id,),
+    )
+    perdonado = 0.0
+    for lote_id, qty in cursor.fetchall():
+        deuda = abs(float(qty or 0))
+        if deuda <= 0:
+            continue
+        cursor.execute("DELETE FROM lotes_stock WHERE id = ?", (lote_id,))
+        cursor.execute(
+            """INSERT INTO movimientos_stock
+               (producto_id, lote_id, cantidad, tipo_movimiento, motivo, usuario_id, fecha_hora)
+               VALUES (?, ?, ?, 'AJUSTE_INVENTARIO', ?, ?, ?)""",
+            (producto_id, lote_id, deuda, motivo, usuario_id, fecha),
+        )
+        perdonado += deuda
+    return perdonado
+
+
+def _comer_positivos(cursor, producto_id: int, cantidad: float, usuario_id: int, fecha: str,
+                     motivo: str, costo_fallback: float) -> float:
+    """Merma FIFO de lotes positivos. Devuelve costo_perdido."""
+    restante = float(cantidad)
+    costo_perdido = 0.0
+    cursor.execute(
+        """SELECT id, cantidad_disponible FROM lotes_stock
+           WHERE producto_id = ? AND cantidad_disponible > 0 AND estado_lote = 'Activo'
+           ORDER BY fecha_vencimiento ASC""",
+        (producto_id,),
+    )
+    for lote_id, disponible in cursor.fetchall():
+        if restante <= 0:
+            break
+        take = min(float(disponible), restante)
+        nuevo = float(disponible) - take
+        cursor.execute("UPDATE lotes_stock SET cantidad_disponible = ? WHERE id = ?", (nuevo, lote_id))
+        if nuevo <= 0:
+            cursor.execute("UPDATE lotes_stock SET estado_lote = 'Agotado' WHERE id = ?", (lote_id,))
+        costo_u = _costo_lote(cursor, lote_id, producto_id, costo_fallback)
+        costo_linea = round(take * costo_u, 2)
+        costo_perdido += costo_linea
+        cursor.execute(
+            """INSERT INTO movimientos_stock
+               (producto_id, lote_id, cantidad, tipo_movimiento, motivo, usuario_id, fecha_hora)
+               VALUES (?, ?, ?, 'AJUSTE_INVENTARIO', ?, ?, ?)""",
+            (producto_id, lote_id, take, motivo, usuario_id, fecha),
+        )
+        cursor.execute(
+            """INSERT INTO registro_mermas
+               (fecha_hora, producto_id, lote_id, cantidad, motivo, costo_perdido, usuario_id, observaciones)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (fecha, producto_id, lote_id, take, motivo, costo_linea, usuario_id, None),
+        )
+        restante -= take
+    return round(costo_perdido, 2)
+
+
+def _alta_ajuste(cursor, producto_id: int, cantidad: float, costo: float, usuario_id: int, fecha: str, motivo: str):
+    cursor.execute(
+        """INSERT INTO lotes_stock
+           (producto_id, numero_lote_proveedor, fecha_ingreso, fecha_vencimiento,
+            cantidad_inicial, cantidad_disponible, costo_real_ingreso, estado_lote)
+           VALUES (?, 'AJUSTE_CONTEO', ?, '2099-12-31', ?, ?, ?, 'Activo')""",
+        (producto_id, _hoy_ar(), cantidad, cantidad, costo),
+    )
+    lote_id = cursor.lastrowid
+    cursor.execute(
+        """INSERT INTO movimientos_stock
+           (producto_id, lote_id, cantidad, tipo_movimiento, motivo, usuario_id, fecha_hora)
+           VALUES (?, ?, ?, 'AJUSTE_INVENTARIO', ?, ?, ?)""",
+        (producto_id, lote_id, cantidad, motivo, usuario_id, fecha),
+    )
+    return lote_id
+
+
+def _registrar_conteo(cursor, producto_id, stock_antes, contado, tipo, usuario_id, fecha, obs, costo_perdido):
+    cursor.execute(
+        """INSERT INTO conteos_inventario
+           (fecha_hora, producto_id, stock_sistema, cantidad_contada, diferencia, tipo, usuario_id, observaciones, costo_perdido)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (fecha, producto_id, stock_antes, contado, round(contado - stock_antes, 4), tipo, usuario_id, obs or None, costo_perdido),
+    )
+
+
+@router.get("/inventario/negativos", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def listar_negativos_inventario():
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute(
+            """SELECT p.id, p.nombre, p.codigo_barras, p.unidad_medida,
+                      SUM(l.cantidad_disponible) as stock_total,
+                      SUM(CASE WHEN l.cantidad_disponible < 0 THEN l.cantidad_disponible ELSE 0 END) as deuda
+               FROM productos p
+               JOIN lotes_stock l ON l.producto_id = p.id
+               WHERE p.activo = 1
+               GROUP BY p.id
+               HAVING stock_total < 0
+               ORDER BY stock_total ASC, p.nombre ASC"""
+        )
+        return {"productos": [dict(r) for r in cursor.fetchall()]}
+    finally:
+        conexion.close()
+
+
+@router.get("/inventario/buscar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def buscar_producto_inventario(q: str = Query("", min_length=0)):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        busqueda = (q or "").strip()
+        if not busqueda:
+            return {"productos": []}
+
+        select_sql = """
+            SELECT p.id, p.nombre, p.codigo_barras, p.unidad_medida,
+                   COALESCE((SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id), 0) as stock_total
+            FROM productos p
+            WHERE p.activo = 1
+        """
+        if busqueda.isdigit():
+            cursor.execute(select_sql + " AND (p.id = ? OR p.codigo_barras = ?) LIMIT 20", (int(busqueda), busqueda))
+            exactos = [dict(r) for r in cursor.fetchall()]
+            if exactos:
+                return {"productos": exactos}
+
+        condiciones = []
+        parametros = []
+        for palabra in busqueda.split():
+            condiciones.append("(p.nombre LIKE ? OR p.codigo_barras LIKE ?)")
+            parametros.extend([f"%{palabra}%", f"%{palabra}%"])
+        cursor.execute(
+            select_sql + " AND " + " AND ".join(condiciones) + " LIMIT 20",
+            tuple(parametros),
+        )
+        return {"productos": [dict(r) for r in cursor.fetchall()]}
+    finally:
+        conexion.close()
+
+
+@router.get("/inventario/historial", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def historial_conteos(limit: int = Query(40, ge=1, le=200)):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute(
+            """SELECT c.id, c.fecha_hora, c.producto_id, p.nombre, p.codigo_barras,
+                      c.stock_sistema, c.cantidad_contada, c.diferencia, c.tipo,
+                      c.observaciones, c.costo_perdido, u.nombre_completo as usuario
+               FROM conteos_inventario c
+               JOIN productos p ON p.id = c.producto_id
+               LEFT JOIN usuarios u ON u.id = c.usuario_id
+               ORDER BY c.id DESC
+               LIMIT ?""",
+            (limit,),
+        )
+        return {"movimientos": [dict(r) for r in cursor.fetchall()]}
+    finally:
+        conexion.close()
+
+
+@router.post("/inventario/ajustar")
+def ajustar_inventario(datos: AjusteInventario, payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
+    tipo = (datos.tipo or "").strip().upper()
+    if tipo not in TIPOS_AJUSTE:
+        return {"error": "Tipo de ajuste inválido."}
+
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute("SELECT id, nombre FROM productos WHERE id = ? AND activo = 1", (datos.producto_id,))
+        prod = cursor.fetchone()
+        if not prod:
+            return {"error": "Ese producto no existe o está inactivo."}
+
+        stock_antes = _stock_neto(cursor, datos.producto_id)
+        usuario_id = _usuario_id(payload)
+        fecha = _ahora_ar()
+        costo_fb = _costo_maestro(cursor, datos.producto_id)
+        costo_perdido = 0.0
+
+        if tipo == "NEGATIVO_CERO":
+            if stock_antes >= 0:
+                return {"error": "Ese producto no está en negativo."}
+            _perdonar_negativos(cursor, datos.producto_id, usuario_id, fecha, "Regularización: borrar deuda VENTA_SIN_STOCK")
+            stock_despues = _stock_neto(cursor, datos.producto_id)
+            _registrar_conteo(
+                cursor, datos.producto_id, stock_antes, stock_despues, tipo,
+                usuario_id, fecha, datos.observaciones, 0.0,
+            )
+            conexion.commit()
+            return {
+                "mensaje": "Deuda de stock borrada.",
+                "producto_id": datos.producto_id,
+                "nombre": prod["nombre"],
+                "stock_anterior": stock_antes,
+                "stock_nuevo": stock_despues,
+                "diferencia": round(stock_despues - stock_antes, 4),
+                "costo_perdido": 0.0,
+                "aviso_factura": True,
+            }
+
+        if datos.cantidad_contada is None:
+            return {"error": "Indicá cuánto hay en físico."}
+        target = float(datos.cantidad_contada)
+        if target < 0:
+            return {"error": "El físico no puede ser negativo."}
+
+        if abs(stock_antes - target) < 0.0001:
+            _registrar_conteo(
+                cursor, datos.producto_id, stock_antes, target, tipo,
+                usuario_id, fecha, datos.observaciones or "Sin diferencia", 0.0,
+            )
+            conexion.commit()
+            return {
+                "mensaje": "El sistema ya coincidía con el físico.",
+                "producto_id": datos.producto_id,
+                "nombre": prod["nombre"],
+                "stock_anterior": stock_antes,
+                "stock_nuevo": stock_antes,
+                "diferencia": 0.0,
+                "costo_perdido": 0.0,
+                "aviso_factura": False,
+            }
+
+        motivo = "Conteo cíclico" if tipo == "CONTEO" else "Regularización de negativo (físico)"
+        _perdonar_negativos(cursor, datos.producto_id, usuario_id, fecha, motivo)
+        neto_tras_perdon = _stock_neto(cursor, datos.producto_id)
+
+        if neto_tras_perdon < target:
+            _alta_ajuste(
+                cursor, datos.producto_id, target - neto_tras_perdon, costo_fb,
+                usuario_id, fecha, motivo,
+            )
+        elif neto_tras_perdon > target:
+            costo_perdido = _comer_positivos(
+                cursor, datos.producto_id, neto_tras_perdon - target,
+                usuario_id, fecha, motivo, costo_fb,
+            )
+
+        stock_despues = _stock_neto(cursor, datos.producto_id)
+        _registrar_conteo(
+            cursor, datos.producto_id, stock_antes, target, tipo,
+            usuario_id, fecha, datos.observaciones, costo_perdido,
+        )
+        conexion.commit()
+        return {
+            "mensaje": "Stock emparejado al físico.",
+            "producto_id": datos.producto_id,
+            "nombre": prod["nombre"],
+            "stock_anterior": stock_antes,
+            "stock_nuevo": stock_despues,
+            "diferencia": round(stock_despues - stock_antes, 4),
+            "costo_perdido": costo_perdido,
+            "aviso_factura": stock_antes < 0,
+        }
+    except Exception as e:
+        if conexion:
+            conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        if conexion:
+            conexion.close()

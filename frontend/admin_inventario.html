@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP Admin - Inventario y Conteo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/estilos.css?v=1.0.34">
+    <style>
+        .inv-stock-neg { font-size: 1.15rem; }
+        .inv-fisico { max-width: 110px; }
+        @media (max-width: 767.98px) {
+            .inv-acciones { display: flex; flex-direction: column; gap: 0.4rem; }
+            .inv-fisico { max-width: none; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container" style="display: flex; width: 100%; height: 100%;">
+        <div id="layout-sidebar-placeholder"></div>
+        <div class="main-wrapper">
+            <div id="layout-navbar-placeholder"></div>
+            <div class="content-area">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
+                    <div>
+                        <h3 class="fw-bold mb-1"><i class="bi bi-clipboard-check text-primary"></i> Inventario</h3>
+                        <p class="text-muted small mb-0">Empareja el libro con el piso. No toca precios ni el catálogo. Factura vieja después de ajustar = duplicás stock.</p>
+                    </div>
+                </div>
+
+                <div class="p-3 p-md-4 bg-white border rounded shadow-sm">
+                    <ul class="nav nav-tabs mb-3" id="inventarioTabs">
+                        <li class="nav-item">
+                            <button type="button" class="nav-link active fw-bold" id="btn-tab-negativos" onclick="cambiarPestanaInventario('negativos')">
+                                <i class="bi bi-dash-circle"></i> Negativos
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button type="button" class="nav-link fw-bold" id="btn-tab-conteo" onclick="cambiarPestanaInventario('conteo')">
+                                <i class="bi bi-upc-scan"></i> Conteo
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div id="tab-negativos">
+                        <div class="alert alert-warning small mb-3">
+                            Son ventas sin lote (<code>VENTA_SIN_STOCK</code>). <b>Pasar a 0</b> borra esa deuda. Si hay mercadería en el piso, cargá el físico. No hay botón de “poner todos en 0”.
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="small text-muted" id="negativosResumen">Cargando…</span>
+                            <button type="button" class="btn btn-outline-secondary btn-sm fw-bold" onclick="cargarNegativos()">
+                                <i class="bi bi-arrow-clockwise"></i> Actualizar
+                            </button>
+                        </div>
+                        <div class="table-responsive border rounded">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Producto</th>
+                                        <th class="text-end">Sistema</th>
+                                        <th class="text-center" style="min-width: 280px;">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tablaNegativosBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="tab-conteo" class="d-none">
+                        <div class="alert alert-info small mb-3">
+                            Escaneá o buscá <b>un</b> SKU, contá y confirmá. El resto del catálogo no se toca. Si da de menos, es merma de conteo (pega en ganancia). Si da de más, entra un lote de ajuste.
+                        </div>
+                        <div class="input-group input-group-lg shadow-sm mb-3">
+                            <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
+                            <input type="text" id="inputBuscarConteo" class="form-control" placeholder="Código de barras o nombre…" autocomplete="off">
+                            <button type="button" class="btn btn-primary fw-bold" onclick="buscarParaConteo()">Buscar</button>
+                        </div>
+                        <div id="resultadosConteo" class="mb-3"></div>
+                        <div id="fichaConteo" class="d-none border rounded p-3 mb-4 bg-light"></div>
+                        <h6 class="fw-bold text-secondary"><i class="bi bi-clock-history"></i> Últimos ajustes</h6>
+                        <div class="table-responsive border rounded">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Cuando</th>
+                                        <th>Producto</th>
+                                        <th>Tipo</th>
+                                        <th class="text-end">Antes</th>
+                                        <th class="text-end">Contado</th>
+                                        <th class="text-end">Dif.</th>
+                                        <th>Quién</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tablaHistorialConteo"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="js/layout.js?v=1.0.47"></script>
+    <script src="js/app_inventario.js?v=1.0.1"></script>
+</body>
+</html>

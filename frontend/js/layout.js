@@ -78,6 +78,7 @@ function inyectarLayout() {
                 ${esAdmin ? `<a href="admin_dashboard.html" class="menu-item"><i class="bi bi-speedometer2"></i> Dashboard</a>` : ''}
                 <a href="pos.html" class="menu-item"><i class="bi bi-display"></i> Abrir POS (Caja)</a>
                 <a href="admin_productos.html" class="menu-item"><i class="bi bi-box-seam"></i> Productos & Stock</a>
+                <a href="admin_inventario.html" class="menu-item"><i class="bi bi-clipboard-check"></i> Inventario</a>
                 <a href="admin_carteleria.html" class="menu-item"><i class="bi bi-megaphone"></i> Cartelería</a>
                 <a href="admin_mayorista.html" class="menu-item"><i class="bi bi-truck"></i> Venta Depósito</a>
                 
