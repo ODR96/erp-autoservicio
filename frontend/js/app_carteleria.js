@@ -109,14 +109,15 @@ function htmlPrecioAntesAhora(precioAhora, precioAntes, opts) {
     const ahora = fmtPrecioCartel(precioAhora);
     const antesN = Number(precioAntes);
     const ahoraN = Number(precioAhora);
-    if (!Number.isFinite(antesN) || antesN <= 0 || Math.abs(antesN - ahoraN) < 0.01) {
-        return `$${ahora}`;
-    }
     const tamAntes = (opts && opts.antes) || '12px';
-    const tamAhora = (opts && opts.ahora) || 'inherit';
-    const colorAhora = (opts && opts.colorAhora) || 'inherit';
+    const tamAhora = (opts && opts.ahora) || '32px';
+    const colorAhora = (opts && opts.colorAhora) || '#000';
+    const bloqueAhora = `<div style="font-size:${tamAhora}; font-weight:900; color:${colorAhora}; line-height:1;">$${ahora}</div>`;
+    if (!Number.isFinite(antesN) || antesN <= 0 || Math.abs(antesN - ahoraN) < 0.01) {
+        return bloqueAhora;
+    }
     return `<div style="text-decoration:line-through; color:#888; font-size:${tamAntes}; font-weight:600; line-height:1;">$${fmtPrecioCartel(antesN)}</div>
-            <div style="font-size:${tamAhora}; font-weight:900; color:${colorAhora}; line-height:1;">$${ahora}</div>`;
+            ${bloqueAhora}`;
 }
 
 // ESCUDO DEL BUSCADOR

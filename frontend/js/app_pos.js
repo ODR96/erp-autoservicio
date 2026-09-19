@@ -1940,31 +1940,39 @@ async function registrarMovimientoCaja(tipo) {
 
     let esSangria = false;
     if (tipo === 'retiro') {
+        let tipoRetiro = null;
         const eleccion = await Swal.fire({
             title: '<span style="color:#fff; font-weight:bold;">¿Qué tipo de retiro es?</span>',
-            html: `<p style="color:#94a3b8; font-size: 0.9rem; text-align:left; width:90%; margin:0 auto;">
-                     <b>Gasto del local</b> (luz, limpia, plomero): pega a la rentabilidad.<br>
-                     <b>Pago a proveedor</b>: sale del cajón, baja deuda, <u>no</u> es gasto.<br>
-                     <b>Sangría</b>: la plata sigue siendo tuya (caja fuerte / cambio).
-                   </p>`,
-            icon: 'question',
+            html: `<div class="d-grid gap-2" style="width:92%; margin:12px auto 0 auto;">
+                     <button type="button" class="btn btn-lg fw-bold" id="ret-gasto"
+                        style="background:#1e3a5f; color:#fff; border:1px solid #38bdf8; padding:14px 16px;">
+                        Gasto del local
+                     </button>
+                     <button type="button" class="btn btn-lg fw-bold" id="ret-proveedor"
+                        style="background:#1e3a5f; color:#fff; border:1px solid #f59e0b; padding:14px 16px;">
+                        Pago a proveedor
+                     </button>
+                     <button type="button" class="btn btn-lg fw-bold" id="ret-sangria"
+                        style="background:#1e3a5f; color:#fff; border:1px solid #22c55e; padding:14px 16px;">
+                        Sangría / tesorería
+                     </button>
+                   </div>`,
             background: '#111C2A',
             color: '#fff',
-            input: 'radio',
-            inputOptions: {
-                gasto: 'Gasto del local',
-                proveedor: 'Pago a proveedor',
-                sangria: 'Sangría / tesorería'
-            },
-            inputValue: 'gasto',
+            showConfirmButton: false,
             showCancelButton: true,
-            confirmButtonText: 'Continuar',
             cancelButtonText: 'Cancelar',
-            confirmButtonColor: '#38bdf8',
-            cancelButtonColor: '#475569'
+            cancelButtonColor: '#475569',
+            didOpen: () => {
+                const pick = (valor) => { tipoRetiro = valor; Swal.clickConfirm(); };
+                document.getElementById('ret-gasto').onclick = () => pick('gasto');
+                document.getElementById('ret-proveedor').onclick = () => pick('proveedor');
+                document.getElementById('ret-sangria').onclick = () => pick('sangria');
+            },
+            preConfirm: () => tipoRetiro
         });
 
-        if (!eleccion.isConfirmed) {
+        if (!eleccion.isConfirmed || !eleccion.value) {
             inputScan.focus();
             return;
         }
@@ -1990,8 +1998,9 @@ async function registrarMovimientoCaja(tipo) {
             Swal.close();
             
             if(dataCat.categorias) {
-                opcionesCategoria = '<select id="swal-categoria" class="form-select form-select-lg mb-3" style="background-color: #070B14; border: 1px solid #1F304A; color: white; width: 80%; margin: 0 auto; border-radius: 8px;">';
-                opcionesCategoria += '<option value="" disabled selected>-- Elegí una Categoría --</option>';
+                opcionesCategoria = '<label class="d-block text-start fw-bold small mb-1" style="width:80%; margin:0 auto; color:#cbd5e1;">Categoría de gasto</label>';
+                opcionesCategoria += '<select id="swal-categoria" class="form-select form-select-lg mb-3" style="background-color: #fff; border: 1px solid #94a3b8; color: #0f172a; width: 80%; margin: 0 auto; border-radius: 8px;">';
+                opcionesCategoria += '<option value="" disabled selected>-- Elegí una categoría --</option>';
                 dataCat.categorias.forEach(c => {
                     const tipoCat = (c.tipo_categoria || 'OPERATIVO').toUpperCase();
                     const nombre = (c.nombre || '').toLowerCase();
