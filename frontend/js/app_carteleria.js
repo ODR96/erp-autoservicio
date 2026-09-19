@@ -28,8 +28,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         const res = await fetch(`${obtenerBaseUrl()}/productos/sincronizar_catalogo`, { headers: { 'Authorization': `Bearer ${token}` } });
         const data = await res.json();
         catalogoLocal = data.productos || [];
+        await refrescarConfigCarteleria();
         await cargarCategoriasCarteleria();
         await cargarColaDesdeDB();
+        const inpPalabra = document.getElementById('palabraMasivoCarteleria');
+        if (inpPalabra) {
+            inpPalabra.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    encolarMasivoCarteleria();
+                }
+            });
+        }
     } catch (e) { console.error("Error cargando catálogo", e); }
 });
 
@@ -73,20 +83,40 @@ async function cargarColaDesdeDB() {
     } catch (e) { console.error("Error cargando cola DB", e); }
 }
 
-function guardarLogoLocal(event) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        localStorage.setItem('logo_empresa_b64', e.target.result);
-        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Logo guardado', showConfirmButton: false, timer: 2000 });
-        actualizarPreview();
-    };
-    reader.readAsDataURL(event.target.files[0]);
+async function refrescarConfigCarteleria() {
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/config/leer`);
+        if (res.ok) {
+            const cfg = await res.json();
+            localStorage.setItem('config_negocio', JSON.stringify(cfg));
+        }
+    } catch (e) { /* usa lo que haya en localStorage */ }
+    const caja = document.getElementById('carteleriaMembrete');
+    if (caja) caja.textContent = `Membrete: ${nombreNegocio()}`;
 }
 
-function borrarLogoLocal() {
-    localStorage.removeItem('logo_empresa_b64');
-    Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Logo eliminado', showConfirmButton: false, timer: 2000 });
-    actualizarPreview();
+function htmlTxtCartel(texto) {
+    return String(texto ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+function fmtPrecioCartel(n) {
+    return Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function htmlPrecioAntesAhora(precioAhora, precioAntes, opts) {
+    const ahora = fmtPrecioCartel(precioAhora);
+    const antesN = Number(precioAntes);
+    const ahoraN = Number(precioAhora);
+    if (!Number.isFinite(antesN) || antesN <= 0 || Math.abs(antesN - ahoraN) < 0.01) {
+        return `$${ahora}`;
+    }
+    const tamAntes = (opts && opts.antes) || '12px';
+    const tamAhora = (opts && opts.ahora) || 'inherit';
+    const colorAhora = (opts && opts.colorAhora) || 'inherit';
+    return `<div style="text-decoration:line-through; color:#888; font-size:${tamAntes}; font-weight:600; line-height:1;">$${fmtPrecioCartel(antesN)}</div>
+            <div style="font-size:${tamAhora}; font-weight:900; color:${colorAhora}; line-height:1;">$${ahora}</div>`;
 }
 
 // ESCUDO DEL BUSCADOR
@@ -147,7 +177,9 @@ function actualizarPreview() {
     const formato = document.getElementById('selectFormato').value;
     const esLibre = document.getElementById('switchModoLibre').checked;
     const textoExtra = document.getElementById('inputTextoExtra').value.toUpperCase();
-    const logo = localStorage.getItem('logo_empresa_b64');
+    const logo = urlLogoNegocio();
+    const local = nombreNegocio();
+    const precioAntes = parseFloat(document.getElementById('inputPrecioFalso').value) || null;
 
     let nombre = "SELECCIONE PRODUCTO"; let precio = "0.00"; let esMayorista = false; let precioMayo = 0; let cantMayo = 0; let txtBulto = ""; let uxb = 1;
 
@@ -171,7 +203,7 @@ function actualizarPreview() {
         }
     }
 
-    let pF = parseFloat(precio).toLocaleString('es-AR', {minimumFractionDigits: 2});
+    const bloquePrecio = htmlPrecioAntesAhora(precio, precioAntes, { antes: '7px', ahora: '16px' });
     let html = "";
 
     // LÓGICA DE UXB PARA VISTA PREVIA (Solo visible en Cenefa Doble)
@@ -179,11 +211,11 @@ function actualizarPreview() {
     let htmlUxB_preview = (uxb > 1 && formato === "Cenefa_Doble") ? `<div style="background:white; color:${colorInstitucional}; font-size:6px; font-weight:bold; padding:1px 4px; border-radius:3px; margin-top:2px;">UxB: ${uxb} | Caja: $${previewPrecioBulto.toLocaleString('es-AR', {minimumFractionDigits:2})}</div>` : '';
 
     if (formato === "Cenefa_Normal") {
-        html = `<div style="width: 150px; height: 60px; border: 1px solid #ccc; background: white; display:flex; flex-direction:column; align-items:center; position:relative;">
-                    <div style="background:${colorInstitucional}; width:100%; color:white; font-size:5px; text-align:center; padding:1px 0;">AUTOSERVICIO 20 DE JUNIO</div>
-                    ${textoExtra ? `<div style="background:#dc3545; color:white; font-size:6px; padding:2px 5px; border-radius:3px; margin-top:2px;">${textoExtra}</div>` : ''}
-                    <div style="font-size: 8px; font-weight:bold; margin-top:auto; text-align:center; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${nombre}</div>
-                    <div style="font-size: 16px; font-weight:900; margin-top:auto; padding-bottom:2px;">$${pF}</div>
+        html = `<div style="width: 150px; height: 70px; border: 1px solid #ccc; background: white; display:flex; flex-direction:column; align-items:center; position:relative;">
+                    <div style="background:${colorInstitucional}; width:100%; color:white; font-size:5px; text-align:center; padding:1px 0;">${htmlTxtCartel(local.toUpperCase())}</div>
+                    ${textoExtra ? `<div style="background:#dc3545; color:white; font-size:6px; padding:2px 5px; border-radius:3px; margin-top:2px;">${htmlTxtCartel(textoExtra)}</div>` : ''}
+                    <div style="font-size: 8px; font-weight:bold; margin-top:auto; text-align:center; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${htmlTxtCartel(nombre)}</div>
+                    <div style="margin-top:auto; padding-bottom:2px; text-align:center;">${bloquePrecio}</div>
                 </div>`;
     } else if (formato === "Cenefa_Doble") {
         let mitadDerecha = esMayorista 
@@ -194,23 +226,26 @@ function actualizarPreview() {
                 ${htmlUxB_preview}
                </div>` 
             : `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-                <span style="font-size:16px; font-weight:bold;">$${pF}</span>
+                <span style="font-size:16px; font-weight:bold;">$${fmtPrecioCartel(precio)}</span>
                 ${htmlUxB_preview}
                </div>`;
             
         html = `<div style="width: 250px; height: 60px; border: 1px solid #333; display:flex; background:white;">
                     <div style="width:50%; padding:5px; text-align:center; display:flex; flex-direction:column; justify-content:center;">
                         ${textoExtra ? `<div style="font-size:6px; color:#dc3545; font-weight:bold;">${textoExtra}</div>` : '<div style="font-size:6px; color:#666; font-weight:bold;">PRECIO NORMAL</div>'}
-                        <div style="font-size:8px; font-weight:bold;">${nombre}</div>
-                        <div style="font-size:12px; font-weight:bold;">$${pF}</div>
+                        <div style="font-size:8px; font-weight:bold;">${htmlTxtCartel(nombre)}</div>
+                        <div style="font-size:12px; font-weight:bold; text-align:center;">${htmlPrecioAntesAhora(precio, precioAntes, { antes: '6px', ahora: '12px' })}</div>
                     </div>
                     ${mitadDerecha}
                 </div>`;
     } else if (formato === "Cartel_A4") {
-        html = `<div style="width: 100px; height: 140px; border: 3px solid ${colorInstitucional}; border-radius:8px; background:white; display:flex; flex-direction:column; align-items:center; padding:10px;">
-                    ${logo ? `<img src="${logo}" style="max-height:20px; margin-bottom:5px;">` : `<div style="font-size:8px; font-weight:bold; color:${colorInstitucional};">Autoservicio</div>`}
-                    <div style="font-size:8px; font-weight:bold; text-align:center; margin-top:10px;">${nombre}</div>
-                    <div style="font-size:18px; font-weight:900; color:#198754; margin-top:auto;">$${pF}</div>
+        const cabecera = logo
+            ? `<img src="${logo}" style="max-height:36px; max-width:90%; object-fit:contain; margin-bottom:6px;">`
+            : `<div style="font-size:9px; font-weight:bold; color:${colorInstitucional}; text-align:center;">${htmlTxtCartel(local)}</div>`;
+        html = `<div style="width: 170px; height: 240px; border: 3px solid ${colorInstitucional}; border-radius:8px; background:white; display:flex; flex-direction:column; align-items:center; padding:10px;">
+                    ${cabecera}
+                    <div style="font-size:11px; font-weight:bold; text-align:center; margin-top:8px;">${htmlTxtCartel(nombre)}</div>
+                    <div style="margin-top:auto; text-align:center; color:#198754;">${htmlPrecioAntesAhora(precio, precioAntes, { antes: '11px', ahora: '22px', colorAhora: '#198754' })}</div>
                 </div>`;
     }
     preview.innerHTML = html;
@@ -258,6 +293,36 @@ async function agregarACola() {
         }
     }
 
+    if (!esLibre && productoSeleccionado) {
+        try {
+            const tipoDb = formato.startsWith('Cenefa') ? 'Cenefa' : 'Cartel_A4';
+            const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    producto_id: productoSeleccionado.id,
+                    tipo_cartel: tipoDb,
+                    cantidad_copias: copias || 1,
+                    texto_personalizado: textoExtra || '',
+                    plantilla: 'Clasica',
+                    color_tema: '#1a365d'
+                })
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            await cargarColaDesdeDB();
+            if (pf) {
+                const ultimo = [...colaImpresion].reverse().find((c) => c.producto_id === productoSeleccionado.id && !c.esLibre);
+                if (ultimo) ultimo.precio_falso = pf;
+                dibujarCola();
+            }
+            Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Agregado a la cola', showConfirmButton: false, timer: 1000 });
+            return;
+        } catch (e) {
+            return Swal.fire('Error', e.message || 'No se pudo guardar en la cola.', 'error');
+        }
+    }
+
     colaImpresion.push(item); dibujarCola();
     Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Agregado a la cola', showConfirmButton: false, timer: 1000 });
 }
@@ -294,14 +359,14 @@ function dibujarCola() {
         let badge = c.formato.includes("Normal") ? "bg-secondary" : (c.formato.includes("Doble") ? "bg-primary" : "bg-success");
         let txtDB = c.id_db ? '<i class="bi bi-robot text-primary" title="Automático"></i>' : '';
         let fotito = c.fotoManual ? '<i class="bi bi-image text-info ms-1"></i>' : '';
-        let pMostrar = c.precio_falso ? c.precio_falso : c.precio;
-        let badgeFalso = c.precio_falso ? '<span class="badge bg-warning text-dark ms-2"><i class="bi bi-pencil"></i> Pisado</span>' : '';
-        
-        // EL ARREGLO: Limpiamos la "F" suelta y arreglamos el HTML roto de las columnas
+        const badgeFalso = c.precio_falso
+            ? `<div class="small text-muted text-decoration-line-through">$${fmtPrecioCartel(c.precio_falso)}</div>`
+            : '';
+
         tbody.innerHTML += `
         <tr>
-            <td class="text-start ps-3 fw-bold">${txtDB} ${c.nombre} ${fotito}</td>
-            <td class="text-success fw-bold">$${parseFloat(pMostrar).toFixed(2)} ${badgeFalso}</td>
+            <td class="text-start ps-3 fw-bold">${txtDB} ${htmlTxtCartel(c.nombre)} ${fotito}</td>
+            <td class="text-success fw-bold">${badgeFalso}$${fmtPrecioCartel(c.precio)}</td>
             <td><span class="badge ${badge}">${c.formato.replace('_', ' ')}</span></td>
             <td class="fw-bold">${c.copias}</td>
             <td><button class="btn btn-sm text-danger border-0" onclick="borrarItemCola(${idx})"><i class="bi bi-trash"></i></button></td>
@@ -311,8 +376,9 @@ function dibujarCola() {
 
 function imprimirTodo(filtroSeleccionado) {
     if (colaImpresion.length === 0) return Swal.fire('Aviso', 'La cola está vacía.', 'warning');
-    const zona = document.getElementById('zonaImpresion'); 
-    const logo = localStorage.getItem('logo_empresa_b64');
+    const zona = document.getElementById('zonaImpresion');
+    const logo = urlLogoNegocio();
+    const local = nombreNegocio();
 
     // FILTRADO INTELIGENTE (Ahora sí recibe el parámetro del botón)
     let listaAImprimir = colaImpresion;
@@ -340,8 +406,11 @@ function imprimirTodo(filtroSeleccionado) {
     `;
 
     listaAImprimir.forEach((item, idx) => {
-        let pF = parseFloat(item.precio).toLocaleString('es-AR', {minimumFractionDigits: 2});
-        let txExtra = item.textoExtra ? `<div class="bg-print" style="background:#dc3545; color:white; font-size:10px; font-weight:bold; text-align:center; text-transform:uppercase; padding:2px 5px; border-radius:3px; margin-bottom:2px;">${item.textoExtra}</div>` : '';
+        const pF = fmtPrecioCartel(item.precio);
+        const bloquePrecioCenefa = htmlPrecioAntesAhora(item.precio, item.precio_falso, { antes: '11px', ahora: '32px' });
+        const bloquePrecioDoble = htmlPrecioAntesAhora(item.precio, item.precio_falso, { antes: '12px', ahora: '28px' });
+        const bloquePrecioA4 = htmlPrecioAntesAhora(item.precio, item.precio_falso, { antes: '28px', ahora: 'inherit', colorAhora: '#198754' });
+        let txExtra = item.textoExtra ? `<div class="bg-print" style="background:#dc3545; color:white; font-size:10px; font-weight:bold; text-align:center; text-transform:uppercase; padding:2px 5px; border-radius:3px; margin-bottom:2px;">${htmlTxtCartel(item.textoExtra)}</div>` : '';
         
         let uxb = item.uxb || 1;
         let precioBultoNum = item.cantMayo ? (item.precioMayo * uxb) : (item.precio * uxb);
@@ -353,11 +422,11 @@ function imprimirTodo(filtroSeleccionado) {
             if (item.formato === "Cenefa_Normal") {
                 html += `
                     <div class="cartel cenefa" style="width: 100mm; height: 40mm; border: 1px solid #ddd; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;">
-                        <div class="bg-print" style="width: 100%; background: ${colorInstitucional}; color: white; font-size: 8px; font-weight: bold; text-align: center; text-transform: uppercase; padding: 1.5mm 0; letter-spacing: 1px;">Autoservicio 20 de Junio</div>
+                        <div class="bg-print" style="width: 100%; background: ${colorInstitucional}; color: white; font-size: 8px; font-weight: bold; text-align: center; text-transform: uppercase; padding: 1.5mm 0; letter-spacing: 1px;">${htmlTxtCartel(local)}</div>
                         <div style="padding: 1mm 2mm; width: 100%; display: flex; flex-direction: column; align-items: center; height: 100%;">
                             ${txExtra}
-                            <div class="truncate-lines" style="font-size: 11px; font-weight: bold; text-align: center; color: #333; line-height:1.1; margin-top:1mm; min-height: 8mm;">${item.nombre}</div>
-                            <div style="font-size: 32px; font-weight: 900; line-height: 1; margin-top:auto; color: #000; padding-bottom:1mm;">$${pF}</div>
+                            <div class="truncate-lines" style="font-size: 11px; font-weight: bold; text-align: center; color: #333; line-height:1.1; margin-top:1mm; min-height: 8mm;">${htmlTxtCartel(item.nombre)}</div>
+                            <div style="margin-top:auto; color: #000; padding-bottom:1mm; text-align:center;">${bloquePrecioCenefa}</div>
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:9mm; width:65mm; margin:0; margin-top:auto;"></svg>` : ''}
                         </div>
                     </div>
@@ -381,8 +450,8 @@ function imprimirTodo(filtroSeleccionado) {
                         <div style="width: 50%; padding: 2mm; display:flex; flex-direction:column; justify-content:center; align-items:center; border-right: 2px dashed #999; background: white;">
                             ${txExtra}
                             <div style="font-size: 10px; text-transform:uppercase; color: #666; font-weight:bold; background: #f0f0f0; padding: 2px 8px; border-radius: 4px; margin-bottom: 2mm;">PRECIO NORMAL</div>
-                            <div class="truncate-lines" style="font-size: 14px; font-weight: bold; text-align: center; line-height:1.1; color:#333; margin-bottom: 1mm;">${item.nombre}</div>
-                            <div style="font-size: 28px; font-weight: bold; color: #000; margin-bottom: 1mm;">$${pF}</div>
+                            <div class="truncate-lines" style="font-size: 14px; font-weight: bold; text-align: center; line-height:1.1; color:#333; margin-bottom: 1mm;">${htmlTxtCartel(item.nombre)}</div>
+                            <div style="color: #000; margin-bottom: 1mm; text-align:center;">${bloquePrecioDoble}</div>
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:7mm; width:45mm; margin:0;"></svg>` : ''}
                         </div>
                         ${mitadDer}
@@ -390,9 +459,9 @@ function imprimirTodo(filtroSeleccionado) {
                 `;
             }
             else if (item.formato === "Cartel_A4") {
-                let logoHTML = logo 
-                    ? `<img src="${logo}" style="max-height: 40mm; object-fit: contain;">` 
-                    : `<div style="font-size:30px; font-weight:900; color:${colorInstitucional}; text-transform:uppercase; letter-spacing: 2px;">Autoservicio 20 de Junio</div>`;
+                let logoHTML = logo
+                    ? `<img src="${logo}" style="max-height: 40mm; object-fit: contain;">`
+                    : `<div style="font-size:30px; font-weight:900; color:${colorInstitucional}; text-transform:uppercase; letter-spacing: 2px;">${htmlTxtCartel(local)}</div>`;
 
                 // LA LÓGICA DINÁMICA PARA RELLENAR ESPACIO
                 let tieneFoto = (item.esLibre && item.fotoManual);
@@ -410,14 +479,14 @@ function imprimirTodo(filtroSeleccionado) {
                             ${logoHTML}
                         </div>
                         <div style="padding: 10mm; flex-grow: 1; display:flex; flex-direction:column; align-items:center; justify-content:${justificacion}; width:100%;">
-                            ${txExtra ? `<div class="bg-print" style="background:#3586dc; color:white; font-size:35px; font-weight:900; padding:5mm 20mm; border-radius:15px; margin-bottom:10mm; text-transform:uppercase; letter-spacing:2px; box-shadow: 5px 5px 0px rgba(0,0,0,0.2);">${item.textoExtra}</div>` : ''}
+                            ${txExtra ? `<div class="bg-print" style="background:#3586dc; color:white; font-size:35px; font-weight:900; padding:5mm 20mm; border-radius:15px; margin-bottom:10mm; text-transform:uppercase; letter-spacing:2px; box-shadow: 5px 5px 0px rgba(0,0,0,0.2);">${htmlTxtCartel(item.textoExtra)}</div>` : ''}
                             
                             ${imagenManualHTML}
                             
-                            <div style="font-size: ${fontSizeNombre}; font-weight: 900; color: #333; line-height: 1.1;">${item.nombre}</div>
+                            <div style="font-size: ${fontSizeNombre}; font-weight: 900; color: #333; line-height: 1.1;">${htmlTxtCartel(item.nombre)}</div>
                             ${bultoHTML}
                             
-                            <div style="font-size: ${fontSizePrecio}; font-weight: 900; color: #198754; line-height: 0.9; text-shadow: 4px 4px 0px rgba(0,0,0,0.1); margin-top: ${tieneFoto ? 'auto' : '0'};">$${pF}</div>
+                            <div style="font-size: ${fontSizePrecio}; font-weight: 900; color: #198754; line-height: 0.9; text-shadow: 4px 4px 0px rgba(0,0,0,0.1); margin-top: ${tieneFoto ? 'auto' : '0'}; text-align:center;">${bloquePrecioA4}</div>
                             
                             ${item.cantMayo ? `<div class="bg-print" style="margin-top:10mm; background:${colorInstitucional}; color:white; padding: 8mm; border-radius:15px; width:90%;"><div style="font-size:25px; font-weight:bold;">OFERTA MAYORISTA LLEVANDO ${item.cantMayo} UNIDADES</div><div style="font-size:60px; font-weight:900; margin-top:2mm;">$${item.precioMayo} c/u</div></div>` : ''}
                         </div>
@@ -430,14 +499,13 @@ function imprimirTodo(filtroSeleccionado) {
     zona.innerHTML = html;
     zona.classList.remove('d-none');
 
-    // Generamos los códigos de barras físicos en el DOM invisible
-    colaImpresion.forEach((item, idx) => {
+    listaAImprimir.forEach((item, idx) => {
         if ((item.formato === "Cenefa_Normal" || item.formato === "Cenefa_Doble") && item.codigo_barras) {
             for (let i = 0; i < item.copias; i++) {
-                try { 
-                    JsBarcode(`#bc-${idx}-${i}`, item.codigo_barras, { 
-                        format: "CODE128", width: 1.5, height: 30, displayValue: true, fontSize: 12, textMargin: 1, margin: 0 
-                    }); 
+                try {
+                    JsBarcode(`#bc-${idx}-${i}`, item.codigo_barras, {
+                        format: "CODE128", width: 1.5, height: 30, displayValue: true, fontSize: 12, textMargin: 1, margin: 0
+                    });
                 } catch (e) {}
             }
         }
@@ -464,7 +532,7 @@ function imprimirTodo(filtroSeleccionado) {
                 window.print(); 
                 zona.classList.add('d-none'); 
                 zona.innerHTML = ''; 
-                vaciarCola(); // Borra la cola de la base de datos tras imprimir
+                quitarImpresosDeCola(listaAImprimir);
             } else {
                 zona.classList.add('d-none'); 
                 zona.innerHTML = '';
@@ -473,41 +541,81 @@ function imprimirTodo(filtroSeleccionado) {
     }, 100);
 }
 
-async function encolarPorCategoria() {
-    const idCategoria = parseInt(document.getElementById('selectMasivoCarteleria').value);
+function payloadMasivoCarteleria() {
+    const idCategoria = parseInt(document.getElementById('selectMasivoCarteleria').value, 10);
+    const palabra = (document.getElementById('palabraMasivoCarteleria').value || '').trim();
     const formato = document.getElementById('formatoMasivoCarteleria').value;
+    const hayRubro = Number.isFinite(idCategoria) && idCategoria > 0;
+    return {
+        tipo_filtro: hayRubro ? 'categoria' : 'todos',
+        filtro_id: hayRubro ? idCategoria : 0,
+        tipo_cartel: formato,
+        plantilla: 'Clasica',
+        color_tema: '#000000',
+        palabra_clave: palabra
+    };
+}
 
-    if (!idCategoria || isNaN(idCategoria)) {
-        return Swal.fire('Aviso', 'Seleccioná un rubro primero.', 'warning');
+async function encolarMasivoCarteleria() {
+    const body = payloadMasivoCarteleria();
+    if (!body.palabra_clave && body.filtro_id <= 0) {
+        return Swal.fire('Aviso', 'Escribí una palabra (ej. yerba) o elegí un rubro.', 'warning');
     }
 
-    Swal.fire({ title: 'Generando etiquetas...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
     try {
+        const qs = new URLSearchParams({
+            tipo_filtro: body.tipo_filtro,
+            filtro_id: String(body.filtro_id),
+            palabra_clave: body.palabra_clave
+        });
+        const prevRes = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/previsualizar_masivo?${qs}`);
+        const prev = await prevRes.json();
+        if (prev.error) throw new Error(prev.error);
+        if (!prev.cantidad) {
+            return Swal.fire('Nada para encolar', 'No hay productos activos con ese filtro.', 'info');
+        }
+
+        const ejemplos = (prev.ejemplos || []).join(', ');
+        const extra = prev.cantidad > (prev.ejemplos || []).length ? '…' : '';
+        const ok = await Swal.fire({
+            title: `¿Encolar ${prev.cantidad} carteles?`,
+            html: `<div class="text-start small">${ejemplos}${extra}</div>`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Sí, a la cola',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#1b365d',
+            reverseButtons: true
+        });
+        if (!ok.isConfirmed) return;
+
+        Swal.fire({ title: 'Encolando…', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
         const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar_masivo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                tipo_filtro: 'categoria',
-                filtro_id: idCategoria,
-                tipo_cartel: formato,
-                plantilla: 'Clasica',
-                color_tema: '#000000'
-            })
+            body: JSON.stringify(body)
         });
-
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
-        Swal.fire('¡Encolado Masivo Exitoso!', data.mensaje, 'success');
-        
-        // Llamá a tu función que recarga la tablita visual de la cola
-        if (typeof cargarColaImpresion === 'function') {
-            cargarColaImpresion();
-        }
+        await cargarColaDesdeDB();
+        Swal.fire('Listo', data.mensaje, 'success');
     } catch (e) {
         Swal.fire('Error', e.message, 'error');
     }
+}
+
+async function quitarImpresosDeCola(impresos) {
+    const impresosSet = new Set(impresos);
+    colaImpresion = colaImpresion.filter((c) => !(c.esLibre && impresosSet.has(c)));
+    for (const item of impresos) {
+        if (item.id_db) {
+            try {
+                await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${item.id_db}`, { method: 'DELETE' });
+            } catch (e) { /* sigue con el resto */ }
+        }
+    }
+    await cargarColaDesdeDB();
 }
 
 async function cargarCategoriasCarteleria() {
@@ -518,7 +626,7 @@ async function cargarCategoriasCarteleria() {
         
         const select = document.getElementById('selectMasivoCarteleria');
         if (select) {
-            select.innerHTML = '<option value="">-- Seleccione un Rubro --</option>';
+            select.innerHTML = '<option value="">Todos los rubros</option>';
             (data.categorias || []).forEach(c => {
                 select.innerHTML += `<option value="${c.id}">${c.nombre}</option>`;
             });

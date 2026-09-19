@@ -1019,39 +1019,86 @@ def descargar_catalogo_offline():
         conexion.close()
         
 class EncoladoMasivo(BaseModel):
-    tipo_filtro: str # 'categoria', 'proveedor', 'todos'
-    filtro_id: int
+    tipo_filtro: str = "categoria"  # categoria | proveedor | todos
+    filtro_id: int = 0
     tipo_cartel: str = "Cenefa"
     plantilla: str = "Clasica"
     color_tema: str = "#000000"
+    palabra_clave: str = ""
+
+
+def _productos_para_cola(cursor, tipo_filtro: str, filtro_id: int, palabra_clave: str):
+    """Activos por rubro/proveedor y/o palabras (yerba, aceite). None = falta filtro."""
+    palabras = [p for p in (palabra_clave or "").split() if p]
+    usa_rubro = tipo_filtro == "categoria" and int(filtro_id or 0) > 0
+    usa_prov = tipo_filtro == "proveedor" and int(filtro_id or 0) > 0
+    if not palabras and not usa_rubro and not usa_prov:
+        return None
+
+    query = "SELECT id, nombre FROM productos WHERE activo = 1"
+    params = []
+    if usa_rubro:
+        query += " AND categoria_id = ?"
+        params.append(int(filtro_id))
+    elif usa_prov:
+        query += " AND proveedor_habitual_id = ?"
+        params.append(int(filtro_id))
+    for pal in palabras:
+        query += " AND (nombre LIKE ? OR IFNULL(codigo_barras, '') LIKE ?)"
+        like = f"%{pal}%"
+        params.extend([like, like])
+    query += " ORDER BY nombre ASC"
+    cursor.execute(query, tuple(params))
+    return cursor.fetchall()
+
+
+@router.get("/etiquetas/previsualizar_masivo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def previsualizar_encolado_masivo(
+    tipo_filtro: str = "categoria",
+    filtro_id: int = 0,
+    palabra_clave: str = "",
+):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        productos = _productos_para_cola(cursor, tipo_filtro, filtro_id, palabra_clave)
+        if productos is None:
+            return {"error": "Indicá un rubro o una palabra (ej. yerba)."}
+        nombres = [p[1] for p in productos]
+        return {
+            "cantidad": len(productos),
+            "ejemplos": nombres[:8],
+        }
+    finally:
+        conexion.close()
+
 
 @router.post("/etiquetas/encolar_masivo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def encolar_etiquetas_masivo(datos: EncoladoMasivo):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        query = "SELECT id FROM productos WHERE activo = 1"
-        params = []
-        if datos.tipo_filtro == 'categoria' and datos.filtro_id > 0:
-            query += " AND categoria_id = ?"
-            params.append(datos.filtro_id)
-        elif datos.tipo_filtro == 'proveedor' and datos.filtro_id > 0:
-            query += " AND proveedor_habitual_id = ?"
-            params.append(datos.filtro_id)
-        
-        cursor.execute(query, tuple(params))
-        productos = cursor.fetchall()
-        
+        productos = _productos_para_cola(cursor, datos.tipo_filtro, datos.filtro_id, datos.palabra_clave)
+        if productos is None:
+            return {"error": "Indicá un rubro o una palabra (ej. yerba)."}
+        if not productos:
+            return {"error": "No hay productos activos con ese filtro."}
+
         for p in productos:
-            cursor.execute('''
-                INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, plantilla, color_tema) 
+            cursor.execute(
+                '''
+                INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, plantilla, color_tema)
                 VALUES (?, ?, 1, 0, ?, ?)
-            ''', (p[0], datos.tipo_cartel, datos.plantilla, datos.color_tema))
-            
+                ''',
+                (p[0], datos.tipo_cartel, datos.plantilla, datos.color_tema),
+            )
+
         conexion.commit()
-        return {"mensaje": f"Se enviaron {len(productos)} productos a la cola de impresión."}
+        return {"mensaje": f"Se enviaron {len(productos)} productos a la cola de impresión.", "cantidad": len(productos)}
     except Exception as e:
-        if conexion: conexion.rollback()
+        if conexion:
+            conexion.rollback()
         return {"error": str(e)}
     finally:
-        if conexion: conexion.close()
+        if conexion:
+            conexion.close()

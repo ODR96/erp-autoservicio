@@ -27,6 +27,27 @@ function obtenerBaseUrl() {
     return `${protocolo}//${host}${extra}`;
 }
 
+function leerConfigNegocio() {
+    try {
+        return JSON.parse(localStorage.getItem('config_negocio') || '{}') || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function nombreNegocio() {
+    const n = String(leerConfigNegocio().nombre_negocio || '').trim();
+    return n || 'ERPetto';
+}
+
+function urlLogoNegocio() {
+    const ruta = leerConfigNegocio().ruta_logo || '';
+    if (!ruta) return '';
+    const s = String(ruta);
+    if (s.startsWith('data:image') || s.startsWith('http://') || s.startsWith('https://')) return s;
+    return `${obtenerBaseUrl()}/static/logos/${s}`;
+}
+
 // ========================================================
 // VERIFICACIÓN VISUAL DE PERMISOS (Protección UX)
 // ========================================================
@@ -62,8 +83,7 @@ function inyectarLayout() {
     const rol = localStorage.getItem('usuario_rol') || 'ADMIN';
     const esAdmin = rol === 'ADMIN';
 
-    const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: "Autoservicio 20 de Junio" };
-    const nombreLocal = config.nombre_negocio;
+    const nombreLocal = nombreNegocio();
 
     // Se agrega flexbox (d-flex flex-column) para mandar el footer al fondo
     const sidebarHTML = `

@@ -19,44 +19,38 @@
             <div id="layout-navbar-placeholder"></div>
 
             <div class="content-area d-print-none">
-                <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
                     <h3 class="fw-bold mb-0" style="color: #1b365d;"><i class="bi bi-megaphone"></i> Marketing y
                         Cartelería</h3>
-                    <div>
-                        <input type="file" id="inputLogo" class="d-none" accept="image/*"
-                            onchange="guardarLogoLocal(event)">
-                        <button class="btn btn-outline-secondary fw-bold shadow-sm"
-                            onclick="document.getElementById('inputLogo').click()">
-                            <i class="bi bi-image"></i> Logo
-                        </button>
-                        <button class="btn btn-outline-danger fw-bold shadow-sm ms-1" onclick="borrarLogoLocal()"
-                            title="Borrar Logo">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                    </div>
+                    <div class="small text-muted" id="carteleriaMembrete">Membrete: Configuración</div>
                 </div>
                 <!-- NUEVA BARRA SUPERIOR: ENCOLADO MASIVO -->
                 <div class="card border-primary mb-3 shadow-sm">
                     <div class="card-header bg-primary text-white fw-bold py-2">
-                        <i class="bi bi-collection"></i> Agregar Rubro Completo a la Cola
+                        <i class="bi bi-collection"></i> Encolar varios (rubro y/o palabra)
                     </div>
                     <div class="card-body py-2">
                         <div class="row g-2 align-items-center">
-                            <div class="col-md-5">
-                                <select id="selectMasivoCarteleria" class="form-select border-primary"></select>
+                            <div class="col-md-3">
+                                <select id="selectMasivoCarteleria" class="form-select border-primary" title="Rubro opcional"></select>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-3">
+                                <input type="text" id="palabraMasivoCarteleria" class="form-control border-primary"
+                                    placeholder="Palabra: yerba, aceite…" autocomplete="off">
+                            </div>
+                            <div class="col-md-3">
                                 <select id="formatoMasivoCarteleria" class="form-select">
                                     <option value="Cenefa">Cenefa Normal (10x4 cm)</option>
                                     <option value="Cartel_A4">Cartel A4 (Oferta)</option>
                                 </select>
                             </div>
                             <div class="col-md-3">
-                                <button class="btn btn-primary w-100 fw-bold" onclick="encolarPorCategoria()">
-                                    <i class="bi bi-send-plus"></i> Encolar Rubro
+                                <button class="btn btn-primary w-100 fw-bold" onclick="encolarMasivoCarteleria()">
+                                    <i class="bi bi-send-plus"></i> Encolar
                                 </button>
                             </div>
                         </div>
+                        <small class="text-muted">Ej. “yerba” en todos los rubros, o “yerba” solo en Almacén. Enter también busca.</small>
                     </div>
                 </div>
 
@@ -130,8 +124,8 @@
                                 <label class="form-label fw-bold small text-muted"><i class="bi bi-eye"></i> Vista
                                     Previa en Vivo:</label>
                                 <div id="previewCanva"
-                                    class="border rounded bg-white shadow-inner d-flex justify-content-center align-items-center mb-4"
-                                    style="height: 150px; overflow: hidden; background-color: #f8f9fa;">
+                                    class="border rounded bg-white shadow-inner d-flex justify-content-center align-items-center mb-4 p-2"
+                                    style="min-height: 160px; max-height: 360px; overflow: auto; background-color: #f8f9fa;">
                                     <div class="text-muted small">Seleccioná un formato para ver el diseño</div>
                                 </div>
 
@@ -199,8 +193,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="js/layout.js?v=1.0.42"></script>
-    <script src="js/app_carteleria.js?v=1.0.29"></script>
+    <script src="js/layout.js?v=1.0.48"></script>
+    <script src="js/app_carteleria.js?v=1.0.31"></script>
 </body>
 
 </html>
