@@ -35,6 +35,7 @@ window.fetch = async function() {
 
 let clientesGlobales = [];
 let deudoresGlobales = [];
+let filtroDeudaActual = 'todos';
 let clienteSeleccionadoId = null;
 let clienteEditandoId = null;
 let modalClienteInstance;
@@ -79,12 +80,26 @@ async function cargarClientes() {
     try {
         const [resCli, resDeu] = await Promise.all([
             fetch(`${obtenerBaseUrl()}/clientes/listado`),
-            fetch(`${obtenerBaseUrl()}/clientes/deudores`),
+            fetch(`${obtenerBaseUrl()}/clientes/deudores`).catch(() => null),
         ]);
         const data = await resCli.json();
-        const deu = await resDeu.json().catch(() => ({ deudores: [] }));
         clientesGlobales = data.clientes || [];
-        deudoresGlobales = deu.deudores || [];
+        let deudores = [];
+        if (resDeu && resDeu.ok) {
+            const deu = await resDeu.json().catch(() => ({ deudores: [] }));
+            deudores = deu.deudores || [];
+        }
+        if (!deudores.length) {
+            deudores = clientesGlobales.filter((c) => (parseFloat(c.saldo_actual_deudor) || 0) !== 0);
+        }
+        deudoresGlobales = deudores;
+        const mapaDeu = {};
+        deudores.forEach((d) => { mapaDeu[d.id] = d; });
+        clientesGlobales = clientesGlobales.map((c) => {
+            const d = mapaDeu[c.id];
+            if (!d) return { ...c, vencido: 0, abierto: 0 };
+            return { ...c, ...d };
+        });
         filtrarClientesUI();
     } catch (e) {
         console.error("Error al cargar clientes", e);
@@ -98,7 +113,7 @@ function dibujarTablaDirectorio(lista) {
     tbody.innerHTML = '';
     
     if (lista.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No se encontraron clientes.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">No se encontraron clientes.</td></tr>';
         return;
     }
 
@@ -107,14 +122,27 @@ function dibujarTablaDirectorio(lista) {
             ? '<span class="badge bg-primary">Resp. Inscripto</span>'
             : `<span class="badge bg-secondary">${c.condicion_iva || 'Consumidor Final'}</span>`;
         const limite = parseFloat(c.limite_credito) || 0;
+        const saldo = parseFloat(c.saldo_actual_deudor) || 0;
+        const vencido = parseFloat(c.vencido) || 0;
+        let tdSaldo = `<td class="text-end text-muted">${plataCli(0)}</td>`;
+        if (saldo > 0.009) tdSaldo = `<td class="text-end fw-bold text-danger">${plataCli(saldo)}</td>`;
+        else if (saldo < -0.009) tdSaldo = `<td class="text-end fw-bold text-success">A favor ${plataCli(Math.abs(saldo))}</td>`;
+        const tdMora = vencido > 0.05
+            ? `<td class="text-end fw-bold text-danger">${plataCli(vencido)}</td>`
+            : `<td class="text-end text-muted">—</td>`;
         return `<tr>
                 <td class="fw-bold text-dark">${c.nombre_completo}</td>
                 <td class="text-muted">${c.cuit || '---'}</td>
                 <td>${badgeIva}</td>
                 <td>${c.telefono_whatsapp || '---'}</td>
-                <td class="text-end fw-bold text-danger">$ ${limite.toFixed(2)}</td>
+                <td class="text-end text-muted">$ ${limite.toFixed(2)}</td>
+                ${tdSaldo}
+                ${tdMora}
                 <td class="text-center small">${textoDiaCobro(c.dia_vencimiento)}</td>
-                <td class="text-center">
+                <td class="text-center text-nowrap">
+                    <button class="btn btn-sm btn-outline-danger shadow-sm me-1" onclick="cargarDeudaManual(${c.id})" title="Anotar deuda">
+                        <i class="bi bi-plus-lg"></i> Deuda
+                    </button>
                     <button class="btn btn-sm btn-outline-primary shadow-sm" onclick="abrirEditarCliente(${c.id})" title="Editar Ficha">
                         <i class="bi bi-pencil-square"></i> Editar
                     </button>
@@ -126,8 +154,10 @@ function dibujarTablaDirectorio(lista) {
 function dibujarListaSaldos(lista) {
     const contenedor = document.getElementById('listaSaldosClientes');
     if(!contenedor) return;
-    contenedor.innerHTML = '';
-    if (lista.length === 0) { contenedor.innerHTML = '<div class="p-3 text-center text-muted">Nadie debe. Cuenta corriente al día.</div>'; return; }
+    if (lista.length === 0) {
+        contenedor.innerHTML = '<div class="p-3 text-center text-muted">Nadie en esta lista. Cuenta corriente al día o cambiaste el filtro.</div>';
+        return;
+    }
 
     contenedor.innerHTML = lista.map((c) => {
         const saldo = parseFloat(c.saldo_actual_deudor) || 0;
@@ -140,12 +170,13 @@ function dibujarListaSaldos(lista) {
             colorClase = 'text-success fw-bold';
             textoSaldo = `A favor ${plataCli(Math.abs(saldo))}`;
         }
-        const mora = vencido > 0
+        const mora = vencido > 0.05
             ? `<div class="small text-danger fw-bold">Vencido ${plataCli(vencido)}</div>`
-            : (abierto > 0
+            : (abierto > 0.05
                 ? `<div class="small text-muted">Período ${plataCli(abierto)}</div>`
                 : `<div class="small text-muted">${textoDiaCobro(c.dia_vencimiento)}</div>`);
-        return `<button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-3 item-cliente-lista"
+        const claseMora = vencido > 0.05 ? ' border-start border-3 border-danger' : '';
+        return `<button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-3 item-cliente-lista${claseMora}"
                 onclick="seleccionarCliente(${c.id})" tabindex="0" data-id="${c.id}">
                 <div class="text-start">
                     <div class="fw-bold text-primary">${c.nombre_completo}</div>
@@ -155,6 +186,53 @@ function dibujarListaSaldos(lista) {
                 <div class="text-end fs-5 ${colorClase}">${textoSaldo}</div>
             </button>`;
     }).join('');
+}
+
+function pintarResumenDeudores(lista) {
+    const caja = document.getElementById('resumenDeudores');
+    if (!caja) return;
+    let vencido = 0;
+    let abierto = 0;
+    let saldo = 0;
+    let conMora = 0;
+    lista.forEach((c) => {
+        const v = parseFloat(c.vencido) || 0;
+        const a = parseFloat(c.abierto) || 0;
+        const s = parseFloat(c.saldo_actual_deudor) || 0;
+        vencido += v;
+        abierto += a;
+        saldo += s;
+        if (v > 0.05) conMora += 1;
+    });
+    caja.innerHTML = `
+        <div class="col-6 col-lg-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Con saldo</div><div class="fw-bold">${lista.length}</div></div></div>
+        <div class="col-6 col-lg-3"><div class="border rounded p-2 ${conMora ? 'bg-danger-subtle' : 'bg-light'}"><div class="small text-muted">Con mora</div><div class="fw-bold text-danger">${conMora} · ${plataCli(vencido)}</div></div></div>
+        <div class="col-6 col-lg-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Período abierto</div><div class="fw-bold">${plataCli(abierto)}</div></div></div>
+        <div class="col-6 col-lg-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Saldo neto</div><div class="fw-bold ${saldo > 0 ? 'text-danger' : 'text-success'}">${plataCli(saldo)}</div></div></div>
+    `;
+}
+
+function setFiltroDeuda(cual) {
+    filtroDeudaActual = cual;
+    const mapa = { todos: 'filtroDeudaTodos', mora: 'filtroDeudaMora', periodo: 'filtroDeudaPeriodo', favor: 'filtroDeudaFavor' };
+    Object.keys(mapa).forEach((k) => {
+        const b = document.getElementById(mapa[k]);
+        if (!b) return;
+        b.classList.toggle('active', k === cual);
+        b.classList.toggle('btn-danger', k === 'mora' && k === cual);
+        b.classList.toggle('btn-outline-danger', k === 'mora' && k !== cual);
+        b.classList.toggle('btn-secondary', k !== 'mora' && k === cual);
+        b.classList.toggle('btn-outline-secondary', k !== 'mora' && k !== cual);
+    });
+    filtrarClientesUI();
+}
+
+function listaDeudoresFiltrada() {
+    const base = (deudoresGlobales || []).filter((c) => (parseFloat(c.saldo_actual_deudor) || 0) !== 0);
+    if (filtroDeudaActual === 'mora') return base.filter((c) => (parseFloat(c.vencido) || 0) > 0.05);
+    if (filtroDeudaActual === 'periodo') return base.filter((c) => (parseFloat(c.abierto) || 0) > 0.05 && (parseFloat(c.vencido) || 0) <= 0.05);
+    if (filtroDeudaActual === 'favor') return base.filter((c) => (parseFloat(c.saldo_actual_deudor) || 0) < 0);
+    return base;
 }
 
 // --- BUSCADOR UNIFICADO ---
@@ -172,8 +250,9 @@ function filtrarClientesUI() {
     };
 
     dibujarTablaDirectorio(clientesGlobales.filter(match));
-    const deudas = (deudoresGlobales.length ? deudoresGlobales : clientesGlobales.filter((c) => (parseFloat(c.saldo_actual_deudor) || 0) !== 0));
-    dibujarListaSaldos(deudas.filter(match));
+    const deudasTodas = (deudoresGlobales || []).filter((c) => (parseFloat(c.saldo_actual_deudor) || 0) !== 0);
+    pintarResumenDeudores(deudasTodas);
+    dibujarListaSaldos(listaDeudoresFiltrada().filter(match));
 }
 
 // --- NAVEGACIÓN POR TECLADO PARA LA LISTA ---
@@ -616,6 +695,61 @@ async function imprimirResumenCuenta() {
 // ==========================================
 // HERRAMIENTAS AVANZADAS: RECARGOS Y RECÁLCULOS
 // ==========================================
+
+async function cargarDeudaManual(clienteId) {
+    const id = parseInt(clienteId, 10);
+    if (!id) return;
+    const cliente = clientesGlobales.find((c) => c.id === id) || deudoresGlobales.find((c) => c.id === id);
+    const nombre = String((cliente && cliente.nombre_completo) || 'este cliente').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+    const hoy = new Date();
+    const yyyy = hoy.getFullYear();
+    const mm = String(hoy.getMonth() + 1).padStart(2, '0');
+    const dd = String(hoy.getDate()).padStart(2, '0');
+    const { value: formValues } = await Swal.fire({
+        title: 'Anotar deuda',
+        html: `
+            <div class="text-start small mb-2">Se carga a <b>${nombre}</b> como cuenta corriente (no es un ticket de caja).</div>
+            <input id="swal-deuda-monto" type="number" min="0.01" step="0.01" class="swal2-input" placeholder="Monto ($)">
+            <input id="swal-deuda-motivo" type="text" class="swal2-input" placeholder="Motivo (ej: saldo de libreta)" maxlength="180">
+            <input id="swal-deuda-fecha" type="date" class="swal2-input" value="${yyyy}-${mm}-${dd}">
+            <div class="small text-muted mt-1">Si es deuda vieja, poné la fecha real: entra en mora si ya pasó el día de cobro.</div>
+        `,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Anotar',
+        confirmButtonColor: '#dc3545',
+        preConfirm: () => {
+            const monto = parseFloat(document.getElementById('swal-deuda-monto').value);
+            const motivo = (document.getElementById('swal-deuda-motivo').value || '').trim();
+            const fecha = document.getElementById('swal-deuda-fecha').value;
+            if (!monto || monto <= 0) { Swal.showValidationMessage('Ingresá un monto mayor a 0'); return false; }
+            if (motivo.length < 3) { Swal.showValidationMessage('Escribí un motivo'); return false; }
+            return { monto, motivo, fecha };
+        }
+    });
+    if (!formValues) return;
+
+    Swal.fire({ title: 'Anotando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/cargar_deuda/${id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                monto: formValues.monto,
+                motivo: formValues.motivo,
+                fecha: formValues.fecha || null,
+                usuario_id: 1
+            })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error || data.detail) throw new Error(data.error || data.detail || 'No se pudo anotar.');
+        await cargarClientes();
+        if (clienteSeleccionadoId === id) await seleccionarCliente(id);
+        Swal.fire('Listo', 'La deuda quedó en la cuenta.', 'success');
+    } catch (e) {
+        Swal.fire('Error', e.message || 'No se pudo anotar la deuda.', 'error');
+    }
+}
 
 async function aplicarRecargoManual() {
     if (!clienteSeleccionadoId) return;

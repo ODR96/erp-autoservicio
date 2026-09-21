@@ -1312,6 +1312,12 @@ function plataFiado(n) {
     return `$ ${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
 }
 
+function fusionarDeudoresEnClientes(clientes, deudores) {
+    const mapa = {};
+    (deudores || []).forEach((d) => { mapa[d.id] = d; });
+    return (clientes || []).map((c) => mapa[c.id] ? { ...c, ...mapa[c.id] } : c);
+}
+
 async function abrirModalCobroFiado() {
     document.getElementById("inputBuscarFiado").value = "";
     document.getElementById("cajaInfoFiado").classList.add("d-none");
@@ -1326,13 +1332,7 @@ async function abrirModalCobroFiado() {
             apiFetch(`${obtenerBaseUrl()}/clientes/deudores`).catch(() => null)
         ]);
         const data = await res.json();
-        clientesGlobalesPOS = data.clientes || data || [];
-        if (resDeu && resDeu.ok) {
-            const deu = await resDeu.json();
-            const mapa = {};
-            (deu.deudores || []).forEach((d) => { mapa[d.id] = d; });
-            clientesGlobalesPOS = clientesGlobalesPOS.map((c) => mapa[c.id] ? { ...c, ...mapa[c.id] } : c);
-        }
+        clientesGlobalesPOS = fusionarDeudoresEnClientes(data.clientes || data || [], (resDeu && resDeu.ok) ? ((await resDeu.json()).deudores || []) : []);
         setTimeout(() => document.getElementById("inputBuscarFiado").focus(), 500);
     } catch (e) {
         console.error("Error al cargar clientes", e);
@@ -1513,7 +1513,7 @@ function buscarClienteFiado() {
     const resultados = clientesGlobalesPOS.filter(c => {
         const fuente = normalizarTexto(`${c.nombre_completo} ${c.cuit || ''}`);
         return palabras.every(p => fuente.includes(p));
-    });
+    }).sort((a, b) => (Number(b.vencido) || 0) - (Number(a.vencido) || 0));
 
     dropdown.innerHTML = resultados.length === 0
         ? '<div class="list-group-item text-muted">No se encontraron clientes</div>'
@@ -1661,9 +1661,12 @@ async function abrirSeleccionCliente() {
     modalSeleccionCliente.show();
     document.getElementById('listaClientesAsignacion').innerHTML = '<div class="text-center p-3 text-muted">Cargando clientes...</div>';
     try {
-        const res = await apiFetch(`${obtenerBaseUrl()}/clientes/listado`);
+        const [res, resDeu] = await Promise.all([
+            apiFetch(`${obtenerBaseUrl()}/clientes/listado`),
+            apiFetch(`${obtenerBaseUrl()}/clientes/deudores`).catch(() => null)
+        ]);
         const data = await res.json();
-        clientesGlobalesPOS = data.clientes || data;
+        clientesGlobalesPOS = fusionarDeudoresEnClientes(data.clientes || data, (resDeu && resDeu.ok) ? ((await resDeu.json()).deudores || []) : []);
         filtrarClientesAsignacion();
         setTimeout(() => document.getElementById('inputBuscarAsignarCliente').focus(), 500);
     } catch (e) {
@@ -1674,43 +1677,49 @@ async function abrirSeleccionCliente() {
 function filtrarClientesAsignacion() {
     const query = normalizarTexto(document.getElementById('inputBuscarAsignarCliente').value);
     const contenedor = document.getElementById('listaClientesAsignacion');
-    contenedor.innerHTML = `<button class="list-group-item list-group-item-action fw-bold text-primary" onclick="asignarClienteAlTicket('Consumidor Final', null, 0, 0)"><i class="bi bi-person"></i> Consumidor Final (Quitar cliente)</button>`;
-
-    if (!Array.isArray(clientesGlobalesPOS)) return;
-
     const palabras = query.split(" ").filter(p => p !== "");
-    const resultados = clientesGlobalesPOS.filter(c => {
+    const resultados = (Array.isArray(clientesGlobalesPOS) ? clientesGlobalesPOS : []).filter(c => {
         const nombreLimpio = normalizarTexto(c.nombre_completo);
         const cuitLimpio = normalizarTexto(c.cuit || '');
         return palabras.every(pal => nombreLimpio.includes(pal) || cuitLimpio.includes(pal));
     });
 
-    resultados.forEach(c => {
-        const deuda = c.saldo_actual_deudor || 0;
-        const limite = c.limite_credito || 0;
-
-        let badgeDeuda = `<span class="badge bg-success rounded-pill">A Favor: $${Math.abs(deuda).toFixed(2)}</span>`;
-        if (deuda > 0) badgeDeuda = `<span class="badge bg-danger rounded-pill">Debe: $${deuda.toFixed(2)}</span>`;
-        else if (deuda === 0) badgeDeuda = `<span class="badge bg-secondary rounded-pill">$0.00</span>`;
-
-        contenedor.innerHTML += `
-        <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="asignarClienteAlTicket('${c.nombre_completo}', ${c.id}, ${limite}, ${deuda})">
-            <span><i class="bi bi-person-check"></i> ${c.nombre_completo}<br><small class="text-muted">${textoDiaCobro(c.dia_vencimiento)}</small></span>
+    const filas = [
+        `<button type="button" class="list-group-item list-group-item-action fw-bold text-primary" data-id="" data-nombre="Consumidor Final" data-limite="0" data-deuda="0" data-vencido="0" onclick="asignarClienteAlTicket(this)"><i class="bi bi-person"></i> Consumidor Final (Quitar cliente)</button>`
+    ];
+    filas.push(...resultados.map((c) => {
+        const deuda = Number(c.saldo_actual_deudor) || 0;
+        const limite = Number(c.limite_credito) || 0;
+        const vencido = Number(c.vencido) || 0;
+        let badgeDeuda = `<span class="badge bg-secondary rounded-pill">$0.00</span>`;
+        if (vencido > 0.05) badgeDeuda = `<span class="badge bg-danger rounded-pill">Venc. $${vencido.toFixed(0)}</span>`;
+        else if (deuda > 0) badgeDeuda = `<span class="badge bg-warning text-dark rounded-pill">Debe: $${deuda.toFixed(0)}</span>`;
+        else if (deuda < 0) badgeDeuda = `<span class="badge bg-success rounded-pill">A Favor: $${Math.abs(deuda).toFixed(0)}</span>`;
+        return `<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" data-id="${c.id}" data-nombre="${escHtmlPos(c.nombre_completo)}" data-limite="${limite}" data-deuda="${deuda}" data-vencido="${vencido}" onclick="asignarClienteAlTicket(this)">
+            <span><i class="bi bi-person-check"></i> ${escHtmlPos(c.nombre_completo)}<br><small class="text-muted">${textoDiaCobro(c.dia_vencimiento)}</small></span>
             ${badgeDeuda}
         </button>`;
-    });
+    }));
+    contenedor.innerHTML = filas.join('');
 }
 
-function asignarClienteAlTicket(nombre, id, limite, deuda) {
+function asignarClienteAlTicket(btn) {
+    const idRaw = btn.getAttribute('data-id');
+    const id = idRaw ? parseInt(idRaw, 10) : null;
+    const nombre = btn.getAttribute('data-nombre') || 'Consumidor Final';
+    const limite = parseFloat(btn.getAttribute('data-limite')) || 0;
+    const deuda = parseFloat(btn.getAttribute('data-deuda')) || 0;
+    const vencido = parseFloat(btn.getAttribute('data-vencido')) || 0;
     clienteSeleccionadoId = id;
     limiteClienteGlobal = limite;
     deudaClienteGlobal = deuda;
 
     let extra = "";
-    if (id && deuda > 0) extra = ` <span class="badge bg-danger ms-1 px-1 py-0">Debe: $${deuda.toFixed(0)}</span>`;
+    if (id && vencido > 0.05) extra = ` <span class="badge bg-danger ms-1 px-1 py-0">Venc. $${vencido.toFixed(0)}</span>`;
+    else if (id && deuda > 0) extra = ` <span class="badge bg-warning text-dark ms-1 px-1 py-0">Debe: $${deuda.toFixed(0)}</span>`;
     else if (id && deuda < 0) extra = ` <span class="badge bg-success ms-1 px-1 py-0">A favor: $${Math.abs(deuda).toFixed(0)}</span>`;
 
-    document.getElementById("nombreClienteTicket").innerHTML = `${nombre} ${extra}`;
+    document.getElementById("nombreClienteTicket").innerHTML = `${escHtmlPos(nombre)} ${extra}`;
     modalSeleccionCliente.hide();
     inputScan.focus();
 }

@@ -624,6 +624,64 @@ def aplicar_recargo(cliente_id: int, ajuste: AjusteDeuda):
     finally:
         conexion.close()
 
+class CargoManual(BaseModel):
+    monto: float
+    motivo: str
+    usuario_id: int = 1
+    fecha: Optional[str] = None
+
+
+@router.post("/cargar_deuda/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def cargar_deuda_manual(cliente_id: int, cargo: CargoManual):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        monto = round(float(cargo.monto or 0), 2)
+        if monto <= 0.009:
+            raise Exception("El monto tiene que ser mayor a 0.")
+        motivo = (cargo.motivo or "").strip()
+        if len(motivo) < 3:
+            raise Exception("Escribí un motivo (mínimo 3 caracteres).")
+        if cargo.fecha:
+            try:
+                dia = datetime.strptime(str(cargo.fecha)[:10], "%Y-%m-%d").date()
+            except ValueError:
+                raise Exception("La fecha del cargo no es válida.")
+            if dia > _hoy_ar():
+                raise Exception("La fecha del cargo no puede ser futura.")
+            fecha_hora = f"{dia.isoformat()} 12:00:00"
+        else:
+            fecha_hora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+
+        cursor.execute("SELECT id FROM clientes WHERE id = ?", (cliente_id,))
+        if not cursor.fetchone():
+            raise Exception("El cliente no existe.")
+
+        cursor.execute(
+            "UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor + ? WHERE id = ?",
+            (monto, cliente_id),
+        )
+        cursor.execute(
+            '''
+            INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
+            VALUES (?, ?, 'CARGO', ?, ?, ?)
+            ''',
+            (cliente_id, fecha_hora, monto, f"Ajuste Admin: {motivo[:180]}", cargo.usuario_id),
+        )
+        conexion.commit()
+        return {"mensaje": "Deuda anotada en la cuenta."}
+    except Exception as e:
+        if conexion:
+            conexion.rollback()
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+        return {"error": mensaje_error}
+    finally:
+        conexion.close()
+
+
 @router.get("/simular_actualizacion/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def simular_actualizacion_precios(cliente_id: int):
     conexion = obtener_conexion()
