@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
-from backend.mod_clientes.rutas_clientes import persistir_imputacion_fifo
+from backend.mod_clientes.rutas_clientes import persistir_imputacion_fifo, _estado_cuenta_de
 
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
@@ -19,6 +19,8 @@ def asegurar_columnas_multi_caja():
     except: pass
     # NULL a propósito: las ventas viejas caen al costo maestro. DEFAULT 0 mentiría CMV=0.
     try: cursor.execute("ALTER TABLE ventas_detalle ADD COLUMN costo_unitario_historico REAL")
+    except: pass
+    try: cursor.execute("ALTER TABLE ventas_cabecera ADD COLUMN override_mora_motivo TEXT")
     except: pass
     conexion.commit()
     conexion.close()
@@ -123,11 +125,29 @@ class NuevaVenta(BaseModel):
     condicion_iva_cliente: str = "Consumidor Final"
     descuento_recargo_global: float = 0.0
     autorizado_por: Optional[str] = None
+    override_mora_motivo: Optional[str] = None
     facturar_afip: bool = False
     items: List[ItemVenta]
     pagos_mixtos: Optional[List[PagoMixto]] = None
     cajero_nombre: str = "Sistema"
     turno_id: int
+
+def _supervisor_override(cursor, nombre):
+    nombre = (nombre or "").strip()
+    if not nombre:
+        return None
+    cursor.execute(
+        "SELECT id, rol FROM usuarios WHERE nombre_completo = ? LIMIT 1",
+        (nombre,),
+    )
+    fila = cursor.fetchone()
+    if not fila:
+        return None
+    rol = (fila["rol"] or "").upper()
+    if rol not in ("ADMIN", "ENCARGADO"):
+        return None
+    return fila["id"]
+
 
 @router.post("/cobrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_venta(venta: NuevaVenta):
@@ -138,6 +158,29 @@ def registrar_venta(venta: NuevaVenta):
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")        
         total_venta = 0.0
         ahorro_por_promos = 0.0
+        override_mora = None
+        sup_id_override = None
+
+        if venta.metodo_pago.upper() in ["CUENTA CORRIENTE", "FIADO"]:
+            if not venta.cliente_id:
+                raise Exception("Para vender fiado, seleccione un cliente.")
+            cursor.execute("SELECT * FROM clientes WHERE id = ?", (venta.cliente_id,))
+            cliente_fiado = cursor.fetchone()
+            if not cliente_fiado:
+                raise Exception("El cliente no existe.")
+            est = _estado_cuenta_de(cursor, cliente_fiado)
+            vencido = float(est.get("vencido") or 0)
+            if vencido > 0.05:
+                motivo = (venta.override_mora_motivo or "").strip()
+                if len(motivo) < 5:
+                    raise Exception(
+                        f"MORA_VENCIDA: {cliente_fiado['nombre_completo']} tiene $ {vencido:.2f} vencido. "
+                        "Cobrale la mora o un Encargado debe autorizar con motivo."
+                    )
+                sup_id_override = _supervisor_override(cursor, venta.autorizado_por)
+                if not sup_id_override:
+                    raise Exception("El override de mora tiene que ser de Encargado o Admin.")
+                override_mora = motivo[:200]
         
         cursor.execute('''
             INSERT INTO ventas_cabecera 
@@ -218,16 +261,21 @@ def registrar_venta(venta: NuevaVenta):
             if nuevo_saldo > cliente['limite_credito']:
                 if not venta.autorizado_por: 
                     raise Exception(f"ALERTA: El cliente {cliente['nombre_completo']} excede su límite. PASE CREDENCIAL.")
-                cursor.execute("SELECT id FROM usuarios WHERE nombre_completo = ?", (venta.autorizado_por,))
-                supervisor = cursor.fetchone()
-                sup_id = supervisor['id'] if supervisor else 1
-                cursor.execute("UPDATE ventas_cabecera SET autorizado_por = ? WHERE id = ?", (sup_id, venta_id))
-            
+                if not sup_id_override:
+                    cursor.execute("SELECT id FROM usuarios WHERE nombre_completo = ?", (venta.autorizado_por,))
+                    supervisor = cursor.fetchone()
+                    sup_id_override = supervisor['id'] if supervisor else 1
+
             cursor.execute("UPDATE clientes SET saldo_actual_deudor = ? WHERE id = ?", (nuevo_saldo, venta.cliente_id))
             cursor.execute('''
                 INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
                 VALUES (?, ?, 'CARGO', ?, ?, ?)
             ''', (venta.cliente_id, fecha_actual, total_con_descuento, f"Ticket POS #{venta_id}", 1))
+            if sup_id_override or override_mora:
+                cursor.execute(
+                    "UPDATE ventas_cabecera SET autorizado_por = ?, override_mora_motivo = ? WHERE id = ?",
+                    (sup_id_override, override_mora, venta_id),
+                )
 
         if venta.metodo_pago == "MIXTO" and venta.pagos_mixtos:
             cursor.execute('''CREATE TABLE IF NOT EXISTS ventas_pagos_mixtos (

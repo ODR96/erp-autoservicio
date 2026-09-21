@@ -1063,7 +1063,7 @@ function calcularVuelto() {
 
 // ===== NUEVO MOTOR: ENVIAR VENTA A PYTHON =====
 // 1. ADAPTAMOS EL MOTOR PRINCIPAL PARA RECIBIR LA LISTA MIXTA
-async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos = null, autorizadoPor = null) {
+async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos = null, autorizadoPor = null, extras = null) {
     const itemsVenta = carrito.map(p => {
         let precioCalculado = p.precio_venta_final;
         if (p.reglas_mayoristas && p.reglas_mayoristas.length > 0) {
@@ -1103,6 +1103,7 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
         items: itemsVenta,
         pagos_mixtos: arrayPagosMixtos,
         autorizado_por: autorizadoPor,
+        override_mora_motivo: extras && extras.override_mora_motivo ? extras.override_mora_motivo : null,
         turno_id: turnoActualId
     };
 
@@ -1714,6 +1715,38 @@ function asignarClienteAlTicket(nombre, id, limite, deuda) {
     inputScan.focus();
 }
 
+async function pedirOverrideMoraFiado(nombre, vencido) {
+    const plata = Number(vencido).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const esJefe = empleadoLogueado && (empleadoLogueado.rol === 'ADMIN' || empleadoLogueado.rol === 'ENCARGADO');
+    let firma = null;
+    if (!esJefe) {
+        firma = await solicitarAutorizacion(
+            `${nombre} tiene $ ${plata} vencido. No se fía más hasta cobrar la mora, salvo override de Encargado.`
+        );
+        if (!firma) return null;
+    } else {
+        firma = empleadoLogueado.nombre_completo || empleadoLogueado.usuario || empleadoLogueado.nombre || 'Administrador Autorizado';
+    }
+    const mot = await Swal.fire({
+        title: 'Tiene mora vencida',
+        html: `<b>${escHtmlPos(nombre)}</b> debe <b>$ ${plata}</b> de períodos cerrados. No se fía más hasta cobrarla.`,
+        input: 'textarea',
+        inputPlaceholder: 'Motivo del override (obligatorio)',
+        inputAttributes: { maxlength: 200 },
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Autorizar fiado igual',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#d33',
+        inputValidator: (v) => {
+            if (!v || v.trim().length < 5) return 'Escribí un motivo (mínimo 5 caracteres).';
+            return undefined;
+        }
+    });
+    if (!mot.isConfirmed) return null;
+    return { firma, motivo: String(mot.value || '').trim() };
+}
+
 async function mandarACtaCte() {
     if (carrito.length === 0) return Swal.fire('Error', 'El ticket está vacío.', 'error');
 
@@ -1723,14 +1756,32 @@ async function mandarACtaCte() {
     }
 
     let firmaAutorizacion = null;
+    let motivoMora = null;
+
+    try {
+        const resEst = await apiFetch(`${obtenerBaseUrl()}/clientes/estado_cuenta/${clienteSeleccionadoId}`);
+        const est = await resEst.json();
+        if (!resEst.ok || est.error || est.detail) throw new Error(est.error || est.detail || 'No se pudo leer la cuenta.');
+        const vencido = Number(est.vencido) || 0;
+        if (vencido > 0.05) {
+            const ov = await pedirOverrideMoraFiado(est.nombre || 'Este cliente', vencido);
+            if (!ov) return;
+            firmaAutorizacion = ov.firma;
+            motivoMora = ov.motivo;
+        }
+    } catch (e) {
+        return Swal.fire('Error', e.message || 'No se pudo verificar la mora del cliente.', 'error');
+    }
 
     const proximaDeuda = deudaClienteGlobal + totalVenta;
     if (proximaDeuda > limiteClienteGlobal) {
-        if (empleadoLogueado && (empleadoLogueado.rol === 'ADMIN' || empleadoLogueado.rol === 'ENCARGADO')) {
+        if (firmaAutorizacion) {
+            const confirmar = await Swal.fire({ title: 'Límite Excedido', text: `Además, la deuda llegará a $${proximaDeuda.toFixed(2)}, arriba del límite. ¿Avanzar igual?`, icon: 'warning', showCancelButton: true, confirmButtonText: 'Sí, forzar fiado' });
+            if (!confirmar.isConfirmed) return;
+        } else if (empleadoLogueado && (empleadoLogueado.rol === 'ADMIN' || empleadoLogueado.rol === 'ENCARGADO')) {
             const confirmar = await Swal.fire({ title: 'Límite Excedido', text: `La deuda llegará a $${proximaDeuda.toFixed(2)}. Como sos ${empleadoLogueado.rol}, podés autorizarlo. ¿Avanzar?`, icon: 'warning', showCancelButton: true, confirmButtonText: 'Sí, forzar fiado' });
             if (!confirmar.isConfirmed) return;
 
-            // PARCHE BLINDADO: Buscamos tu nombre de todas las formas posibles
             firmaAutorizacion = empleadoLogueado.nombre_completo || empleadoLogueado.usuario || empleadoLogueado.nombre || "Administrador Autorizado";
         } else {
             const autorizadoPor = await solicitarAutorizacion(`La deuda superará el límite permitido de $${limiteClienteGlobal.toFixed(2)}.`);
@@ -1742,8 +1793,7 @@ async function mandarACtaCte() {
 
     Swal.fire({ title: 'Procesando Fiado...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
-    // LE ENVIAMOS LA FIRMA A PYTHON COMO 4TO PARÁMETRO
-    const resultado = await procesarVentaBackend('CUENTA CORRIENTE', totalVenta, null, firmaAutorizacion);
+    const resultado = await procesarVentaBackend('CUENTA CORRIENTE', totalVenta, null, firmaAutorizacion, { override_mora_motivo: motivoMora });
 
     if (resultado) {
         const nombreLimpio = document.getElementById("nombreClienteTicket").innerText.split(' Debe')[0].split(' A favor')[0].trim();
