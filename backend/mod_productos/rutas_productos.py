@@ -397,7 +397,9 @@ def ver_producto_por_id(producto_id: int):
         resultado["lotes"] = [dict(l) for l in cursor.fetchall()]
 
         cursor.execute('''
-            SELECT p.id, p.nombre, pc.cantidad_hijo as cantidad 
+            SELECT p.id, p.nombre, pc.cantidad_hijo as cantidad,
+                   IFNULL(p.costo_sin_iva, 0) as costo_sin_iva,
+                   IFNULL(p.precio_venta_final, 0) as precio_venta_final
             FROM productos_combos pc
             JOIN productos p ON pc.producto_hijo_id = p.id
             WHERE pc.producto_padre_id = ?

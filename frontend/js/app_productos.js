@@ -378,6 +378,10 @@ document.getElementById('modalNuevoProducto').addEventListener('keypress', funct
             document.getElementById('inputNombre').focus();
             return; 
         }
+        if (e.target.id === 'inputBuscarComponente' || e.target.id === 'inputCantComponente') {
+            agregarComponenteUI();
+            return;
+        }
 
         guardarProductoCompleto(); 
     }
@@ -407,6 +411,8 @@ document.querySelector('[data-bs-target="#modalNuevoProducto"]').addEventListene
     
     reglasMayoristas = []; dibujarTablaReglas();
     componentesComboActual = []; dibujarTablaComponentes();
+    document.getElementById('inputCantComponente').value = '1';
+    document.getElementById('inputBuscarComponente').value = '';
     document.querySelector('#tab-abm-lotes table tbody').innerHTML = '<tr><td colspan="6" class="text-muted">Aún no hay lotes ingresados.</td></tr>';
     
     document.getElementById('btnAgregarLoteRapido').style.display = 'none';
@@ -828,6 +834,9 @@ async function abrirEditarProducto(id, pestana = 'precios') {
 
         componentesComboActual = p.componentes_combo || [];
         dibujarTablaComponentes();
+        document.getElementById('inputCantComponente').value = '1';
+        document.getElementById('inputBuscarComponente').value = '';
+        aplicarCostoComboDesdeComponentes({ tocarPrecio: false });
         
         try {
             const resHist = await apiFetch(`${obtenerBaseUrl()}/productos/movimientos/${id}`);
@@ -1139,39 +1148,85 @@ function buscarComponenteCombo(busqueda) {
     const contenedor = document.getElementById('resultadosBusquedaCombo');
     if (busqueda.length < 2) { contenedor.classList.add('d-none'); return; }
 
-    // PARCHE: Para el combo buscamos en el servidor (la memoria solo tiene 50)
-    apiFetch(`${obtenerBaseUrl()}/productos/buscar?termino=${busqueda}`)
+    apiFetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(busqueda)}`)
         .then(res => res.json())
         .then(data => {
-            const filtrados = data.productos || [];
+            const filtrados = (data.productos || []).filter(p => p.id !== productoEditandoId);
             contenedor.innerHTML = '';
             filtrados.forEach(p => {
-                contenedor.innerHTML += `
-                    <button type="button" class="list-group-item list-group-item-action small py-1" 
-                        onclick="seleccionarComponente(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')">
-                        <b>${p.codigo_barras || 'S/C'}</b> - ${p.nombre} ($${p.precio_venta_final})
-                    </button>`;
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'list-group-item list-group-item-action small py-1';
+                const codigo = p.codigo_barras || 'S/C';
+                const precio = Number(p.precio_venta_final || 0).toFixed(2);
+                btn.textContent = `${codigo} - ${p.nombre} ($${precio})`;
+                btn.addEventListener('click', () => seleccionarComponente(p));
+                contenedor.appendChild(btn);
             });
-            contenedor.classList.remove('d-none');
-        });
+            contenedor.classList.toggle('d-none', filtrados.length === 0);
+        })
+        .catch(() => contenedor.classList.add('d-none'));
 }
 
-function seleccionarComponente(id, nombre) {
-    componenteSeleccionadoTemporal = { id, nombre };
-    document.getElementById('inputBuscarComponente').value = nombre;
+function seleccionarComponente(prod) {
+    componenteSeleccionadoTemporal = {
+        id: prod.id,
+        nombre: prod.nombre,
+        costo_sin_iva: Number(prod.costo_sin_iva) || 0,
+        precio_venta_final: Number(prod.precio_venta_final) || 0
+    };
+    document.getElementById('inputBuscarComponente').value = prod.nombre;
     document.getElementById('resultadosBusquedaCombo').classList.add('d-none');
 }
 
+function costoUnitarioComponente(c) {
+    return Number(c.costo_sin_iva != null ? c.costo_sin_iva : c.costo) || 0;
+}
+
+function costoTeoricoCombo() {
+    return componentesComboActual.reduce((acc, c) => acc + costoUnitarioComponente(c) * (Number(c.cantidad) || 0), 0);
+}
+
+function pintarResumenCostoCombo() {
+    const caja = document.getElementById('comboCostoResumen');
+    if (!caja) return;
+    if (componentesComboActual.length === 0) {
+        caja.textContent = '';
+        return;
+    }
+    caja.textContent = `Costo del pack (suma de componentes): $ ${costoTeoricoCombo().toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function aplicarCostoComboDesdeComponentes({ tocarPrecio } = { tocarPrecio: true }) {
+    pintarResumenCostoCombo();
+    if (componentesComboActual.length === 0) return;
+    const costo = costoTeoricoCombo();
+    document.getElementById('inputCosto').value = costo.toFixed(2);
+    if (tocarPrecio) {
+        calcularPrecioAutomatico();
+        return;
+    }
+    const iva = parseFloat(document.getElementById('inputIva').value) || 0;
+    const precio = parseFloat(document.getElementById('inputPrecioVenta').value) || 0;
+    const costoConIva = costo * (1 + iva / 100);
+    if (costoConIva > 0 && precio > 0) {
+        document.getElementById('inputMargen').value = (((precio / costoConIva) - 1) * 100).toFixed(2);
+    }
+}
+
 function agregarComponenteUI() {
-    const cant = parseFloat(document.getElementById('inputCantComponente').value);
+    const cant = parseFloat(document.getElementById('inputCantComponente').value) || 1;
 
     if (componenteSeleccionadoTemporal && cant > 0) {
         componentesComboActual.push({
             id: componenteSeleccionadoTemporal.id,
             nombre: componenteSeleccionadoTemporal.nombre,
-            cantidad: cant
+            cantidad: cant,
+            costo_sin_iva: componenteSeleccionadoTemporal.costo_sin_iva || 0,
+            precio_venta_final: componenteSeleccionadoTemporal.precio_venta_final || 0
         });
-        dibujarTablaComponentes(); 
+        dibujarTablaComponentes();
+        aplicarCostoComboDesdeComponentes({ tocarPrecio: true });
 
         componenteSeleccionadoTemporal = null;
         document.getElementById('inputBuscarComponente').value = "";
@@ -1184,6 +1239,8 @@ function agregarComponenteUI() {
 function borrarComponenteUI(idx) {
     componentesComboActual.splice(idx, 1);
     dibujarTablaComponentes();
+    if (componentesComboActual.length > 0) aplicarCostoComboDesdeComponentes({ tocarPrecio: true });
+    else pintarResumenCostoCombo();
 }
 
 function dibujarTablaComponentes() {
@@ -1191,21 +1248,27 @@ function dibujarTablaComponentes() {
     tbody.innerHTML = '';
 
     if (componentesComboActual.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Este producto no es un combo.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Este producto no es un combo.</td></tr>';
+        pintarResumenCostoCombo();
         return;
     }
 
     componentesComboActual.forEach((c, idx) => {
+        const costo = costoUnitarioComponente(c);
+        const subt = costo * (Number(c.cantidad) || 0);
         tbody.innerHTML += `
             <tr>
-                <td>${c.nombre}</td>
+                <td>${htmlTxt(c.nombre)}</td>
                 <td class="text-center fw-bold">${c.cantidad}</td>
+                <td class="text-end">$ ${costo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                <td class="text-end fw-bold">$ ${subt.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
                 <td class="text-center">
                     <button type="button" class="btn btn-sm text-danger border-0" onclick="borrarComponenteUI(${idx})"><i class="bi bi-trash"></i></button>
                 </td>
             </tr>
         `;
     });
+    pintarResumenCostoCombo();
 }
 
 // --- CARGAR PESTAÑA CENTRAL DE COMBOS ---
