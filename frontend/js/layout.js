@@ -277,6 +277,10 @@ function htmlReciboPagoCtaCte(datos) {
     const alDia = saldo <= 0;
     const saldoTxt = saldo < 0 ? `A FAVOR $ ${plataTicket(Math.abs(saldo))}` : `$ ${plataTicket(saldo)}`;
     const lineaLocal = [direccion, cuit ? `CUIT ${cuit}` : ''].filter(Boolean).join(' | ');
+    const ticksImp = ticketsImputacionDe(datos.aplicaciones);
+    const lineaTickets = ticksImp.length
+        ? `<div class="center" style="font-size: 10px;">Imputado a ${ticksImp.map((n) => '#' + n).join(', ')}</div>`
+        : '';
     const encabezado = [
         negocio ? `<div class="center bold" style="font-size: 14px; margin-bottom: 2px;">${escaparHtmlTicket(negocio.toUpperCase())}</div>` : '',
         lineaLocal ? `<div class="center" style="font-size: 10px; margin-bottom: 4px;">${escaparHtmlTicket(lineaLocal)}</div>` : ''
@@ -315,6 +319,7 @@ function htmlReciboPagoCtaCte(datos) {
         <div class="divisor-doble"></div>
         <div class="center bold" style="font-size: 11px;">IMPORTE ABONADO</div>
         <div class="monto bold">$ ${plataTicket(monto)}</div>
+        ${lineaTickets}
         <div class="divisor"></div>
         <table>
             <tr><td class="k">Medio</td><td class="v">${escaparHtmlTicket(datos.metodo)}</td></tr>
@@ -325,6 +330,16 @@ function htmlReciboPagoCtaCte(datos) {
         <div class="center" style="font-size: 9px; margin-top: 8px;">Comprobante no válido como factura.</div>
         <div style="margin-bottom: 20mm;"></div>
     </body></html>`;
+}
+
+function ticketsImputacionDe(aplicaciones) {
+    return [...new Set((aplicaciones || []).map((a) => a && a.ticket).filter(Boolean))];
+}
+
+function htmlLineaImputacionFiado(aplicaciones) {
+    const t = ticketsImputacionDe(aplicaciones);
+    if (!t.length) return '';
+    return `<div class="small text-muted">Imputado a ticket ${t.map((n) => '#' + n).join(', ')}</div>`;
 }
 
 function imprimirReciboPagoCtaCte(datos) {
@@ -340,7 +355,8 @@ async function preguntarImprimirReciboPagoCtaCte(datos) {
     const r = await Swal.fire({
         title: alDia ? 'Cuenta al día' : 'Imprimir recibo',
         html: `<div class="text-start small">Abonó <b>$ ${plataTicket(datos.monto)}</b> (${escaparHtmlTicket(datos.metodo)})<br>
-            ${alDia ? '<b>No debe nada.</b>' : `Vencido $ ${plataTicket(datos.vencido)} · Período $ ${plataTicket(datos.abierto)}<br>Saldo: <b>$ ${plataTicket(saldo)}</b>`}</div>`,
+            ${alDia ? '<b>No debe nada.</b>' : `Vencido $ ${plataTicket(datos.vencido)} · Período $ ${plataTicket(datos.abierto)}<br>Saldo: <b>$ ${plataTicket(saldo)}</b>`}
+            ${htmlLineaImputacionFiado(datos.aplicaciones)}</div>`,
         icon: 'success',
         showCancelButton: true,
         confirmButtonText: '<i class="bi bi-printer"></i> Ticketera',
@@ -375,7 +391,8 @@ async function imprimirReciboPagoPorMovimiento(movimientoId, opciones) {
             vencido: data.vencido,
             abierto: data.abierto,
             fecha: data.fecha,
-            tituloSaldo: 'SALDO LUEGO DE ESTE COBRO'
+            tituloSaldo: 'SALDO LUEGO DE ESTE COBRO',
+            aplicaciones: data.aplicaciones || []
         };
         if (preguntar) {
             ultimoReciboPagoCtaCte = datos;
@@ -384,7 +401,8 @@ async function imprimirReciboPagoPorMovimiento(movimientoId, opciones) {
             const r = await Swal.fire({
                 title: alDia ? 'Reimprimir · cuenta al día' : 'Reimprimir recibo',
                 html: `<div class="text-start small">Abonó <b>$ ${plataTicket(datos.monto)}</b> (${escaparHtmlTicket(datos.metodo)})<br>
-                    ${alDia ? '<b>Quedó al día en ese cobro.</b>' : `Saldo luego del cobro: <b>$ ${plataTicket(saldo)}</b>`}</div>`,
+                    ${alDia ? '<b>Quedó al día en ese cobro.</b>' : `Saldo luego del cobro: <b>$ ${plataTicket(saldo)}</b>`}
+                    ${htmlLineaImputacionFiado(datos.aplicaciones)}</div>`,
                 icon: 'question',
                 showCancelButton: true,
                 confirmButtonText: '<i class="bi bi-printer"></i> Ticketera',

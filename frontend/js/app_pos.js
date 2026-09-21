@@ -1445,7 +1445,7 @@ function dibujarFilasHistorial() {
         return `<tr>
             <td class="text-muted small align-middle">${String(m.fecha_hora || '').split(' ')[0]}</td>
             <td class="align-middle"><span class="badge ${esPago ? 'bg-success' : 'bg-danger'}">${m.tipo_movimiento}</span></td>
-            <td class="text-start small align-middle">${m.detalle || ''}</td>
+            <td class="text-start small align-middle">${m.detalle || ''}${htmlLineaImputacionFiado(m.aplicaciones)}</td>
             <td class="fw-bold ${esPago ? 'text-success' : 'text-danger'} align-middle">${esPago ? '-' : ''}$${Number(m.monto || 0).toFixed(2)}</td>
             <td class="text-end align-middle">${acciones}</td>
         </tr>`;
@@ -1627,17 +1627,22 @@ async function registrarPagoFiado() {
             saldo: est.saldo,
             vencido: est.vencido,
             abierto: est.abierto,
-            tituloSaldo: 'SALDO LUEGO DE ESTE COBRO'
+            tituloSaldo: 'SALDO LUEGO DE ESTE COBRO',
+            aplicaciones: data.aplicaciones || []
         };
         ultimoReciboPagoCtaCte = datosRecibo;
         cargarHistorialTabla(clienteFiadoActual.id);
         imprimirReciboPagoCtaCte(datosRecibo);
+        const ticketsImp = ticketsImputacionDe(data.aplicaciones);
+        const extraImp = ticketsImp.length
+            ? `<br><small>Imputado a ticket ${ticketsImp.map((t) => '#' + t).join(', ')}</small>`
+            : '';
         const saldo = Number(datosRecibo.saldo) || 0;
         await Swal.fire({
             title: saldo <= 0 ? 'Cuenta al día' : 'Pago registrado',
-            text: 'Recibo enviado a la ticketera.',
+            html: (saldo <= 0 ? 'No debe nada.' : 'Pago registrado.') + extraImp,
             icon: 'success',
-            timer: 1600,
+            timer: 2200,
             showConfirmButton: false
         });
     } catch (e) {

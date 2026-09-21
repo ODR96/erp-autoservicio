@@ -68,6 +68,111 @@ def _ticket_detalle(detalle):
     return m.group(1) if m else None
 
 
+def persistir_imputacion_fifo(cursor, cliente_id, pago_id, monto, ticket=None):
+    """Imputa un PAGO a los cargos más viejos (FIFO). Ticket de anulación, si viene, se cubre primero."""
+    resto = round(float(monto or 0), 2)
+    if resto <= 0.009:
+        return []
+    cursor.execute(
+        """
+        SELECT id, monto, IFNULL(monto_saldado, 0) as monto_saldado, IFNULL(detalle, '') as detalle
+        FROM movimientos_clientes
+        WHERE cliente_id = ? AND UPPER(tipo_movimiento) IN ('CARGO', 'RECARGO')
+        ORDER BY fecha_hora ASC, id ASC
+        """,
+        (cliente_id,),
+    )
+    cargos = []
+    for r in cursor.fetchall():
+        if isinstance(r, sqlite3.Row):
+            cargos.append(dict(r))
+        else:
+            cargos.append({"id": r[0], "monto": r[1], "monto_saldado": r[2], "detalle": r[3]})
+
+    aplicaciones = []
+
+    def tomar(c, cuanto):
+        pendiente = round(float(c["monto"] or 0) - float(c["monto_saldado"] or 0), 2)
+        if pendiente <= 0.009 or cuanto <= 0.009:
+            return 0.0
+        toma = round(min(pendiente, cuanto), 2)
+        nuevo = round(float(c["monto_saldado"] or 0) + toma, 2)
+        cursor.execute("UPDATE movimientos_clientes SET monto_saldado = ? WHERE id = ?", (nuevo, c["id"]))
+        cursor.execute(
+            "INSERT INTO clientes_pago_aplicaciones (pago_id, cargo_id, monto) VALUES (?, ?, ?)",
+            (pago_id, c["id"], toma),
+        )
+        c["monto_saldado"] = nuevo
+        aplicaciones.append({
+            "cargo_id": c["id"],
+            "ticket": _ticket_detalle(c.get("detalle")),
+            "monto": toma,
+        })
+        return toma
+
+    if ticket:
+        for c in cargos:
+            if resto <= 0.009:
+                break
+            if _ticket_detalle(c.get("detalle")) == str(ticket):
+                resto = round(resto - tomar(c, resto), 2)
+    for c in cargos:
+        if resto <= 0.009:
+            break
+        resto = round(resto - tomar(c, resto), 2)
+    return aplicaciones
+
+
+def _backfill_saldado_clientes(cursor):
+    """Pagos viejos (sin filas en aplicaciones) se imputan FIFO una sola vez."""
+    cursor.execute(
+        """
+        SELECT id, cliente_id, tipo_movimiento, monto, IFNULL(detalle, '') as detalle
+        FROM movimientos_clientes
+        WHERE UPPER(tipo_movimiento) IN ('PAGO', 'PAGO_ANULACION')
+          AND NOT EXISTS (
+              SELECT 1 FROM clientes_pago_aplicaciones a WHERE a.pago_id = movimientos_clientes.id
+          )
+        ORDER BY fecha_hora ASC, id ASC
+        """
+    )
+    huerfanos = cursor.fetchall()
+    for m in huerfanos:
+        if isinstance(m, sqlite3.Row):
+            pago_id, cliente_id, tipo, monto, detalle = m["id"], m["cliente_id"], m["tipo_movimiento"], m["monto"], m["detalle"]
+        else:
+            pago_id, cliente_id, tipo, monto, detalle = m[0], m[1], m[2], m[3], m[4]
+        tick = _ticket_detalle(detalle) if (tipo or "").upper() == "PAGO_ANULACION" else None
+        persistir_imputacion_fifo(cursor, cliente_id, pago_id, monto, ticket=tick)
+
+
+def _aplicaciones_de_pagos(cursor, pago_ids):
+    if not pago_ids:
+        return {}
+    placeholders = ",".join("?" * len(pago_ids))
+    cursor.execute(
+        f"""
+        SELECT a.pago_id, a.monto, IFNULL(c.detalle, '') as detalle
+        FROM clientes_pago_aplicaciones a
+        JOIN movimientos_clientes c ON c.id = a.cargo_id
+        WHERE a.pago_id IN ({placeholders})
+        ORDER BY a.id ASC
+        """,
+        list(pago_ids),
+    )
+    por_pago = {}
+    for r in cursor.fetchall():
+        if isinstance(r, sqlite3.Row):
+            pago_id, monto, detalle = r["pago_id"], r["monto"], r["detalle"]
+        else:
+            pago_id, monto, detalle = r[0], r[1], r[2]
+        por_pago.setdefault(pago_id, []).append({
+            "ticket": _ticket_detalle(detalle),
+            "monto": round(float(monto or 0), 2),
+        })
+    return por_pago
+
+
 def _aplicar_a_cargos(cargos, monto, ticket=None):
     resto = float(monto or 0)
     if resto <= 0:
@@ -113,7 +218,8 @@ def _estado_cuenta_de(cursor, cliente, hasta_id=None, al=None):
 
     hoy = al or _hoy_ar()
     sql = """
-        SELECT id, fecha_hora, tipo_movimiento, monto, IFNULL(detalle, '') as detalle
+        SELECT id, fecha_hora, tipo_movimiento, monto, IFNULL(detalle, '') as detalle,
+               IFNULL(monto_saldado, 0) as monto_saldado
         FROM movimientos_clientes
         WHERE cliente_id = ?
     """
@@ -131,15 +237,19 @@ def _estado_cuenta_de(cursor, cliente, hasta_id=None, al=None):
         monto = float(m["monto"] or 0)
         if tipo in ("CARGO", "RECARGO"):
             saldo_recon += monto
+            restante = monto
+            if hasta_id is None:
+                restante = max(0.0, round(monto - float(m["monto_saldado"] or 0), 2))
             cargos.append({
                 "fecha": _parse_fecha_mov(m["fecha_hora"]),
-                "restante": monto,
+                "restante": restante,
                 "ticket": _ticket_detalle(m["detalle"]),
             })
         elif tipo in ("PAGO", "PAGO_ANULACION"):
             saldo_recon -= monto
-            tick = _ticket_detalle(m["detalle"]) if tipo == "PAGO_ANULACION" else None
-            _aplicar_a_cargos(cargos, monto, tick)
+            if hasta_id is not None:
+                tick = _ticket_detalle(m["detalle"]) if tipo == "PAGO_ANULACION" else None
+                _aplicar_a_cargos(cargos, monto, tick)
 
     saldo = round(saldo_recon, 2) if hasta_id is not None else saldo_cache
     a_favor = round(-saldo, 2) if saldo < 0 else 0.0
@@ -206,6 +316,15 @@ def inicializar_tabla_movimientos():
         detalle TEXT,
         usuario_id INTEGER
     )''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS clientes_pago_aplicaciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pago_id INTEGER NOT NULL,
+        cargo_id INTEGER NOT NULL,
+        monto REAL NOT NULL
+    )''')
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_cli_pago_app_pago ON clientes_pago_aplicaciones (pago_id)"
+    )
     
     # PARCHE DE MIGRACIÓN: Le inyectamos la columna IVA a tu tabla vieja sin romper nada
     try:
@@ -216,6 +335,12 @@ def inicializar_tabla_movimientos():
         cursor.execute("ALTER TABLE clientes ADD COLUMN dia_vencimiento INTEGER")
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute("ALTER TABLE movimientos_clientes ADD COLUMN monto_saldado REAL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
+    _backfill_saldado_clientes(cursor)
 
     conexion.commit()
     conexion.close()
@@ -330,12 +455,14 @@ def recibo_pago_historico(movimiento_id: int):
             raise HTTPException(status_code=404, detail="Cliente no encontrado.")
         al = _parse_fecha_mov(mov["fecha_hora"])
         est = _estado_cuenta_de(cursor, cliente, hasta_id=mov["id"], al=al)
+        apps = _aplicaciones_de_pagos(cursor, [mov["id"]]).get(mov["id"], [])
         return {
             "movimiento_id": mov["id"],
             "fecha": mov["fecha_hora"],
             "monto": float(mov["monto"] or 0),
             "metodo": _metodo_desde_detalle(mov["detalle"]),
             "detalle": mov["detalle"],
+            "aplicaciones": apps,
             **est,
         }
     finally:
@@ -383,6 +510,8 @@ def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
             INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
             VALUES (?, ?, 'PAGO', ?, ?, ?)
         ''', (cliente_id, fecha_actual, pago.monto_pago, f"Pago en {origen} ({pago.metodo_pago})", pago.usuario_id))
+        pago_id = cursor.lastrowid
+        aplicaciones = persistir_imputacion_fifo(cursor, cliente_id, pago_id, pago.monto_pago)
         
         # 3. EL SWITCH: Si afecta caja y es en efectivo, recién ahí inflamos el cajón del turno
         if pago.afecta_caja and pago.metodo_pago.upper() == "EFECTIVO":
@@ -400,7 +529,7 @@ def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
                 ''', (fecha_actual, pago.usuario_id, pago.monto_pago, f"Cobro Deuda Cliente ID: {cliente_id}", turno_id))
 
         conexion.commit()
-        return {"mensaje": "Pago procesado correctamente."}
+        return {"mensaje": "Pago procesado correctamente.", "aplicaciones": aplicaciones}
     except Exception as e:
         if conexion:
             conexion.rollback() # <-- "Ctrl + Z" por si quedó algo a medio guardar
@@ -431,6 +560,13 @@ def ver_historial_cliente(cliente_id: int):
             ORDER BY fecha_hora DESC, id DESC
         ''', (cliente_id,))
         movimientos = [dict(m) for m in cursor.fetchall()]
+        pago_ids = [
+            m["id"] for m in movimientos
+            if (m.get("tipo_movimiento") or "").upper() in ("PAGO", "PAGO_ANULACION")
+        ]
+        por_pago = _aplicaciones_de_pagos(cursor, pago_ids)
+        for m in movimientos:
+            m["aplicaciones"] = por_pago.get(m["id"], [])
         return {"movimientos": movimientos}
     except Exception as e:
         if conexion:

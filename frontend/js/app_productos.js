@@ -836,7 +836,7 @@ async function abrirEditarProducto(id, pestana = 'precios') {
         dibujarTablaComponentes();
         document.getElementById('inputCantComponente').value = '1';
         document.getElementById('inputBuscarComponente').value = '';
-        aplicarCostoComboDesdeComponentes({ tocarPrecio: false });
+        pintarResumenCostoCombo();
         
         try {
             const resHist = await apiFetch(`${obtenerBaseUrl()}/productos/movimientos/${id}`);
@@ -874,6 +874,7 @@ async function abrirEditarProducto(id, pestana = 'precios') {
 
         document.querySelector('#modalNuevoProducto .modal-title').innerHTML = `<i class="bi bi-pencil-square"></i> Editando: ${p.nombre}`;
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalNuevoProducto')).show();
+        if (componentesComboActual.length) avisarDesvioCostoCombo(p.costo_sin_iva);
     } catch (e) {
         Swal.fire('Error', 'No se pudo cargar el producto: ' + e.message, 'error');
     }
@@ -909,6 +910,30 @@ async function guardarProductoCompleto() {
     };
     
     if(!p.nombre || p.precio_venta_final <= 0) return Swal.fire('Error', 'Faltan datos importantes.', 'warning');
+
+    if (componentesComboActual.length) {
+        const teorico = costoTeoricoCombo();
+        const costoForm = parseFloat(document.getElementById('inputCosto').value) || 0;
+        if (teorico > 0.009 && Math.abs(teorico - costoForm) > 0.05) {
+            const ok = await Swal.fire({
+                title: 'Costo del pack desactualizado',
+                html: `Los componentes suman <b>$ ${teorico.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</b> y el combo está en <b>$ ${costoForm.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</b>.`,
+                icon: 'warning',
+                showDenyButton: true,
+                showCancelButton: true,
+                confirmButtonText: 'Actualizar y guardar',
+                denyButtonText: 'Guardar igual',
+                cancelButtonText: 'Volver',
+                confirmButtonColor: '#198754'
+            });
+            if (ok.isDismissed) return;
+            if (ok.isConfirmed) {
+                aplicarCostoComboDesdeComponentes({ tocarPrecio: true });
+                p.costo_sin_iva = parseFloat(document.getElementById('inputCosto').value) || 0;
+                p.precio_venta_final = parseFloat(document.getElementById('inputPrecioVenta').value) || 0;
+            }
+        }
+    }
     
     try {
         let res;
@@ -1192,9 +1217,40 @@ function pintarResumenCostoCombo() {
     if (!caja) return;
     if (componentesComboActual.length === 0) {
         caja.textContent = '';
+        caja.className = 'small fw-bold text-primary';
         return;
     }
-    caja.textContent = `Costo del pack (suma de componentes): $ ${costoTeoricoCombo().toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const teorico = costoTeoricoCombo();
+    const actual = parseFloat(document.getElementById('inputCosto').value) || 0;
+    const fmt = (n) => n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (teorico > 0.009 && Math.abs(teorico - actual) > 0.05) {
+        caja.className = 'small fw-bold text-danger';
+        caja.textContent = `Los componentes ahora cuestan $ ${fmt(teorico)} y el pack está en $ ${fmt(actual)}.`;
+        return;
+    }
+    caja.className = 'small fw-bold text-primary';
+    caja.textContent = `Costo del pack (suma de componentes): $ ${fmt(teorico)}`;
+}
+
+async function avisarDesvioCostoCombo(costoGuardado) {
+    const teorico = costoTeoricoCombo();
+    const guardado = Number(costoGuardado) || 0;
+    if (!(teorico > 0.009 && Math.abs(teorico - guardado) > 0.05)) {
+        pintarResumenCostoCombo();
+        return;
+    }
+    pintarResumenCostoCombo();
+    const fmt = (n) => Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const r = await Swal.fire({
+        title: 'El pack quedó desactualizado',
+        html: `Los componentes ahora cuestan <b>$ ${fmt(teorico)}</b> y el combo está en <b>$ ${fmt(guardado)}</b>.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Actualizar costo y precio',
+        cancelButtonText: 'Dejar como está',
+        confirmButtonColor: '#198754'
+    });
+    if (r.isConfirmed) aplicarCostoComboDesdeComponentes({ tocarPrecio: true });
 }
 
 function aplicarCostoComboDesdeComponentes({ tocarPrecio } = { tocarPrecio: true }) {

@@ -315,7 +315,7 @@ async function cargarHistorialCliente(id) {
             return `<tr>
                     <td class="text-muted align-middle text-start">${String(m.fecha_hora || '').split(' ')[0]}</td>
                     <td class="align-middle"><span class="badge ${esPago ? 'bg-success' : 'bg-danger'}">${m.tipo_movimiento}</span></td>
-                    <td class="small align-middle text-start">${m.detalle || ''}</td>
+                    <td class="small align-middle text-start">${m.detalle || ''}${htmlLineaImputacionFiado(m.aplicaciones)}</td>
                     <td class="text-end fw-bold ${colorMonto} align-middle">${signo} $${montoValido.toFixed(2)}</td>
                     <td class="text-center align-middle">${btnAccion}</td>
                 </tr>`;
@@ -405,7 +405,8 @@ async function registrarPagoCliente() {
             saldo: est.saldo,
             vencido: est.vencido,
             abierto: est.abierto,
-            tituloSaldo: 'SALDO LUEGO DE ESTE COBRO'
+            tituloSaldo: 'SALDO LUEGO DE ESTE COBRO',
+            aplicaciones: data.aplicaciones || []
         };
         ultimoReciboPagoCtaCte = datosRecibo;
         await preguntarImprimirReciboPagoCtaCte(datosRecibo);

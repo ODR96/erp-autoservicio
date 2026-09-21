@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
+from backend.mod_clientes.rutas_clientes import persistir_imputacion_fifo
 
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
@@ -376,6 +377,7 @@ def anular_venta(venta_id: int, peticion: AnularVentaRequest, background_tasks: 
                 INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
                 VALUES (?, ?, 'PAGO_ANULACION', ?, ?, ?)
             ''', (cliente_id, fecha_actual, total_venta, f"Anulación Ticket #{venta_id}", peticion.usuario_id))
+            persistir_imputacion_fifo(cursor, cliente_id, cursor.lastrowid, total_venta, ticket=venta_id)
 
         # EL ARREGLO: Las anulaciones ahora sí declaran a qué turno y caja están afectando
         elif metodo_pago == 'EFECTIVO':
