@@ -14,16 +14,16 @@ HITOS Y ARQUITECTURA ACTUAL:
 4. Fechas de negocio: zona Argentina (UTC-3), no date('now') UTC ni toISOString() a ciegas.
 
 VERSIÓN:
-- Release Electron / badge: v1.0.34 (file:// pega a http://185.249.225.63:8000). El asar NO tiene el QR.
-- Cache JS/CSS reciente: layout ?v=1.0.50 — POS 1.0.62 / clientes 1.0.40.
+- Release Electron / badge: v1.0.35 (file:// pega a http://185.249.225.63:8000). Trae QR, ticket WA y cajero en remito.
+- Cache JS/CSS reciente: layout ?v=1.0.50 — POS 1.0.62 / clientes 1.0.41.
 - Admin hoy: http://185.249.225.63:8000  (Nginx :80 en paralelo)
-- Git: origin/main beba2f3 (QR Mercado Pago). nginx-erpetto.conf NO se commitea.
+- Git: origin/main f6a994b. nginx-erpetto.conf NO se commitea.
 
 SAVE STATE (2026-09-23):
 - Fiados v2 cerrado (2b FIFO persistente, 3 bloqueo+override mora, 4 deudores + cargo manual).
 - QR Mercado Pago V1 en git: sticker estático CAJA1 (caja MP "QR #1", pdv). Poll 2s. Ticket / stock recién con cobro acreditado (cobro_externo_id). QR no va a ventas_offline.
 - Texto de la orden MP = configuracion_local.nombre_negocio. Transferencia sigue manual y separada.
-- Probado en localhost (cargar, escanear sticker, pagar, cancelar). VPS todavía no tiene pull. Electron no hasta probar en el local con el QR impreso.
+- QR probado en localhost (cargar, escanear sticker, pagar, cancelar). VPS: pull + .env MP + restart ANTES de cobrar QR en el local.
 - Se sigue vendiendo sin stock (VENTA_SIN_STOCK). El CMV no bloquea el POS.
 - facturar_afip en /ventas/cobrar es STUB: CAE SIMULADO. AFIP en freezer.
 - Encargado: sin dashboard / RRHH / gastos / monitor de cajas. POS, productos, clientes, proveedores sí.
@@ -51,11 +51,12 @@ HITOS RECIENTES (ya no son tareas):
 - Cierre Z: caja solo_admin no manda WhatsApp; turno >20 h no manda digest de faltantes.
 - Fiados 2c: convenio_desde al pactar el día (no vence cargos anteriores). Clientes viejos con día ya cargado siguen igual hasta que se vuelva a pactar.
 - WhatsApp ticket a pedido: POST /ventas/ticket/{id}/whatsapp. Botón post-venta, historial POS y Clientes. Sin teléfono, no se manda.
+- Remito: cajero = quien abrió el turno (no "Caja Principal").
 
 COLA (prioridad):
 1. VPS: git pull + .env MP + restart FastAPI. Humo: una venta QR chica contra Contabo.
 2. Pago mixto de verdad (todos los medios, hoy el combo "Transferencia / QR" NO carga MP) + anulación/devolución del QR acreditado.
-3. Electron nuevo DESPUÉS de probar el sticker en el local. El 1.0.34 no tiene este POS. No publicar instalador si el ticket no cierra post-acreditación.
+3. Instalar Electron 1.0.35 en las cajas (file:// sigue :8000). Humo QR en el local con el sticker. Mixto "Transferencia / QR" NO carga MP.
 4. Point (tarjeta; QR en terminal es respaldo, no pisa el sticker). Webhook cuando haya HTTPS.
 5. AFIP REAL sigue en freezer. El toggle del POS existe; el backend no. Homologación el día que se descongele.
 6. Electron que abra http://IP/ (o HTTPS) → recién ahí uvicorn --host 127.0.0.1 y UFW sin 8000.
