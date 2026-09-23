@@ -16,8 +16,14 @@ async function apiFetch(recurso, config = {}) {
 
 const usuarioIdActual = parseInt(localStorage.getItem('usuario_id')) || 1;
 
-let empleadoActivo = null;   // { id, nombre_completo, ... }
+let empleadoActivo = null;   // { id, nombre_completo, telefono_whatsapp, ... }
+let telefonosEmpleados = {};
 let tarifaVigenteActiva = null; // { modalidad_pago, valor, ... } o null
+
+function telefonoEmpleadoActivo() {
+    if (!empleadoActivo) return '';
+    return (empleadoActivo.telefono_whatsapp || telefonosEmpleados[empleadoActivo.id] || '').trim();
+}
 
 // Ancla "hoy" a la hora de Argentina (UTC-3) de forma FIJA, sin depender de cómo esté
 // configurada la zona horaria del sistema operativo de esta PC/celular (puede estar mal
@@ -123,7 +129,9 @@ async function cargarSelectorEmpleados() {
         if (data.error) throw new Error(data.error);
 
         const select = document.getElementById('selectorEmpleado');
+        telefonosEmpleados = {};
         data.usuarios.filter(u => u.estado === 'ACTIVO').forEach(u => {
+            telefonosEmpleados[u.id] = (u.telefono_whatsapp || '').trim();
             select.innerHTML += `<option value="${u.id}">${u.nombre_completo} (${u.rol})</option>`;
         });
     } catch (e) {
@@ -139,7 +147,7 @@ function cambiarEmpleadoActivo() {
         empleadoActivo = null;
         return;
     }
-    empleadoActivo = { id: parseInt(id) };
+    empleadoActivo = { id: parseInt(id), telefono_whatsapp: telefonosEmpleados[id] || '' };
     document.getElementById('panelEmpleado').style.display = 'block';
     document.getElementById('avisoSinEmpleado').style.display = 'none';
 
@@ -763,25 +771,43 @@ async function confirmarLiquidacion() {
     const categoriaId = document.getElementById('liqCategoriaGasto').value;
     if (!categoriaId) return Swal.fire('Atención', 'Elegí la categoría de gasto.', 'warning');
 
-    const { value: pin } = await Swal.fire({
+    const { value: formLiq } = await Swal.fire({
         title: `Confirmar pago de $${ultimoPreview.monto_neto_estimado}`,
-        html: `<p>Empleado: <b>${ultimoPreview.empleado}</b><br>Esta acción impacta la rentabilidad del mes por el monto BRUTO ($${ultimoPreview.monto_bruto}).</p><input id="swal-pin" type="password" class="swal2-input" placeholder="Tu PIN de Administrador">`,
+        html: `<p>Empleado: <b>${ultimoPreview.empleado}</b><br>Esta acción impacta la rentabilidad del mes por el monto BRUTO ($${ultimoPreview.monto_bruto}).</p>
+            <input id="swal-pin" type="password" class="swal2-input" placeholder="Tu PIN de Administrador">
+            <div class="form-check text-start mt-3 ms-3">
+                <input class="form-check-input" type="checkbox" id="swal-wa">
+                <label class="form-check-label" for="swal-wa">Mandar recibo por WhatsApp</label>
+            </div>
+            <input id="swal-tel" type="tel" class="swal2-input" placeholder="5493704XXXXXX" inputmode="numeric" value="${telefonoEmpleadoActivo()}" style="display:none">`,
         focusConfirm: false,
         showCancelButton: true,
         confirmButtonText: 'Confirmar y Pagar (Enter)',
         confirmButtonColor: '#dc3545',
         didOpen: (popup) => {
+            const chk = document.getElementById('swal-wa');
+            const tel = document.getElementById('swal-tel');
+            chk.addEventListener('change', () => {
+                tel.style.display = chk.checked ? 'block' : 'none';
+                if (chk.checked && !tel.value) tel.focus();
+            });
             atarEnterConfirmarSwal(popup);
             setTimeout(() => document.getElementById('swal-pin').focus(), 300);
         },
         preConfirm: () => {
             const pin = document.getElementById('swal-pin').value;
+            const mandarWa = document.getElementById('swal-wa').checked;
+            const telefono = (document.getElementById('swal-tel').value || '').trim();
             if (!pin) { Swal.showValidationMessage('Ingresá tu PIN'); return false; }
-            return pin;
+            if (mandarWa && telefono.replace(/\D/g, '').length < 8) {
+                Swal.showValidationMessage('Si mandás WhatsApp, cargá el número (549 + área sin 0 + número sin 15).');
+                return false;
+            }
+            return { pin, mandarWa, telefono };
         }
     });
 
-    if (!pin) return;
+    if (!formLiq) return;
 
     const desde = document.getElementById('liqDesde').value;
     const hasta = document.getElementById('liqHasta').value;
@@ -792,13 +818,17 @@ async function confirmarLiquidacion() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 usuario_id: empleadoActivo.id, periodo_desde: desde, periodo_hasta: hasta,
-                categoria_gasto_id: parseInt(categoriaId), liquidado_por: usuarioIdActual, pin_autorizante: pin
+                categoria_gasto_id: parseInt(categoriaId), liquidado_por: usuarioIdActual, pin_autorizante: formLiq.pin
             })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
-        Swal.fire('¡Liquidación generada!', data.resumen.nota, 'success');
+        let extraWa = '';
+        if (formLiq.mandarWa && data.liquidacion_id) {
+            extraWa = await mandarLiquidacionWhatsapp(data.liquidacion_id, formLiq.telefono);
+        }
+        Swal.fire('¡Liquidación generada!', (data.resumen.nota || '') + extraWa, extraWa && extraWa.includes('no ') ? 'warning' : 'success');
         document.getElementById('previewLiquidacion').style.display = 'none';
         ultimoPreview = null;
         cargarCuentaEmpleado();
@@ -829,11 +859,53 @@ async function cargarLiquidaciones() {
                 <td class="text-end fw-bold">$${l.monto_neto_pagado}</td>
                 <td class="text-center"><span class="badge ${esAnulada ? 'bg-secondary' : 'bg-success'}">${l.estado}</span></td>
                 <td class="text-center">
-                    ${esAnulada ? '' : `<button class="btn btn-sm btn-outline-danger" onclick="anularLiquidacion(${l.id})" title="Anular"><i class="bi bi-x-circle"></i></button>`}
+                    ${esAnulada ? '' : `
+                        <button class="btn btn-sm btn-outline-success me-1" onclick="pedirWhatsappLiquidacion(${l.id})" title="WhatsApp"><i class="bi bi-whatsapp"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="anularLiquidacion(${l.id})" title="Anular"><i class="bi bi-x-circle"></i></button>
+                    `}
                 </td>
             </tr>
         `;
     });
+}
+
+async function mandarLiquidacionWhatsapp(liquidacionId, telefono) {
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/rrhh/liquidaciones/${liquidacionId}/whatsapp`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telefono })
+        });
+        const data = await res.json();
+        if (data.error) return ` WhatsApp: ${data.error}`;
+        return ' Recibo pedido al WhatsApp.';
+    } catch (e) {
+        return ` WhatsApp: ${e.message}`;
+    }
+}
+
+async function pedirWhatsappLiquidacion(id) {
+    const { value: telefono } = await Swal.fire({
+        title: 'Mandar liquidación por WhatsApp',
+        input: 'tel',
+        inputValue: telefonoEmpleadoActivo(),
+        inputPlaceholder: '5493704XXXXXX',
+        inputAttributes: { inputmode: 'numeric' },
+        showCancelButton: true,
+        confirmButtonText: 'Enviar',
+        confirmButtonColor: '#25D366',
+        preConfirm: (valor) => {
+            const tel = (valor || '').trim();
+            if (tel.replace(/\D/g, '').length < 8) {
+                Swal.showValidationMessage('Cargá el WhatsApp (549 + área sin 0 + número sin 15).');
+                return false;
+            }
+            return tel;
+        }
+    });
+    if (!telefono) return;
+    Swal.fire({ title: 'Mandando...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+    const extra = await mandarLiquidacionWhatsapp(id, telefono);
+    Swal.fire('WhatsApp', extra.trim(), extra.includes('no ') || extra.includes('Node') ? 'warning' : 'success');
 }
 
 async function anularLiquidacion(id) {

@@ -177,6 +177,10 @@ class AnulacionLiquidacion(BaseModel):
     motivo: Optional[str] = ""
 
 
+class WhatsappLiquidacion(BaseModel):
+    telefono: Optional[str] = ""
+
+
 # =================================================================
 # 3. HELPERS INTERNOS (seguridad + cálculo, reutilizados por varios endpoints)
 # =================================================================
@@ -755,6 +759,7 @@ def liquidar_sueldo(liq: LiquidacionNueva):
         conexion.commit()
         return {
             "mensaje": f"Liquidación #{liquidacion_id} generada con éxito.",
+            "liquidacion_id": liquidacion_id,
             "resumen": {
                 "empleado": empleado['nombre_completo'],
                 "modalidad": modalidad,
@@ -785,6 +790,52 @@ def listar_liquidaciones(usuario_id: int):
             SELECT * FROM liquidaciones_sueldos WHERE usuario_id = ? ORDER BY fecha_liquidacion DESC
         ''', (usuario_id,))
         return {"liquidaciones": [dict(r) for r in cursor.fetchall()]}
+    finally:
+        conexion.close()
+
+
+@router.post("/liquidaciones/{liquidacion_id}/whatsapp", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def mandar_liquidacion_whatsapp(liquidacion_id: int, body: WhatsappLiquidacion):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute(
+            '''
+            SELECT l.*, u.nombre_completo AS empleado, IFNULL(u.telefono_whatsapp, '') AS telefono_whatsapp
+            FROM liquidaciones_sueldos l
+            LEFT JOIN usuarios u ON u.id = l.usuario_id
+            WHERE l.id = ?
+            ''',
+            (liquidacion_id,),
+        )
+        liq = cursor.fetchone()
+        if not liq:
+            raise Exception("La liquidación no existe.")
+        if liq["estado"] == "ANULADO":
+            raise Exception("Esa liquidación está anulada.")
+        telefono = (body.telefono or "").strip() or (liq["telefono_whatsapp"] or "").strip()
+        if not telefono:
+            raise Exception("Este empleado no tiene WhatsApp cargado. Cargalo en Cajas → Empleados o escribilo ahora.")
+        from backend.whatsapp_puente import avisar_liquidacion_sueldo
+        envio = avisar_liquidacion_sueldo(
+            telefono,
+            {
+                "empleado": liq["empleado"],
+                "periodo_desde": liq["periodo_desde"],
+                "periodo_hasta": liq["periodo_hasta"],
+                "modalidad": liq["modalidad_aplicada"],
+                "monto_bruto": liq["monto_bruto"],
+                "descuento_aplicado": liq["total_descuentos_aplicados"],
+                "monto_neto": liq["monto_neto_pagado"],
+                "saldo_pendiente": liq["saldo_pendiente_arrastrado"],
+            },
+        )
+        if not envio.get("ok"):
+            return {"error": envio.get("detalle") or "No se pudo pedir el WhatsApp."}
+        return {"mensaje": "Pedido al WhatsApp del empleado. Si no llega en un minuto, el bot no está arriba."}
+    except Exception as e:
+        return {"error": str(e)}
     finally:
         conexion.close()
 

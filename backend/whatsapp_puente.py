@@ -132,6 +132,43 @@ def avisar_ticket_cliente(telefono: str, texto: str):
     return enviar_whatsapp(texto, numero=destino)
 
 
+def _fecha_ar(valor) -> str:
+    texto = str(valor or "").strip()
+    if len(texto) >= 10 and texto[4] == "-" and texto[7] == "-":
+        return f"{texto[8:10]}/{texto[5:7]}/{texto[0:4]}"
+    return texto or "-"
+
+
+def avisar_liquidacion_sueldo(telefono: str, datos: dict):
+    destino = _normalizar_destino(telefono)
+    if not destino:
+        return {"ok": False, "detalle": "Ese WhatsApp no es válido."}
+    conexion = obtener_conexion()
+    try:
+        fila = conexion.execute(
+            "SELECT nombre_negocio FROM configuracion_local WHERE id = 1"
+        ).fetchone()
+        negocio = " ".join(str((fila[0] if fila else "") or "").split()) or "ERPetto"
+    except Exception:
+        negocio = "ERPetto"
+    finally:
+        conexion.close()
+    lineas = [
+        negocio,
+        "Liquidación de sueldo",
+        f"Empleado: {datos.get('empleado') or '-'}",
+        f"Período: {_fecha_ar(datos.get('periodo_desde'))} a {_fecha_ar(datos.get('periodo_hasta'))}",
+        f"Modalidad: {datos.get('modalidad') or '-'}",
+        f"Bruto: {_plata(datos.get('monto_bruto'))}",
+        f"Descuentos: {_plata(datos.get('descuento_aplicado'))}",
+        f"Neto a cobrar: {_plata(datos.get('monto_neto'))}",
+    ]
+    saldo = float(datos.get("saldo_pendiente") or 0)
+    if saldo > 0.009:
+        lineas.append(f"Saldo que queda pendiente: {_plata(saldo)}")
+    return enviar_whatsapp("\n".join(lineas), numero=destino)
+
+
 def avisar_retiro(monto, motivo: str, usuario: str = "", turno_id=None):
     lineas = [f"Retiro de caja {_plata(monto)}"]
     if usuario:

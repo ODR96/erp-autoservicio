@@ -14,6 +14,8 @@ async function apiFetch(recurso, config = {}) {
     return respuesta;
 }
 
+let empleadosCache = [];
+
 function cambiarPestana(id, evento) {
     document.querySelectorAll('#cajaTabs .nav-link').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
@@ -465,6 +467,7 @@ async function cargarEmpleados() {
         if (data.error) throw new Error(data.error);
 
         tbody.innerHTML = '';
+        empleadosCache = data.usuarios || [];
         data.usuarios.forEach(u => {
             let badgeRol = 'bg-secondary';
             if (u.rol === 'ADMIN') badgeRol = 'bg-danger';
@@ -477,7 +480,7 @@ async function cargarEmpleados() {
             let botonesAccion = u.estado === 'ACTIVO'
                 ? `
                    <button class="btn btn-sm btn-outline-dark py-0 me-1" title="Imprimir Credencial" onclick="imprimirCredencial('${u.nombre_completo}', '${u.rol}', '${u.codigo_barras_credencial}')"><i class="bi bi-printer"></i></button>
-                   <button class="btn btn-sm btn-outline-primary py-0" title="Editar" onclick="abrirEditarEmpleado(${u.id}, '${u.nombre_completo}', '${u.rol}', '${u.codigo_barras_credencial}')"><i class="bi bi-pencil"></i></button>
+                   <button class="btn btn-sm btn-outline-primary py-0" title="Editar" onclick="abrirEditarEmpleado(${u.id})"><i class="bi bi-pencil"></i></button>
                    <button class="btn btn-sm btn-outline-danger py-0 ms-1" title="Dar de baja" onclick="darDeBajaEmpleado(${u.id}, '${u.nombre_completo}')"><i class="bi bi-trash"></i></button>
                   `
                 : `<button class="btn btn-sm btn-success py-0 fw-bold shadow-sm" onclick="reactivarEmpleado(${u.id}, '${u.nombre_completo}')"><i class="bi bi-arrow-counterclockwise"></i> Restaurar</button>`;
@@ -505,17 +508,21 @@ document.querySelector('[data-bs-target="#modalNuevoEmpleado"]').addEventListene
     document.getElementById('empNombre').value = '';
     document.getElementById('empRol').value = 'CAJERO';
     document.getElementById('empPin').value = '';
+    document.getElementById('empTel').value = '';
     document.getElementById('empCredencial').value = '';
     document.querySelector('#modalNuevoEmpleado .modal-title').innerHTML = '<i class="bi bi-person-badge"></i> Alta de Empleado';
 });
 
 // Función para llenar el modal y abrirlo en modo "EDICIÓN"
-function abrirEditarEmpleado(id, nombre, rol, credencial) {
-    document.getElementById('empId').value = id;
-    document.getElementById('empNombre').value = nombre;
-    document.getElementById('empRol').value = rol;
-    document.getElementById('empPin').value = ''; // Lo dejamos vacío por seguridad
-    document.getElementById('empCredencial').value = credencial === 'null' ? '' : credencial;
+function abrirEditarEmpleado(id) {
+    const u = empleadosCache.find(x => Number(x.id) === Number(id));
+    if (!u) return;
+    document.getElementById('empId').value = u.id;
+    document.getElementById('empNombre').value = u.nombre_completo || '';
+    document.getElementById('empRol').value = u.rol || 'CAJERO';
+    document.getElementById('empPin').value = '';
+    document.getElementById('empTel').value = u.telefono_whatsapp || '';
+    document.getElementById('empCredencial').value = u.codigo_barras_credencial || '';
 
     document.querySelector('#modalNuevoEmpleado .modal-title').innerHTML = '<i class="bi bi-pencil-square"></i> Editar Empleado';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('modalNuevoEmpleado')).show();
@@ -526,6 +533,7 @@ async function guardarEmpleado() {
     const nombre = document.getElementById('empNombre').value.trim();
     const rol = document.getElementById('empRol').value;
     const pin = document.getElementById('empPin').value.trim();
+    const telefono = (document.getElementById('empTel').value || '').trim();
     const credencial = document.getElementById('empCredencial').value.trim() || `CRED-${Math.floor(Math.random() * 10000)}`;
 
     // EL PARCHE: Si es nuevo exige PIN, si estamos editando lo deja pasar en blanco
@@ -545,7 +553,7 @@ async function guardarEmpleado() {
         const res = await apiFetch(url, {
             method: metodo,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nombre_completo: nombre, rol: rol, codigo_barras_credencial: credencial, pin_secreto: pin })
+            body: JSON.stringify({ nombre_completo: nombre, rol: rol, codigo_barras_credencial: credencial, pin_secreto: pin, telefono_whatsapp: telefono })
         });
         const data = await res.json();
 

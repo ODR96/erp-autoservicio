@@ -2,7 +2,7 @@ import os
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import sqlite3
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
@@ -23,6 +23,20 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 840 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/usuarios/login")
+
+
+def asegurar_columnas_usuarios():
+    conexion = obtener_conexion()
+    try:
+        conexion.execute("ALTER TABLE usuarios ADD COLUMN telefono_whatsapp TEXT DEFAULT ''")
+        conexion.commit()
+    except Exception:
+        pass
+    finally:
+        conexion.close()
+
+
+asegurar_columnas_usuarios()
 
 # --- LA AGENCIA DE SEGURIDAD DINÁMICA ---
 class VerificarRol:
@@ -52,12 +66,14 @@ class UsuarioNuevo(BaseModel):
     rol: str 
     codigo_barras_credencial: str
     pin_secreto: str
+    telefono_whatsapp: Optional[str] = ""
     
 class UsuarioActualizar(BaseModel):
     nombre_completo: str
     rol: str
     codigo_barras_credencial: str
-    pin_secreto: str = "" 
+    pin_secreto: str = ""
+    telefono_whatsapp: Optional[str] = "" 
 
 class LoginRequest(BaseModel):
     codigo_credencial: str
@@ -96,9 +112,9 @@ def crear_usuario(u: UsuarioNuevo): # <-- Adiós BackgroundTasks
     try:
         pin_seguro = obtener_hash_pin(u.pin_secreto)
         cursor.execute('''
-            INSERT INTO usuarios (nombre_completo, rol, codigo_barras_credencial, pin_secreto)
-            VALUES (?, ?, ?, ?)
-        ''', (u.nombre_completo, u.rol, u.codigo_barras_credencial, pin_seguro))
+            INSERT INTO usuarios (nombre_completo, rol, codigo_barras_credencial, pin_secreto, telefono_whatsapp)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (u.nombre_completo, u.rol, u.codigo_barras_credencial, pin_seguro, (u.telefono_whatsapp or "").strip()))
         
         conexion.commit()
         conexion.close()
@@ -189,7 +205,7 @@ def listar_usuarios():
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        cursor.execute("SELECT id, nombre_completo, rol, codigo_barras_credencial, estado FROM usuarios")
+        cursor.execute("SELECT id, nombre_completo, rol, codigo_barras_credencial, estado, IFNULL(telefono_whatsapp, '') AS telefono_whatsapp FROM usuarios")
         usuarios = [dict(u) for u in cursor.fetchall()]
         conexion.close()
         return {"usuarios": usuarios}
@@ -212,12 +228,12 @@ def actualizar_usuario(usuario_id: int, u: UsuarioActualizar): # <-- Adiós Back
         if u.pin_secreto != "":
             pin_seguro = obtener_hash_pin(u.pin_secreto)
             cursor.execute('''
-                UPDATE usuarios SET nombre_completo = ?, rol = ?, codigo_barras_credencial = ?, pin_secreto = ? WHERE id = ?
-            ''', (u.nombre_completo, u.rol, u.codigo_barras_credencial, pin_seguro, usuario_id))
+                UPDATE usuarios SET nombre_completo = ?, rol = ?, codigo_barras_credencial = ?, pin_secreto = ?, telefono_whatsapp = ? WHERE id = ?
+            ''', (u.nombre_completo, u.rol, u.codigo_barras_credencial, pin_seguro, (u.telefono_whatsapp or "").strip(), usuario_id))
         else:
             cursor.execute('''
-                UPDATE usuarios SET nombre_completo = ?, rol = ?, codigo_barras_credencial = ? WHERE id = ?
-            ''', (u.nombre_completo, u.rol, u.codigo_barras_credencial, usuario_id))
+                UPDATE usuarios SET nombre_completo = ?, rol = ?, codigo_barras_credencial = ?, telefono_whatsapp = ? WHERE id = ?
+            ''', (u.nombre_completo, u.rol, u.codigo_barras_credencial, (u.telefono_whatsapp or "").strip(), usuario_id))
             
         conexion.commit()
         conexion.close()
