@@ -431,7 +431,7 @@ async function verDetalleTicketAdmin(ventaId) {
              <div class="text-end fw-bold fs-5 mt-2 text-danger border-top pt-2">Total Llevado: $${data.totales.total_a_pagar.toFixed(2)}</div>
              <div class="text-start mt-3 small text-muted bg-light p-2 rounded border">
                 <i class="bi bi-clock"></i> Fecha: ${data.encabezado.fecha}<br>
-                <i class="bi bi-person-badge"></i> Cajero: ${data.encabezado.cajero || data.encabezado.usuario || data.encabezado.vendedor || 'Caja Principal'}
+                <i class="bi bi-person-badge"></i> Cajero: ${data.encabezado.cajero || '—'}
              </div>`;
 
         const r = await Swal.fire({

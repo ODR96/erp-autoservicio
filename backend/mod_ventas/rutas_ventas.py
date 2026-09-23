@@ -22,10 +22,55 @@ def asegurar_columnas_multi_caja():
     except: pass
     try: cursor.execute("ALTER TABLE ventas_cabecera ADD COLUMN override_mora_motivo TEXT")
     except: pass
+    try: cursor.execute("ALTER TABLE ventas_cabecera ADD COLUMN cajero_nombre TEXT")
+    except: pass
     conexion.commit()
     conexion.close()
 
 asegurar_columnas_multi_caja()
+
+
+def _campo_fila(fila, clave, default=None):
+    try:
+        if clave in fila.keys():
+            return fila[clave]
+    except Exception:
+        pass
+    return default
+
+
+def _cajero_desde_turno(cursor, turno_id):
+    if not turno_id:
+        return None, ""
+    cursor.execute(
+        """
+        SELECT t.usuario_id, IFNULL(u.nombre_completo, '')
+        FROM turnos_caja t
+        LEFT JOIN usuarios u ON u.id = t.usuario_id
+        WHERE t.id = ?
+        """,
+        (turno_id,),
+    )
+    fila = cursor.fetchone()
+    if not fila:
+        return None, ""
+    return fila[0], (fila[1] or "").strip()
+
+
+def _cajero_de_venta(cursor, venta):
+    nom = str(_campo_fila(venta, "cajero_nombre") or "").strip()
+    if nom and nom not in ("Sistema", "Caja Principal", "-"):
+        return nom
+    _, nom_turno = _cajero_desde_turno(cursor, _campo_fila(venta, "turno_id"))
+    if nom_turno:
+        return nom_turno
+    uid = _campo_fila(venta, "usuario_id")
+    if uid:
+        cursor.execute("SELECT nombre_completo FROM usuarios WHERE id = ?", (uid,))
+        fila = cursor.fetchone()
+        if fila and fila[0]:
+            return fila[0]
+    return nom or "—"
 
 
 def _costo_unitario_lote(costo_lote, costo_fallback) -> float:
@@ -96,7 +141,7 @@ def obtener_ventas_por_fecha(fecha: str = Query(..., description="Formato YYYY-M
         for row in cursor.fetchall():
             d = dict(row)
             d["cliente"] = d.get("nombre_cliente_factura", "Consumidor Final")
-            d["cajero_nombre"] = d.get("cajero_nombre", "-")
+            d["cajero_nombre"] = _cajero_de_venta(cursor, row)
             ventas.append(d)
         return {"ventas": ventas}
     except Exception as e:
@@ -183,13 +228,18 @@ def registrar_venta(venta: NuevaVenta):
                     raise Exception("El override de mora tiene que ser de Encargado o Admin.")
                 override_mora = motivo[:200]
         
+        usuario_id_caja, nombre_cajero_turno = _cajero_desde_turno(cursor, venta.turno_id)
+        nombre_cajero = nombre_cajero_turno or (venta.cajero_nombre or "").strip() or "Sistema"
+        if not usuario_id_caja:
+            usuario_id_caja = 1
+
         cursor.execute('''
             INSERT INTO ventas_cabecera 
-            (fecha_hora, cliente_id, tipo_comprobante, nombre_cliente_factura, documento_cliente, 
-             condicion_iva_cliente, total_venta, metodo_pago, descuento_recargo_global, estado, turno_id)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'COMPLETADA', ?)
-        ''', (fecha_actual, venta.cliente_id, venta.tipo_comprobante, venta.nombre_cliente_factura, 
-              venta.documento_cliente, venta.condicion_iva_cliente, venta.metodo_pago, venta.descuento_recargo_global, venta.turno_id))
+            (fecha_hora, usuario_id, cliente_id, tipo_comprobante, nombre_cliente_factura, documento_cliente, 
+             condicion_iva_cliente, total_venta, metodo_pago, descuento_recargo_global, estado, turno_id, cajero_nombre)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'COMPLETADA', ?, ?)
+        ''', (fecha_actual, usuario_id_caja, venta.cliente_id, venta.tipo_comprobante, venta.nombre_cliente_factura, 
+              venta.documento_cliente, venta.condicion_iva_cliente, venta.metodo_pago, venta.descuento_recargo_global, venta.turno_id, nombre_cajero))
         
         venta_id = cursor.lastrowid
         
@@ -271,7 +321,7 @@ def registrar_venta(venta: NuevaVenta):
             cursor.execute('''
                 INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
                 VALUES (?, ?, 'CARGO', ?, ?, ?)
-            ''', (venta.cliente_id, fecha_actual, total_con_descuento, f"Ticket POS #{venta_id}", 1))
+            ''', (venta.cliente_id, fecha_actual, total_con_descuento, f"Ticket POS #{venta_id}", usuario_id_caja))
             if sup_id_override or override_mora:
                 cursor.execute(
                     "UPDATE ventas_cabecera SET autorizado_por = ?, override_mora_motivo = ? WHERE id = ?",
@@ -368,7 +418,8 @@ def generar_ticket(venta_id: int):
                 "tipo_comprobante": venta['tipo_comprobante'],
                 "cliente": venta['nombre_cliente_factura'],
                 "fecha": venta['fecha_hora'],
-                "numero_ticket": f"0001-{venta['id']:08d}"
+                "numero_ticket": f"0001-{venta['id']:08d}",
+                "cajero": _cajero_de_venta(cursor, venta),
             },
             "detalle_compra": [dict(item) for item in detalle],
             "totales": {
