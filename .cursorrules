@@ -14,8 +14,8 @@ HITOS Y ARQUITECTURA ACTUAL:
 4. Fechas de negocio: zona Argentina (UTC-3), no date('now') UTC ni toISOString() a ciegas.
 
 VERSIÓN:
-- Release Electron / badge: v1.0.35 (file:// pega a http://185.249.225.63:8000). Trae QR, ticket WA y cajero en remito.
-- Cache JS/CSS reciente: layout ?v=1.0.50 — POS 1.0.62 / clientes 1.0.41.
+- Release Electron / badge: v1.0.36 (file:// pega a http://185.249.225.63:8000). QR, mixto con pata MP, anular que devuelve, WA solo fiado.
+- Cache JS/CSS reciente: layout ?v=1.0.50 — POS 1.0.64 / clientes 1.0.41.
 - Admin hoy: http://185.249.225.63:8000  (Nginx :80 en paralelo)
 - Git: origin/main f6a994b. nginx-erpetto.conf NO se commitea.
 

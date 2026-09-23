@@ -213,15 +213,41 @@ def _estado_order(order):
     pago = pagos[0] if pagos else {}
     pago_status = (pago.get("status") or "").lower()
     pago_detail = (pago.get("status_detail") or "").lower()
+    if status in ("refunded",) or pago_status in ("refunded",) or pago_detail in ("refunded", "reimbursed"):
+        return "reembolsado"
     if status == "processed" or (pago_status == "processed" and pago_detail in ("accredited", "processed", "")):
         return "aprobado"
     if status in ("expired",):
         return "vencido"
     if status in ("canceled", "cancelled"):
         return "cancelado"
-    if status in ("refunded",):
-        return "rechazado"
     return "pendiente"
+
+
+def reembolsar_cobro_aprobado(cursor, cobro):
+    """Devuelve el QR acreditado en MP. Si ya estaba reembolsado, no miente: ok. Si MP no devuelve, explota."""
+    cobro_id = cobro["id"] if isinstance(cobro, sqlite3.Row) or isinstance(cobro, dict) else cobro[0]
+    estado = cobro["estado"] if isinstance(cobro, sqlite3.Row) or isinstance(cobro, dict) else cobro[1]
+    order_id = cobro["mp_order_id"] if isinstance(cobro, sqlite3.Row) or isinstance(cobro, dict) else cobro[2]
+    if estado == "reembolsado":
+        return {"ok": True}
+    if estado != "aprobado":
+        raise RuntimeError("Ese QR no está acreditado. No hay nada para devolver.")
+    if not order_id:
+        raise RuntimeError("Ese cobro QR no tiene orden de Mercado Pago.")
+    try:
+        _mp("POST", f"/v1/orders/{order_id}/refund", None, idempotency=f"refund-cobro-{cobro_id}")
+    except RuntimeError as e:
+        try:
+            order = _mp("GET", f"/v1/orders/{order_id}")
+            if _estado_order(order) == "reembolsado":
+                cursor.execute("UPDATE cobros_externos SET estado = 'reembolsado' WHERE id = ?", (cobro_id,))
+                return {"ok": True}
+        except RuntimeError:
+            pass
+        raise RuntimeError(f"Mercado Pago no devolvió la plata. El ticket no se anula. {e}")
+    cursor.execute("UPDATE cobros_externos SET estado = 'reembolsado' WHERE id = ?", (cobro_id,))
+    return {"ok": True}
 
 
 def _cancelar_pendientes(cursor, pos_id):
@@ -367,6 +393,26 @@ def cancelar_cobro_qr(cobro_id: int):
         cursor.execute("UPDATE cobros_externos SET estado = 'cancelado' WHERE id = ? AND estado = 'pendiente'", (cobro_id,))
         conexion.commit()
         return {"cobro_id": cobro_id, "estado": "cancelado"}
+    except Exception as e:
+        conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        conexion.close()
+
+
+@router.post("/qr/{cobro_id}/devolver", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def devolver_cobro_qr(cobro_id: int):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute("SELECT * FROM cobros_externos WHERE id = ?", (cobro_id,))
+        cobro = cursor.fetchone()
+        if not cobro:
+            return {"error": "Ese cobro no existe."}
+        reembolsar_cobro_aprobado(cursor, cobro)
+        conexion.commit()
+        return {"cobro_id": cobro_id, "estado": "reembolsado"}
     except Exception as e:
         conexion.rollback()
         return {"error": str(e)}

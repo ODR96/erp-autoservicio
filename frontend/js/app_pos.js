@@ -327,15 +327,15 @@ async function abrirHistorialTurno() {
                 const badge = esAnulada ? '<span class="badge bg-danger">Anulada</span>' : '<span class="badge bg-success">Ok</span>';
                 const btnVer = `<button class="btn btn-sm btn-outline-info me-1" onclick="verDetalleTicketGlobal(${v.id})" title="Ver Detalle"><i class="bi bi-eye"></i></button>`;
                 const btnImprimir = `<button class="btn btn-sm btn-outline-primary me-1" onclick="imprimirTicket80mm(${v.id})" title="Reimprimir Ticket"><i class="bi bi-printer"></i></button>`;
-                const btnWa = !esAnulada
+                const metodo = String(v.metodo_pago || '');
+                const esFiado = ['FIADO', 'CUENTA CORRIENTE'].includes(metodo.toUpperCase());
+                const btnWa = !esAnulada && esFiado
                     ? `<button class="btn btn-sm btn-outline-success me-1" onclick="mandarTicketWhatsapp(${v.id})" title="Mandar por WhatsApp"><i class="bi bi-whatsapp"></i></button>`
                     : '';
                 const btnAnular = esAnulada
                     ? '<button class="btn btn-sm btn-secondary" disabled><i class="bi bi-x-circle"></i></button>'
                     : `<button class="btn btn-sm btn-outline-danger" onclick="confirmarAnulacion(${v.id}, '${v.numero_ticket}')" title="Anular Venta"><i class="bi bi-trash"></i></button>`;
                 const hora = new Date(v.fecha_hora).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-                const metodo = String(v.metodo_pago || '');
-                const esFiado = ['FIADO', 'CUENTA CORRIENTE'].includes(metodo.toUpperCase());
                 const nombreFiado = String(v.nombre_cliente || '').trim();
                 const celdaMetodo = esFiado && nombreFiado
                     ? `${metodo}<div class="small text-warning fw-bold">${escHtmlPos(nombreFiado)}</div>`
@@ -420,7 +420,7 @@ async function confirmarAnulacion(ventaId, ticket) {
     // Alerta de seguridad antes de anular
     const confirm = await Swal.fire({
         title: '¿Anular Ticket ' + ticket + '?',
-        text: 'El stock de los productos regresará a la estantería y la plata se descontará de la caja. Esta acción quedará registrada.',
+        text: 'El stock vuelve a la góndola. Si hubo QR, Mercado Pago tiene que devolver la plata: si no la devuelve, el ticket no se anula.',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#d33',
@@ -1245,8 +1245,8 @@ async function mandarTicketWhatsapp(ventaId) {
     return Swal.fire('WhatsApp', data.mensaje || 'Pedido al WhatsApp del cliente.', 'success');
 }
 
-async function preguntarTicketDespuesDeVenta({ titulo, html, imprimir, ventaId }) {
-    const puedeWa = ventaId && !String(ventaId).startsWith('OFF-');
+async function preguntarTicketDespuesDeVenta({ titulo, html, imprimir, ventaId, cuentaCorriente }) {
+    const puedeWa = !!cuentaCorriente && ventaId && !String(ventaId).startsWith('OFF-');
     const r = await Swal.fire({
         title: titulo,
         html,
@@ -1345,124 +1345,136 @@ let clientesGlobalesPOS = [];
 let clienteFiadoActual = null;
 let qrAcreditadoSinTicket = null;
 
-async function cobrarConQrMp() {
-    if (carrito.length === 0) return Swal.fire('Ticket vacío', 'Agregá productos antes de cobrar con QR.', 'error');
-    if (!turnoActualId) return Swal.fire('Sin turno', 'Abrí un turno de caja para poder cobrar.', 'error');
-    if (!navigator.onLine) {
-        return Swal.fire('Sin internet', 'El QR necesita conexión. Cobrá en efectivo o transferencia.', 'warning');
+async function esperarPagoQr(monto, { titulo = 'Cobrar con QR' } = {}) {
+    if (!turnoActualId) {
+        await Swal.fire('Sin turno', 'Abrí un turno de caja para poder cobrar.', 'error');
+        return null;
     }
-
-    if (qrAcreditadoSinTicket && Math.abs(qrAcreditadoSinTicket.monto - totalVenta) > 0.05) {
-        return Swal.fire({
+    if (!navigator.onLine) {
+        await Swal.fire('Sin internet', 'El QR necesita conexión. Cobrá en efectivo o transferencia.', 'warning');
+        return null;
+    }
+    if (monto < 15) {
+        await Swal.fire('QR mínimo', 'Mercado Pago no acepta QR de menos de $15.', 'warning');
+        return null;
+    }
+    if (qrAcreditadoSinTicket && Math.abs(qrAcreditadoSinTicket.monto - monto) > 0.05) {
+        await Swal.fire({
             title: 'Ese QR ya se pagó',
-            html: `El cliente pagó <b>${plataFiado(qrAcreditadoSinTicket.monto)}</b> y el ticket no se guardó.<br>Volvé ese total al carrito y tocá <b>QR</b> de nuevo. No cargues otro cobro.`,
+            html: `El cliente pagó <b>${plataFiado(qrAcreditadoSinTicket.monto)}</b> y el ticket no se guardó.<br>Usá ese mismo monto. No cargues otro cobro.`,
             icon: 'warning'
         });
+        return null;
     }
+    if (qrAcreditadoSinTicket) return qrAcreditadoSinTicket.cobroId;
 
-    const totalQr = totalVenta;
-    let cobroId = qrAcreditadoSinTicket ? qrAcreditadoSinTicket.cobroId : null;
+    const confirm = await Swal.fire({
+        title: titulo,
+        html: `<div style="font-size:2rem;font-weight:800;letter-spacing:-.03em">${plataFiado(monto)}</div>
+            <div class="mt-2">Se carga este monto en el <b>QR impreso</b> de la caja.<br>El cliente no tiene que leer la pantalla.</div>`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#198754',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Cargar monto al QR',
+        cancelButtonText: 'Volver'
+    });
+    if (!confirm.isConfirmed) return null;
 
-    if (!cobroId) {
-        const confirm = await Swal.fire({
-            title: 'Cobrar con QR',
-            html: `<div style="font-size:2rem;font-weight:800;letter-spacing:-.03em">${plataFiado(totalQr)}</div>
-                <div class="mt-2">Se carga este monto en el <b>QR impreso</b> de la caja.<br>El cliente no tiene que leer la pantalla.</div>`,
-            icon: 'question',
-            showCancelButton: true,
-            confirmButtonColor: '#198754',
-            cancelButtonColor: '#6c757d',
-            confirmButtonText: 'Cargar monto al QR',
-            cancelButtonText: 'Volver al ticket'
-        });
-        if (!confirm.isConfirmed) {
-            inputScan.focus();
-            return;
+    Swal.fire({ title: 'Cargando el monto en el QR...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    const res = await apiFetch(`${obtenerBaseUrl()}/pagos/qr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monto, turno_id: turnoActualId })
+    });
+    const data = await res.json().catch(() => ({}));
+    const detalle = data.error || (typeof data.detail === 'string' ? data.detail : '');
+    if (!res.ok || detalle) throw new Error(detalle || ('No se pudo cargar el QR (HTTP ' + res.status + ').'));
+    const cobroId = data.cobro_id;
+
+    let cierre = 'esperando';
+    const img = data.image
+        ? `<img alt="QR de la caja" src="${escHtmlPos(data.image)}" style="width:180px;height:180px;object-fit:contain;background:#fff;padding:8px;border-radius:8px">`
+        : '<div class="small text-danger">No hay imagen del QR. Usá el sticker impreso.</div>';
+    await Swal.fire({
+        title: 'Esperando el pago',
+        html: `<div style="font-size:2.1rem;font-weight:800;letter-spacing:-.03em">${plataFiado(monto)}</div>
+            <div class="mt-2 fw-semibold">Que pague con el QR impreso de la caja.</div>
+            <div class="small text-muted mt-1">Esta pantalla es para vos. El cliente mira el sticker.<br>Si se arrepiente o se va, cancelá: si no, el siguiente paga este monto.</div>
+            <details class="mt-3">
+                <summary class="small text-muted">Mostrar el QR en pantalla (respaldo)</summary>
+                <div class="mt-2">${img}</div>
+            </details>`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: 'Cancelar: no pagó',
+        cancelButtonColor: '#dc3545',
+        didOpen: () => {
+            const timer = setInterval(async () => {
+                if (!Swal.isVisible()) {
+                    clearInterval(timer);
+                    return;
+                }
+                try {
+                    const stRes = await apiFetch(`${obtenerBaseUrl()}/pagos/qr/${cobroId}`);
+                    const st = await stRes.json();
+                    if (st.estado === 'aprobado') {
+                        cierre = 'aprobado';
+                        clearInterval(timer);
+                        Swal.close();
+                    } else if (st.estado && st.estado !== 'pendiente') {
+                        cierre = st.estado;
+                        clearInterval(timer);
+                        Swal.close();
+                    }
+                } catch (e) { /* el próximo intento */ }
+            }, 2000);
         }
-
-        Swal.fire({ title: 'Cargando el monto en el QR...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-        try {
-            const res = await apiFetch(`${obtenerBaseUrl()}/pagos/qr`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ monto: totalQr, turno_id: turnoActualId })
-            });
-            const data = await res.json().catch(() => ({}));
-            const detalle = data.error || (typeof data.detail === 'string' ? data.detail : '');
-            if (!res.ok || detalle) throw new Error(detalle || ('No se pudo cargar el QR (HTTP ' + res.status + ').'));
-            cobroId = data.cobro_id;
-
-            let cierre = 'esperando';
-            const img = data.image
-                ? `<img alt="QR de la caja" src="${escHtmlPos(data.image)}" style="width:180px;height:180px;object-fit:contain;background:#fff;padding:8px;border-radius:8px">`
-                : '<div class="small text-danger">No hay imagen del QR. Usá el sticker impreso.</div>';
+    });
+    if (cierre === 'esperando') cierre = 'cancelar';
+    if (cierre !== 'aprobado') {
+        await apiFetch(`${obtenerBaseUrl()}/pagos/qr/${cobroId}/cancelar`, { method: 'POST' });
+        if (cierre === 'vencido') {
             await Swal.fire({
-                title: 'Esperando el pago',
-                html: `<div style="font-size:2.1rem;font-weight:800;letter-spacing:-.03em">${plataFiado(totalQr)}</div>
-                    <div class="mt-2 fw-semibold">Que pague con el QR impreso de la caja.</div>
-                    <div class="small text-muted mt-1">Esta pantalla es para vos. El cliente mira el sticker.<br>Si se arrepiente o se va, cancelá: si no, el siguiente paga este monto.</div>
-                    <details class="mt-3">
-                        <summary class="small text-muted">Mostrar el QR en pantalla (respaldo)</summary>
-                        <div class="mt-2">${img}</div>
-                    </details>`,
-                allowOutsideClick: false,
-                showConfirmButton: false,
-                showCancelButton: true,
-                cancelButtonText: 'Cancelar: no pagó',
-                cancelButtonColor: '#dc3545',
-                didOpen: () => {
-                    const timer = setInterval(async () => {
-                        if (!Swal.isVisible()) {
-                            clearInterval(timer);
-                            return;
-                        }
-                        try {
-                            const stRes = await apiFetch(`${obtenerBaseUrl()}/pagos/qr/${cobroId}`);
-                            const st = await stRes.json();
-                            if (st.estado === 'aprobado') {
-                                cierre = 'aprobado';
-                                clearInterval(timer);
-                                Swal.close();
-                            } else if (st.estado && st.estado !== 'pendiente') {
-                                cierre = st.estado;
-                                clearInterval(timer);
-                                Swal.close();
-                            }
-                        } catch (e) { /* el próximo intento */ }
-                    }, 2000);
-                }
+                title: 'Se venció el cobro',
+                html: 'Pasaron 5 minutos y nadie pagó.<br>El QR quedó libre. Volvé a cargar el monto si el cliente todavía quiere pagar.',
+                icon: 'warning'
             });
-            if (cierre === 'esperando') cierre = 'cancelar';
-            if (cierre !== 'aprobado') {
-                await apiFetch(`${obtenerBaseUrl()}/pagos/qr/${cobroId}/cancelar`, { method: 'POST' });
-                inputScan.focus();
-                if (cierre === 'vencido') {
-                    return Swal.fire({
-                        title: 'Se venció el cobro',
-                        html: 'Pasaron 5 minutos y nadie pagó.<br>El QR quedó libre. Volvé a tocar <b>QR</b> si el cliente todavía quiere pagar.',
-                        icon: 'warning'
-                    });
-                }
-                return Swal.fire({
-                    title: 'Cobro cancelado',
-                    html: 'Sacamos el monto del QR.<br>El próximo cliente <b>no</b> va a pagar este ticket.',
-                    icon: 'info'
-                });
-            }
-        } catch (e) {
-            return Swal.fire('No se pudo cargar el QR', e.message || 'Reintentá o cobrá por otro medio.', 'error');
+        } else {
+            await Swal.fire({
+                title: 'Cobro cancelado',
+                html: 'Sacamos el monto del QR.<br>El próximo cliente <b>no</b> va a pagar este ticket.',
+                icon: 'info'
+            });
         }
+        return null;
+    }
+    return cobroId;
+}
+
+async function cobrarConQrMp() {
+    if (carrito.length === 0) return Swal.fire('Ticket vacío', 'Agregá productos antes de cobrar con QR.', 'error');
+    let cobroId;
+    try {
+        cobroId = await esperarPagoQr(totalVenta);
+    } catch (e) {
+        return Swal.fire('No se pudo cargar el QR', e.message || 'Reintentá o cobrá por otro medio.', 'error');
+    }
+    if (!cobroId) {
+        inputScan.focus();
+        return;
     }
 
-    qrAcreditadoSinTicket = { cobroId, monto: totalQr };
+    qrAcreditadoSinTicket = { cobroId, monto: totalVenta };
     Swal.fire({ title: 'Pagó. Guardando el ticket...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-    const venta = await procesarVentaBackend('QR Mercado Pago', totalQr, null, null, { sin_offline: true, cobro_externo_id: cobroId });
+    const venta = await procesarVentaBackend('QR Mercado Pago', totalVenta, null, null, { sin_offline: true, cobro_externo_id: cobroId });
     if (!venta) return;
     qrAcreditadoSinTicket = null;
     await preguntarTicketDespuesDeVenta({
         titulo: 'Cobrado con QR',
-        html: `Pagó ${plataFiado(totalQr)} por Mercado Pago.<br>Ticket N°: <b>${venta.numero_ticket}</b>`,
-        imprimir: () => imprimirTicket80mm(venta.numero_ticket, totalQr, 0, venta.ahorro_total),
+        html: `Pagó ${plataFiado(totalVenta)} por Mercado Pago.<br>Ticket N°: <b>${venta.numero_ticket}</b>`,
+        imprimir: () => imprimirTicket80mm(venta.numero_ticket, totalVenta, 0, venta.ahorro_total),
         ventaId: venta.numero_ticket
     });
 }
@@ -1982,7 +1994,8 @@ async function mandarACtaCte() {
             titulo: 'Cuenta corriente',
             html: `Se cargaron <b>$${totalRemito.toFixed(2)}</b> a ${escHtmlPos(nombreLimpio)}.`,
             imprimir: () => imprimirRemitoFiado(nombreLimpio, totalRemito, articulosRemito),
-            ventaId: resultado.numero_ticket
+            ventaId: resultado.numero_ticket,
+            cuentaCorriente: true
         });
     }
 }
@@ -3131,6 +3144,7 @@ function abrirPagoMixto() {
     document.getElementById('mixtoEfectivo').value = '';
     document.getElementById('mixtoTarjeta').value = '';
     document.getElementById('mixtoTransferencia').value = '';
+    document.getElementById('mixtoQr').value = '';
 
     calcularMixto();
     modalPagoMixto.show();
@@ -3141,8 +3155,9 @@ function calcularMixto() {
     const ef = parseFloat(document.getElementById('mixtoEfectivo').value) || 0;
     const ta = parseFloat(document.getElementById('mixtoTarjeta').value) || 0;
     const tr = parseFloat(document.getElementById('mixtoTransferencia').value) || 0;
+    const qr = parseFloat(document.getElementById('mixtoQr').value) || 0;
 
-    const suma = ef + ta + tr;
+    const suma = ef + ta + tr + qr;
     const diferencia = totalVenta - suma;
 
     const estadoTexto = document.getElementById('estadoMixtoTexto');
@@ -3168,30 +3183,48 @@ async function procesarPagoMixto() {
     const efOriginal = parseFloat(document.getElementById('mixtoEfectivo').value) || 0;
     const ta = parseFloat(document.getElementById('mixtoTarjeta').value) || 0;
     const tr = parseFloat(document.getElementById('mixtoTransferencia').value) || 0;
+    const qr = parseFloat(document.getElementById('mixtoQr').value) || 0;
 
-    const suma = efOriginal + ta + tr;
+    const suma = efOriginal + ta + tr + qr;
     if (suma < totalVenta) return Swal.fire('Falta dinero', 'La suma de los pagos no cubre el total de la venta.', 'warning');
+    if (qr > 0.01 && qr < 15) return Swal.fire('QR mínimo', 'La pata QR tiene que ser de $15 o más.', 'warning');
 
-    // Calculamos el vuelto (siempre sale del efectivo)
     const vuelto = suma > totalVenta ? (suma - totalVenta) : 0;
     const efectivoRealCaja = efOriginal - vuelto;
 
-    // Creamos la lista para Python
     const desglosePagos = [];
     if (efectivoRealCaja > 0) desglosePagos.push({ metodo: "EFECTIVO", monto: efectivoRealCaja });
     if (ta > 0) desglosePagos.push({ metodo: "TARJETA", monto: ta });
     if (tr > 0) desglosePagos.push({ metodo: "TRANSFERENCIA", monto: tr });
+    if (qr > 0.01) desglosePagos.push({ metodo: "QR Mercado Pago", monto: qr });
 
-    modalPagoMixto.hide();
+    let cobroId = null;
+    if (qr > 0.01) {
+        modalPagoMixto.hide();
+        try {
+            cobroId = await esperarPagoQr(qr, { titulo: 'QR del pago dividido' });
+        } catch (e) {
+            modalPagoMixto.show();
+            return Swal.fire('No se pudo cargar el QR', e.message || 'Reintentá o sacá la pata QR.', 'error');
+        }
+        if (!cobroId) {
+            modalPagoMixto.show();
+            return;
+        }
+        qrAcreditadoSinTicket = { cobroId, monto: qr };
+    } else {
+        modalPagoMixto.hide();
+    }
+
     Swal.fire({ title: 'Procesando Venta Mixta...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
-    // Disparamos la venta mandando "MIXTO" como método
-    const resultado = await procesarVentaBackend('MIXTO', suma, desglosePagos);
+    const extras = cobroId ? { sin_offline: true, cobro_externo_id: cobroId } : {};
+    const resultado = await procesarVentaBackend('MIXTO', suma, desglosePagos, null, extras);
 
     if (resultado) {
+        qrAcreditadoSinTicket = null;
         await preguntarTicketDespuesDeVenta({
             titulo: 'Venta exitosa',
-            html: `Venta dividida cobrada.<br><b>Entregar vuelto en efectivo: $${vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b>`,
+            html: `Venta dividida cobrada.${qr > 0.01 ? `<br>QR Mercado Pago: ${plataFiado(qr)}` : ''}<br><b>Entregar vuelto en efectivo: $${vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b>`,
             imprimir: () => imprimirTicket80mm(resultado.numero_ticket, suma, vuelto, resultado.ahorro_total),
             ventaId: resultado.numero_ticket
         });

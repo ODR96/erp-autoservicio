@@ -268,6 +268,52 @@
             background-color: #10b981;
         }
 
+        #modalPagoMixto .modal-content {
+            background: #142032;
+            color: #E2E8F0;
+            border: 1px solid #1F304A;
+        }
+        #modalPagoMixto .modal-header {
+            background: #070B14;
+            border-bottom: 1px solid #1F304A;
+            color: #E2E8F0;
+        }
+        #modalPagoMixto .modal-body {
+            background: #142032;
+        }
+        #modalPagoMixto .modal-footer {
+            background: #142032;
+            border-top: 1px solid #1F304A;
+        }
+        #modalPagoMixto .form-label {
+            color: #E2E8F0 !important;
+        }
+        #modalPagoMixto .mixto-caja {
+            background: #070B14;
+            border: 1px solid #1F304A;
+            border-radius: 10px;
+        }
+        #modalPagoMixto .mixto-caja h6 {
+            color: #94A3B8;
+        }
+        #modalPagoMixto #totalMixtoCobrar {
+            color: #F8FAFC !important;
+        }
+        #modalPagoMixto .form-control {
+            background: #1A2A42 !important;
+            color: #F8FAFC !important;
+            border: 1px solid #1F304A !important;
+        }
+        #modalPagoMixto .form-control::placeholder {
+            color: #64748B;
+        }
+        #modalPagoMixto .form-control:focus {
+            box-shadow: 0 0 0 0.2rem rgba(16, 185, 129, 0.25);
+        }
+        #modalPagoMixto .input-group-text {
+            border: 1px solid #1F304A;
+        }
+
         .bg-tarjeta {
             background-color: #eab308;
             color: #1e293b;
@@ -878,15 +924,15 @@
     <div class="modal fade" id="modalPagoMixto" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header bg-dark text-white">
+                <div class="modal-header">
                     <h5 class="modal-title fw-bold"><i class="bi bi-pie-chart-fill text-info"></i> Pago Múltiple /
                         Dividido</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body bg-light">
-                    <div class="text-center mb-4 bg-white p-3 rounded shadow-sm border">
-                        <h6 class="text-muted text-uppercase mb-1 fw-bold">Total del Ticket</h6>
-                        <h1 class="display-5 fw-bold text-dark mb-0" id="totalMixtoCobrar">$0.00</h1>
+                <div class="modal-body">
+                    <div class="text-center mb-4 p-3 mixto-caja">
+                        <h6 class="text-uppercase mb-1 fw-bold">Total del Ticket</h6>
+                        <h1 class="display-5 fw-bold mb-0" id="totalMixtoCobrar">$0.00</h1>
                     </div>
 
                     <div class="row g-3">
@@ -907,27 +953,34 @@
                                     placeholder="0.00" oninput="calcularMixto()">
                             </div>
                         </div>
-                        <div class="col-12">
-                            <label class="form-label fw-bold"><i class="bi bi-phone text-secondary"></i> Transferencia /
-                                QR</label>
+                        <div class="col-6">
+                            <label class="form-label fw-bold"><i class="bi bi-bank text-secondary"></i> Transferencia</label>
                             <div class="input-group input-group-lg shadow-sm">
                                 <span class="input-group-text bg-secondary text-white fw-bold">$</span>
                                 <input type="number" class="form-control text-end fw-bold" id="mixtoTransferencia"
                                     placeholder="0.00" oninput="calcularMixto()">
                             </div>
                         </div>
+                        <div class="col-6">
+                            <label class="form-label fw-bold"><i class="bi bi-qr-code-scan text-success"></i> QR MP</label>
+                            <div class="input-group input-group-lg shadow-sm">
+                                <span class="input-group-text bg-success text-white fw-bold">$</span>
+                                <input type="number" class="form-control text-end fw-bold" id="mixtoQr"
+                                    placeholder="0.00" oninput="calcularMixto()">
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="mt-4 p-3 bg-white border rounded text-center shadow-sm" id="cajaEstadoMixto">
+                    <div class="mt-4 p-3 mixto-caja text-center" id="cajaEstadoMixto">
                         <h4 class="mb-0 text-danger fw-bold" id="estadoMixtoTexto">Falta cobrar: $0.00</h4>
                     </div>
                 </div>
-                <div class="modal-footer justify-content-between bg-white">
-                    <button type="button" class="btn btn-outline-secondary fw-bold"
+                <div class="modal-footer justify-content-between">
+                    <button type="button" class="btn btn-outline-light fw-bold"
                         data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-dark btn-lg fw-bold px-4" id="btnConfirmarMixto" disabled
+                    <button type="button" class="btn btn-success btn-lg fw-bold px-4" id="btnConfirmarMixto" disabled
                         onclick="procesarPagoMixto()">
-                        <i class="bi bi-check-circle text-success"></i> FACTURAR
+                        <i class="bi bi-check-circle"></i> Cobrar
                     </button>
                 </div>
             </div>
@@ -940,7 +993,7 @@
 
     <!-- ===== ARCHIVOS JS SEPARADOS ===== -->
     <script src="js/layout.js?v=1.0.50"></script>
-    <script src="js/app_pos.js?v=1.0.62"></script>
+    <script src="js/app_pos.js?v=1.0.64"></script>
 
 </body>
 

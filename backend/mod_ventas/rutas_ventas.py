@@ -178,6 +178,46 @@ class NuevaVenta(BaseModel):
     cajero_nombre: str = "Sistema"
     turno_id: int
 
+def _metodo_es_qr(metodo: str) -> bool:
+    m = (metodo or "").upper()
+    return "QR" in m
+
+
+def _monto_qr_mixto(pagos) -> float:
+    return round(sum(float(p.monto or 0) for p in (pagos or []) if _metodo_es_qr(p.metodo)), 2)
+
+
+def _atar_cobro_qr(cursor, venta, venta_id, total_con_descuento):
+    monto_esperado = float(total_con_descuento)
+    if (venta.metodo_pago or "").upper() == "MIXTO":
+        monto_esperado = _monto_qr_mixto(venta.pagos_mixtos)
+        if monto_esperado <= 0.05:
+            if venta.cobro_externo_id:
+                raise Exception("Este mixto no tiene pata QR. No se ata un cobro de Mercado Pago.")
+            return
+    elif not _metodo_es_qr(venta.metodo_pago):
+        return
+    if not venta.cobro_externo_id:
+        raise Exception("El QR tiene que estar acreditado antes de cerrar el ticket.")
+    cursor.execute(
+        "SELECT estado, venta_id, monto FROM cobros_externos WHERE id = ?",
+        (venta.cobro_externo_id,),
+    )
+    cobro = cursor.fetchone()
+    if not cobro or (cobro["estado"] or "") != "aprobado":
+        raise Exception("Ese cobro QR no está acreditado.")
+    if cobro["venta_id"]:
+        raise Exception("Ese cobro QR ya tiene ticket.")
+    if abs(float(cobro["monto"] or 0) - monto_esperado) > 0.05:
+        raise Exception("El monto acreditado no coincide con la pata QR.")
+    cursor.execute(
+        "UPDATE cobros_externos SET venta_id = ? WHERE id = ? AND venta_id IS NULL",
+        (venta_id, venta.cobro_externo_id),
+    )
+    if cursor.rowcount != 1:
+        raise Exception("Ese cobro QR ya tiene ticket.")
+
+
 def _supervisor_override(cursor, nombre):
     nombre = (nombre or "").strip()
     if not nombre:
@@ -341,26 +381,7 @@ def registrar_venta(venta: NuevaVenta):
                         VALUES (?, ?, 'INGRESO', ?, ?, ?)
                     ''', (fecha_actual, 1, p.monto, f"Efectivo de Ticket #{venta_id} (Mixto)", venta.turno_id))
 
-        if venta.metodo_pago == "QR Mercado Pago":
-            if not venta.cobro_externo_id:
-                raise Exception("El QR tiene que estar acreditado antes de cerrar el ticket.")
-            cursor.execute(
-                "SELECT estado, venta_id, monto FROM cobros_externos WHERE id = ?",
-                (venta.cobro_externo_id,),
-            )
-            cobro = cursor.fetchone()
-            if not cobro or (cobro["estado"] or "") != "aprobado":
-                raise Exception("Ese cobro QR no está acreditado.")
-            if cobro["venta_id"]:
-                raise Exception("Ese cobro QR ya tiene ticket.")
-            if abs(float(cobro["monto"] or 0) - float(total_con_descuento)) > 0.05:
-                raise Exception("El monto acreditado no coincide con el ticket.")
-            cursor.execute(
-                "UPDATE cobros_externos SET venta_id = ? WHERE id = ? AND venta_id IS NULL",
-                (venta_id, venta.cobro_externo_id),
-            )
-            if cursor.rowcount != 1:
-                raise Exception("Ese cobro QR ya tiene ticket.")
+        _atar_cobro_qr(cursor, venta, venta_id, total_con_descuento)
 
         ahorro_manual = abs(venta.descuento_recargo_global) if venta.descuento_recargo_global < 0 else 0
         cursor.execute("UPDATE ventas_cabecera SET total_venta = ? WHERE id = ?", (total_con_descuento, venta_id))
@@ -491,11 +512,14 @@ def mandar_ticket_whatsapp(venta_id: int):
     conexion.row_factory = sqlite3.Row
     try:
         venta = conexion.execute(
-            "SELECT cliente_id, estado FROM ventas_cabecera WHERE id = ?",
+            "SELECT cliente_id, estado, metodo_pago FROM ventas_cabecera WHERE id = ?",
             (venta_id,),
         ).fetchone()
         if not venta:
             return {"error": "Ese número de ticket no existe"}
+        metodo = (venta["metodo_pago"] or "").upper()
+        if metodo not in ("FIADO", "CUENTA CORRIENTE"):
+            return {"error": "El WhatsApp del ticket es solo para cuenta corriente."}
         if not venta["cliente_id"]:
             return {"error": "Ese ticket es de consumidor final. Asigná un cliente con WhatsApp."}
         cli = conexion.execute(
@@ -555,6 +579,16 @@ def anular_venta(venta_id: int, peticion: AnularVentaRequest, background_tasks: 
         if not venta: raise Exception("La venta no existe.")
         if venta[0] == 'ANULADA': raise Exception("Esta venta ya está anulada.")
 
+        cobro_qr = None
+        try:
+            cursor.execute(
+                "SELECT id, estado, mp_order_id FROM cobros_externos WHERE venta_id = ?",
+                (venta_id,),
+            )
+            cobro_qr = cursor.fetchone()
+        except sqlite3.Error:
+            cobro_qr = None
+
         cursor.execute("SELECT lote_id, cantidad, producto_id FROM movimientos_stock WHERE motivo LIKE ?", (f"Ticket #{venta_id}%",))
         movimientos_afectados = cursor.fetchall()
 
@@ -603,6 +637,10 @@ def anular_venta(venta_id: int, peticion: AnularVentaRequest, background_tasks: 
                     motivo_retiro = f"Anulación Efectivo Mixto #{venta_id}"
             except: pass
 
+        if cobro_qr and cobro_qr[1] == "aprobado":
+            from backend.mod_pagos.rutas_pagos import reembolsar_cobro_aprobado
+            reembolsar_cobro_aprobado(cursor, cobro_qr)
+
         cursor.execute("UPDATE ventas_cabecera SET estado = 'ANULADA' WHERE id = ?", (venta_id,))
         conexion.commit()
         if retiro_anulado:
@@ -614,7 +652,10 @@ def anular_venta(venta_id: int, peticion: AnularVentaRequest, background_tasks: 
                 nombre_usuario(peticion.usuario_id),
                 peticion.turno_id,
             )
-        return {"mensaje": "Venta anulada, stock devuelto y caja actualizada."}
+        mensaje = "Venta anulada, stock devuelto y caja actualizada."
+        if cobro_qr and cobro_qr[1] in ("aprobado", "reembolsado"):
+            mensaje = "Venta anulada. Mercado Pago devolvió el QR. Stock y caja actualizados."
+        return {"mensaje": mensaje}
     except Exception as e:
         if conexion: conexion.rollback()
         return {"error": str(e)}
