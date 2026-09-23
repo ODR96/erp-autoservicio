@@ -126,6 +126,7 @@ class NuevaVenta(BaseModel):
     descuento_recargo_global: float = 0.0
     autorizado_por: Optional[str] = None
     override_mora_motivo: Optional[str] = None
+    cobro_externo_id: Optional[int] = None
     facturar_afip: bool = False
     items: List[ItemVenta]
     pagos_mixtos: Optional[List[PagoMixto]] = None
@@ -289,6 +290,27 @@ def registrar_venta(venta: NuevaVenta):
                         INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
                         VALUES (?, ?, 'INGRESO', ?, ?, ?)
                     ''', (fecha_actual, 1, p.monto, f"Efectivo de Ticket #{venta_id} (Mixto)", venta.turno_id))
+
+        if venta.metodo_pago == "QR Mercado Pago":
+            if not venta.cobro_externo_id:
+                raise Exception("El QR tiene que estar acreditado antes de cerrar el ticket.")
+            cursor.execute(
+                "SELECT estado, venta_id, monto FROM cobros_externos WHERE id = ?",
+                (venta.cobro_externo_id,),
+            )
+            cobro = cursor.fetchone()
+            if not cobro or (cobro["estado"] or "") != "aprobado":
+                raise Exception("Ese cobro QR no está acreditado.")
+            if cobro["venta_id"]:
+                raise Exception("Ese cobro QR ya tiene ticket.")
+            if abs(float(cobro["monto"] or 0) - float(total_con_descuento)) > 0.05:
+                raise Exception("El monto acreditado no coincide con el ticket.")
+            cursor.execute(
+                "UPDATE cobros_externos SET venta_id = ? WHERE id = ? AND venta_id IS NULL",
+                (venta_id, venta.cobro_externo_id),
+            )
+            if cursor.rowcount != 1:
+                raise Exception("Ese cobro QR ya tiene ticket.")
 
         ahorro_manual = abs(venta.descuento_recargo_global) if venta.descuento_recargo_global < 0 else 0
         cursor.execute("UPDATE ventas_cabecera SET total_venta = ? WHERE id = ?", (total_con_descuento, venta_id))

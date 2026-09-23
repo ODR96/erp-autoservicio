@@ -1104,6 +1104,7 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
         pagos_mixtos: arrayPagosMixtos,
         autorizado_por: autorizadoPor,
         override_mora_motivo: extras && extras.override_mora_motivo ? extras.override_mora_motivo : null,
+        cobro_externo_id: extras && extras.cobro_externo_id ? extras.cobro_externo_id : null,
         turno_id: turnoActualId
     };
 
@@ -1124,6 +1125,11 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
 
     } catch (error) {
         if (error.message === "OFFLINE" || error.message === "Failed to apiFetch" || error.message.includes("NetworkError")) {
+            if (extras && extras.sin_offline) {
+                Swal.close();
+                Swal.fire('Sin conexión', 'Este cobro no se guarda offline. Si el cliente ya pagó, tocá QR de nuevo con el mismo total para grabar el ticket.', 'error');
+                return null;
+            }
 
             Swal.close(); // Cerramos el "Procesando..."
 
@@ -1305,6 +1311,129 @@ async function cerrarVentaBasica(metodo) {
 
 let clientesGlobalesPOS = [];
 let clienteFiadoActual = null;
+let qrAcreditadoSinTicket = null;
+
+async function cobrarConQrMp() {
+    if (carrito.length === 0) return Swal.fire('Ticket vacío', 'Agregá productos antes de cobrar con QR.', 'error');
+    if (!turnoActualId) return Swal.fire('Sin turno', 'Abrí un turno de caja para poder cobrar.', 'error');
+    if (!navigator.onLine) {
+        return Swal.fire('Sin internet', 'El QR necesita conexión. Cobrá en efectivo o transferencia.', 'warning');
+    }
+
+    if (qrAcreditadoSinTicket && Math.abs(qrAcreditadoSinTicket.monto - totalVenta) > 0.05) {
+        return Swal.fire({
+            title: 'Ese QR ya se pagó',
+            html: `El cliente pagó <b>${plataFiado(qrAcreditadoSinTicket.monto)}</b> y el ticket no se guardó.<br>Volvé ese total al carrito y tocá <b>QR</b> de nuevo. No cargues otro cobro.`,
+            icon: 'warning'
+        });
+    }
+
+    const totalQr = totalVenta;
+    let cobroId = qrAcreditadoSinTicket ? qrAcreditadoSinTicket.cobroId : null;
+
+    if (!cobroId) {
+        const confirm = await Swal.fire({
+            title: 'Cobrar con QR',
+            html: `<div style="font-size:2rem;font-weight:800;letter-spacing:-.03em">${plataFiado(totalQr)}</div>
+                <div class="mt-2">Se carga este monto en el <b>QR impreso</b> de la caja.<br>El cliente no tiene que leer la pantalla.</div>`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#198754',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'Cargar monto al QR',
+            cancelButtonText: 'Volver al ticket'
+        });
+        if (!confirm.isConfirmed) {
+            inputScan.focus();
+            return;
+        }
+
+        Swal.fire({ title: 'Cargando el monto en el QR...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        try {
+            const res = await apiFetch(`${obtenerBaseUrl()}/pagos/qr`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ monto: totalQr, turno_id: turnoActualId })
+            });
+            const data = await res.json().catch(() => ({}));
+            const detalle = data.error || (typeof data.detail === 'string' ? data.detail : '');
+            if (!res.ok || detalle) throw new Error(detalle || ('No se pudo cargar el QR (HTTP ' + res.status + ').'));
+            cobroId = data.cobro_id;
+
+            let cierre = 'esperando';
+            const img = data.image
+                ? `<img alt="QR de la caja" src="${escHtmlPos(data.image)}" style="width:180px;height:180px;object-fit:contain;background:#fff;padding:8px;border-radius:8px">`
+                : '<div class="small text-danger">No hay imagen del QR. Usá el sticker impreso.</div>';
+            await Swal.fire({
+                title: 'Esperando el pago',
+                html: `<div style="font-size:2.1rem;font-weight:800;letter-spacing:-.03em">${plataFiado(totalQr)}</div>
+                    <div class="mt-2 fw-semibold">Que pague con el QR impreso de la caja.</div>
+                    <div class="small text-muted mt-1">Esta pantalla es para vos. El cliente mira el sticker.<br>Si se arrepiente o se va, cancelá: si no, el siguiente paga este monto.</div>
+                    <details class="mt-3">
+                        <summary class="small text-muted">Mostrar el QR en pantalla (respaldo)</summary>
+                        <div class="mt-2">${img}</div>
+                    </details>`,
+                allowOutsideClick: false,
+                showConfirmButton: false,
+                showCancelButton: true,
+                cancelButtonText: 'Cancelar: no pagó',
+                cancelButtonColor: '#dc3545',
+                didOpen: () => {
+                    const timer = setInterval(async () => {
+                        if (!Swal.isVisible()) {
+                            clearInterval(timer);
+                            return;
+                        }
+                        try {
+                            const stRes = await apiFetch(`${obtenerBaseUrl()}/pagos/qr/${cobroId}`);
+                            const st = await stRes.json();
+                            if (st.estado === 'aprobado') {
+                                cierre = 'aprobado';
+                                clearInterval(timer);
+                                Swal.close();
+                            } else if (st.estado && st.estado !== 'pendiente') {
+                                cierre = st.estado;
+                                clearInterval(timer);
+                                Swal.close();
+                            }
+                        } catch (e) { /* el próximo intento */ }
+                    }, 2000);
+                }
+            });
+            if (cierre === 'esperando') cierre = 'cancelar';
+            if (cierre !== 'aprobado') {
+                await apiFetch(`${obtenerBaseUrl()}/pagos/qr/${cobroId}/cancelar`, { method: 'POST' });
+                inputScan.focus();
+                if (cierre === 'vencido') {
+                    return Swal.fire({
+                        title: 'Se venció el cobro',
+                        html: 'Pasaron 5 minutos y nadie pagó.<br>El QR quedó libre. Volvé a tocar <b>QR</b> si el cliente todavía quiere pagar.',
+                        icon: 'warning'
+                    });
+                }
+                return Swal.fire({
+                    title: 'Cobro cancelado',
+                    html: 'Sacamos el monto del QR.<br>El próximo cliente <b>no</b> va a pagar este ticket.',
+                    icon: 'info'
+                });
+            }
+        } catch (e) {
+            return Swal.fire('No se pudo cargar el QR', e.message || 'Reintentá o cobrá por otro medio.', 'error');
+        }
+    }
+
+    qrAcreditadoSinTicket = { cobroId, monto: totalQr };
+    Swal.fire({ title: 'Pagó. Guardando el ticket...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    const venta = await procesarVentaBackend('QR Mercado Pago', totalQr, null, null, { sin_offline: true, cobro_externo_id: cobroId });
+    if (!venta) return;
+    qrAcreditadoSinTicket = null;
+    await preguntarTicketDespuesDeVenta({
+        titulo: 'Cobrado con QR',
+        html: `Pagó ${plataFiado(totalQr)} por Mercado Pago.<br>Ticket N°: <b>${venta.numero_ticket}</b>`,
+        imprimir: () => imprimirTicket80mm(venta.numero_ticket, totalQr, 0, venta.ahorro_total)
+    });
+}
+
 
 // --- 1. SECCIÓN: COBRAR DEUDA (BOTÓN AMARILLO Y MODAL) ---
 

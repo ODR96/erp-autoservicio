@@ -232,16 +232,15 @@
         /* --- PAGOS --- */
         .pay-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr;
             grid-auto-rows: 60px;
-            /* REGLA ESTRICTA: Botones idénticos */
             gap: 8px;
             padding: 12px;
         }
 
         .btn-pago {
             border-radius: 8px;
-            font-size: 1.1rem;
+            font-size: 1rem;
             font-weight: bold;
             color: white;
             border: none;
@@ -250,7 +249,14 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
+            gap: 6px;
+            min-width: 0;
+            padding: 0 8px;
+        }
+
+        .btn-pago.bg-efectivo {
+            grid-column: span 2;
+            font-size: 1.15rem;
         }
 
         .btn-pago:active {
@@ -270,6 +276,10 @@
 
         .bg-virtual {
             background-color: #3b82f6;
+        }
+
+        .bg-transf {
+            background-color: #0f766e;
         }
 
         .bg-dividido {
@@ -456,14 +466,17 @@
                         <button class="btn-pago bg-efectivo" onclick="prepararCobroEfectivo()">
                             <i class="bi bi-cash-stack fs-5"></i> EFECTIVO (F12)
                         </button>
-                        <button class="btn-pago bg-virtual" onclick="cerrarVentaBasica('Billetera Virtual / QR')">
-                            <i class="bi bi-qr-code-scan fs-5"></i> QR / TRANSF.
+                        <button class="btn-pago bg-virtual" onclick="cobrarConQrMp()">
+                            <i class="bi bi-qr-code-scan fs-5"></i> QR
+                        </button>
+                        <button class="btn-pago bg-transf" onclick="cerrarVentaBasica('Transferencia')">
+                            <i class="bi bi-bank fs-5"></i> TRANSF.
                         </button>
                         <button class="btn-pago bg-tarjeta" onclick="cerrarVentaBasica('Tarjeta / POS')">
                             <i class="bi bi-credit-card fs-5"></i> TARJETA
                         </button>
                         <button class="btn-pago bg-dividido" onclick="abrirPagoMixto()">
-                            <i class="bi bi-pie-chart-fill text-info fs-5"></i> PAGO DIVIDIDO
+                            <i class="bi bi-pie-chart-fill text-info fs-5"></i> DIVIDIDO
                         </button>
                     </div>
                 </div>
@@ -926,7 +939,7 @@
 
     <!-- ===== ARCHIVOS JS SEPARADOS ===== -->
     <script src="js/layout.js?v=1.0.50"></script>
-    <script src="js/app_pos.js?v=1.0.56"></script>
+    <script src="js/app_pos.js?v=1.0.59"></script>
 
 </body>
 
