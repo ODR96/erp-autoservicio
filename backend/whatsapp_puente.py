@@ -35,8 +35,20 @@ def _normalizar_destino(raw: str) -> str:
     digitos = "".join(ch for ch in texto if ch.isdigit())
     if not digitos:
         return ""
-    if not digitos.startswith("54"):
+    if digitos.startswith("00"):
+        digitos = digitos[2:]
+    if digitos.startswith("0"):
+        digitos = digitos[1:]
+    if len(digitos) >= 10 and digitos.startswith("15"):
+        digitos = digitos[2:]
+    if digitos.startswith("549"):
+        pass
+    elif digitos.startswith("54"):
+        digitos = "549" + digitos[2:]
+    elif digitos.startswith("9") and len(digitos) >= 11:
         digitos = "54" + digitos
+    else:
+        digitos = "549" + digitos
     return f"{digitos}@c.us"
 
 
@@ -111,6 +123,13 @@ def enviar_whatsapp(mensaje: str, numero: str = None):
     except Exception as e:
         print(f"WhatsApp puente: Node no respondió en {PUENTE_URL} ({e})")
         return {"ok": False, "detalle": f"Node no respondió en {PUENTE_URL}."}
+
+
+def avisar_ticket_cliente(telefono: str, texto: str):
+    destino = _normalizar_destino(telefono)
+    if not destino:
+        return {"ok": False, "detalle": "Ese cliente no tiene un WhatsApp válido."}
+    return enviar_whatsapp(texto, numero=destino)
 
 
 def avisar_retiro(monto, motivo: str, usuario: str = "", turno_id=None):

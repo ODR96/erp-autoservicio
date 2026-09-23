@@ -327,6 +327,9 @@ async function abrirHistorialTurno() {
                 const badge = esAnulada ? '<span class="badge bg-danger">Anulada</span>' : '<span class="badge bg-success">Ok</span>';
                 const btnVer = `<button class="btn btn-sm btn-outline-info me-1" onclick="verDetalleTicketGlobal(${v.id})" title="Ver Detalle"><i class="bi bi-eye"></i></button>`;
                 const btnImprimir = `<button class="btn btn-sm btn-outline-primary me-1" onclick="imprimirTicket80mm(${v.id})" title="Reimprimir Ticket"><i class="bi bi-printer"></i></button>`;
+                const btnWa = !esAnulada
+                    ? `<button class="btn btn-sm btn-outline-success me-1" onclick="mandarTicketWhatsapp(${v.id})" title="Mandar por WhatsApp"><i class="bi bi-whatsapp"></i></button>`
+                    : '';
                 const btnAnular = esAnulada
                     ? '<button class="btn btn-sm btn-secondary" disabled><i class="bi bi-x-circle"></i></button>'
                     : `<button class="btn btn-sm btn-outline-danger" onclick="confirmarAnulacion(${v.id}, '${v.numero_ticket}')" title="Anular Venta"><i class="bi bi-trash"></i></button>`;
@@ -349,6 +352,7 @@ async function abrirHistorialTurno() {
         <div class="d-flex justify-content-center">
             ${btnVer}
             ${btnImprimir}
+            ${btnWa}
             ${btnAnular}
         </div>
         </td>
@@ -1160,8 +1164,10 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
             };
         }
 
-        // Si es un error real de validación (ej: PIN incorrecto), lo mostramos normal
         Swal.close();
+        if (String(error.message || '').indexOf('MORA_VENCIDA') === 0) {
+            return { mora_bloqueada: true, detalle: error.message };
+        }
         Swal.fire('Venta Rechazada', error.message, 'error');
         return null;
     }
@@ -1221,15 +1227,37 @@ document.addEventListener("DOMContentLoaded", () => {
     sincronizarVentasOffline();
 });
 
-async function preguntarTicketDespuesDeVenta({ titulo, html, imprimir }) {
+function telefonoClienteTicketActual() {
+    if (!clienteSeleccionadoId || !Array.isArray(clientesGlobalesPOS)) return '';
+    const c = clientesGlobalesPOS.find((x) => x.id === clienteSeleccionadoId);
+    return c && c.telefono_whatsapp ? String(c.telefono_whatsapp).trim() : '';
+}
+
+async function mandarTicketWhatsapp(ventaId) {
+    if (!ventaId || String(ventaId).startsWith('OFF-')) {
+        return Swal.fire('WhatsApp', 'Ese ticket no se puede mandar (es offline o no tiene número).', 'warning');
+    }
+    const res = await apiFetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}/whatsapp`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+        return Swal.fire('WhatsApp', data.error || 'No se pudo pedir el envío.', 'error');
+    }
+    return Swal.fire('WhatsApp', data.mensaje || 'Pedido al WhatsApp del cliente.', 'success');
+}
+
+async function preguntarTicketDespuesDeVenta({ titulo, html, imprimir, ventaId }) {
+    const puedeWa = ventaId && !String(ventaId).startsWith('OFF-');
     const r = await Swal.fire({
         title: titulo,
         html,
         icon: 'success',
         showCancelButton: true,
+        showDenyButton: !!puedeWa,
         confirmButtonText: '<i class="bi bi-printer"></i> Imprimir',
-        cancelButtonText: 'No imprimir',
+        denyButtonText: '<i class="bi bi-whatsapp"></i> WhatsApp',
+        cancelButtonText: 'Listo',
         confirmButtonColor: '#198754',
+        denyButtonColor: '#25D366',
         cancelButtonColor: '#6c757d',
         reverseButtons: true,
         allowOutsideClick: false,
@@ -1237,6 +1265,8 @@ async function preguntarTicketDespuesDeVenta({ titulo, html, imprimir }) {
     });
     if (r.isConfirmed && typeof imprimir === 'function') {
         await imprimir();
+    } else if (r.isDenied && ventaId) {
+        await mandarTicketWhatsapp(ventaId);
     }
     limpiarMostrador();
 }
@@ -1264,7 +1294,8 @@ async function confirmarCobroEfectivo() {
         await preguntarTicketDespuesDeVenta({
             titulo: 'Venta exitosa',
             html: `Abonó con: $${pagaCon.toFixed(2)}<br><b>Entregar vuelto: $${resultado.vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b>`,
-            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, pagaCon, resultado.vuelto, resultado.ahorro_total)
+            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, pagaCon, resultado.vuelto, resultado.ahorro_total),
+            ventaId: resultado.numero_ticket
         });
     }
 }
@@ -1300,7 +1331,8 @@ async function cerrarVentaBasica(metodo) {
         await preguntarTicketDespuesDeVenta({
             titulo: `Cobrado con ${metodo}`,
             html: `Ticket N°: <b>${resultado.numero_ticket}</b>`,
-            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, totalVenta, 0, resultado.ahorro_total)
+            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, totalVenta, 0, resultado.ahorro_total),
+            ventaId: resultado.numero_ticket
         });
     }
 }
@@ -1430,7 +1462,8 @@ async function cobrarConQrMp() {
     await preguntarTicketDespuesDeVenta({
         titulo: 'Cobrado con QR',
         html: `Pagó ${plataFiado(totalQr)} por Mercado Pago.<br>Ticket N°: <b>${venta.numero_ticket}</b>`,
-        imprimir: () => imprimirTicket80mm(venta.numero_ticket, totalQr, 0, venta.ahorro_total)
+        imprimir: () => imprimirTicket80mm(venta.numero_ticket, totalQr, 0, venta.ahorro_total),
+        ventaId: venta.numero_ticket
     });
 }
 
@@ -1495,7 +1528,7 @@ async function refrescarEstadoFiado() {
         if (etqDia) {
             etqDia.innerText = est.sin_pactar
                 ? 'Sin día de cobro (no hay mora)'
-                : `Cobra el día ${est.dia_vencimiento}` + (est.ultimo_cierre ? ` · cierre ${est.ultimo_cierre}` : '');
+                : `Cobra el día ${est.dia_vencimiento}` + (est.ultimo_cierre ? ` · cierre ${est.ultimo_cierre}` : '') + (est.convenio_desde ? ` · convenio ${est.convenio_desde}` : '');
         }
         const vencido = Number(est.vencido) || 0;
         const abierto = Number(est.abierto) || 0;
@@ -1866,8 +1899,8 @@ async function pedirOverrideMoraFiado(nombre, vencido) {
         firma = empleadoLogueado.nombre_completo || empleadoLogueado.usuario || empleadoLogueado.nombre || 'Administrador Autorizado';
     }
     const mot = await Swal.fire({
-        title: 'Tiene mora vencida',
-        html: `<b>${escHtmlPos(nombre)}</b> debe <b>$ ${plata}</b> de períodos cerrados. No se fía más hasta cobrarla.`,
+        title: 'Mora vencida: se puede autorizar',
+        html: `<b>${escHtmlPos(nombre)}</b> debe <b>$ ${plata}</b> de períodos cerrados.<br>Un Encargado o Admin puede fiar igual. Escribí el motivo (no borres el día de cobro).`,
         input: 'textarea',
         inputPlaceholder: 'Motivo del override (obligatorio)',
         inputAttributes: { maxlength: 200 },
@@ -1931,7 +1964,15 @@ async function mandarACtaCte() {
 
     Swal.fire({ title: 'Procesando Fiado...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
-    const resultado = await procesarVentaBackend('CUENTA CORRIENTE', totalVenta, null, firmaAutorizacion, { override_mora_motivo: motivoMora });
+    let resultado = await procesarVentaBackend('CUENTA CORRIENTE', totalVenta, null, firmaAutorizacion, { override_mora_motivo: motivoMora });
+    if (resultado && resultado.mora_bloqueada && !motivoMora) {
+        const ov = await pedirOverrideMoraFiado('Este cliente', deudaClienteGlobal);
+        if (!ov) return;
+        resultado = await procesarVentaBackend('CUENTA CORRIENTE', totalVenta, null, ov.firma, { override_mora_motivo: ov.motivo });
+    }
+    if (resultado && resultado.mora_bloqueada) {
+        return Swal.fire('No se pudo fiar', resultado.detalle || 'Sigue habiendo mora vencida.', 'error');
+    }
 
     if (resultado) {
         const nombreLimpio = document.getElementById("nombreClienteTicket").innerText.split(' Debe')[0].split(' A favor')[0].trim();
@@ -1940,7 +1981,8 @@ async function mandarACtaCte() {
         await preguntarTicketDespuesDeVenta({
             titulo: 'Cuenta corriente',
             html: `Se cargaron <b>$${totalRemito.toFixed(2)}</b> a ${escHtmlPos(nombreLimpio)}.`,
-            imprimir: () => imprimirRemitoFiado(nombreLimpio, totalRemito, articulosRemito)
+            imprimir: () => imprimirRemitoFiado(nombreLimpio, totalRemito, articulosRemito),
+            ventaId: resultado.numero_ticket
         });
     }
 }
@@ -1949,6 +1991,7 @@ async function mandarACtaCte() {
 async function guardarNuevoCliente() {
     const dni = document.getElementById("nuevoClienteDni").value;
     const nombre = document.getElementById("nuevoClienteNombre").value;
+    const telefono = (document.getElementById("nuevoClienteTel").value || "").trim();
     const pin = document.getElementById("pinAutorizacion").value;
     const limite = parseFloat(document.getElementById("nuevoClienteLimite").value) || 50000;
     const diaVencimiento = leerDiaCobro("nuevoClienteDiaVencimiento");
@@ -1971,7 +2014,7 @@ async function guardarNuevoCliente() {
     try {
         const res = await apiFetch(`${obtenerBaseUrl()}/clientes/registrar`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nombre_completo: nombre, cuit: dni, telefono_whatsapp: "", limite_credito: limite, dia_vencimiento: diaVencimiento })
+            body: JSON.stringify({ nombre_completo: nombre, cuit: dni, telefono_whatsapp: telefono, limite_credito: limite, dia_vencimiento: diaVencimiento })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -1979,6 +2022,7 @@ async function guardarNuevoCliente() {
         Swal.fire({ title: '¡Cliente Creado!', text: data.mensaje, icon: 'success', timer: 1500, showConfirmButton: false });
 
         document.getElementById("nuevoClienteDni").value = ""; document.getElementById("nuevoClienteNombre").value = "";
+        document.getElementById("nuevoClienteTel").value = "";
         document.getElementById("pinAutorizacion").value = ""; document.getElementById("nuevoClienteLimite").value = "50000";
         armarSelectDiaCobro("nuevoClienteDiaVencimiento", "");
         modalNuevoCliente.hide(); abrirSeleccionCliente();
@@ -3148,7 +3192,8 @@ async function procesarPagoMixto() {
         await preguntarTicketDespuesDeVenta({
             titulo: 'Venta exitosa',
             html: `Venta dividida cobrada.<br><b>Entregar vuelto en efectivo: $${vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b>`,
-            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, suma, vuelto, resultado.ahorro_total)
+            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, suma, vuelto, resultado.ahorro_total),
+            ventaId: resultado.numero_ticket
         });
     }
 }

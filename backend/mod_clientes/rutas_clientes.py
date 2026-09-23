@@ -49,6 +49,25 @@ def _parse_fecha_mov(valor):
         return _hoy_ar()
 
 
+def _campo_fila(fila, clave, default=None):
+    try:
+        if clave in fila.keys():
+            return fila[clave]
+    except Exception:
+        pass
+    return default
+
+
+def _parse_convenio(valor):
+    s = str(valor or "").strip()[:10]
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
 def _ultimo_cierre(dia, hoy):
     dia = int(dia)
 
@@ -217,6 +236,7 @@ def _estado_cuenta_de(cursor, cliente, hasta_id=None, al=None):
         dia = None
 
     hoy = al or _hoy_ar()
+    convenio = _parse_convenio(_campo_fila(cliente, "convenio_desde"))
     sql = """
         SELECT id, fecha_hora, tipo_movimiento, monto, IFNULL(detalle, '') as detalle,
                IFNULL(monto_saldado, 0) as monto_saldado
@@ -259,6 +279,7 @@ def _estado_cuenta_de(cursor, cliente, hasta_id=None, al=None):
         "dia_vencimiento": dia,
         "sin_pactar": dia is None,
         "ultimo_cierre": None,
+        "convenio_desde": convenio.isoformat() if convenio else None,
         "saldo": saldo,
         "vencido": 0.0,
         "abierto": 0.0,
@@ -276,7 +297,10 @@ def _estado_cuenta_de(cursor, cliente, hasta_id=None, al=None):
             if c["restante"] <= 0:
                 continue
             if c["fecha"] < ultimo:
-                vencido += c["restante"]
+                if convenio and c["fecha"] < convenio:
+                    abierto += c["restante"]
+                else:
+                    vencido += c["restante"]
             else:
                 abierto += c["restante"]
     else:
@@ -339,6 +363,10 @@ def inicializar_tabla_movimientos():
         cursor.execute("ALTER TABLE movimientos_clientes ADD COLUMN monto_saldado REAL DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute("ALTER TABLE clientes ADD COLUMN convenio_desde TEXT")
+    except sqlite3.OperationalError:
+        pass
 
     _backfill_saldado_clientes(cursor)
 
@@ -354,10 +382,11 @@ def registrar_cliente(cli: ClienteNuevo):
     cursor = conexion.cursor()
     try:
         dia_cobro = _normalizar_dia_vencimiento(cli.dia_vencimiento)
+        convenio = _hoy_ar().isoformat() if dia_cobro else None
         cursor.execute('''
-            INSERT INTO clientes (nombre_completo, cuit, condicion_iva, telefono_whatsapp, direccion, limite_credito, saldo_actual_deudor, dia_vencimiento)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-        ''', (cli.nombre_completo, cli.cuit, cli.condicion_iva, cli.telefono_whatsapp, cli.direccion, cli.limite_credito, dia_cobro))
+            INSERT INTO clientes (nombre_completo, cuit, condicion_iva, telefono_whatsapp, direccion, limite_credito, saldo_actual_deudor, dia_vencimiento, convenio_desde)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+        ''', (cli.nombre_completo, cli.cuit, cli.condicion_iva, cli.telefono_whatsapp, cli.direccion, cli.limite_credito, dia_cobro, convenio))
         conexion.commit()
         return {"mensaje": f"Cliente {cli.nombre_completo} dado de alta con éxito."}
     except Exception as e:
@@ -382,11 +411,22 @@ def actualizar_cliente(cliente_id: int, cli: ClienteNuevo):
     cursor = conexion.cursor()
     try:
         dia_cobro = _normalizar_dia_vencimiento(cli.dia_vencimiento)
+        cursor.execute("SELECT dia_vencimiento, convenio_desde FROM clientes WHERE id = ?", (cliente_id,))
+        actual = cursor.fetchone()
+        if not actual:
+            raise Exception("Ese cliente no existe.")
+        dia_antes = _normalizar_dia_vencimiento(actual[0])
+        if dia_cobro is None:
+            convenio = None
+        elif dia_antes is None:
+            convenio = _hoy_ar().isoformat()
+        else:
+            convenio = actual[1]
         cursor.execute('''
             UPDATE clientes 
-            SET nombre_completo = ?, cuit = ?, condicion_iva = ?, telefono_whatsapp = ?, direccion = ?, limite_credito = ?, dia_vencimiento = ?
+            SET nombre_completo = ?, cuit = ?, condicion_iva = ?, telefono_whatsapp = ?, direccion = ?, limite_credito = ?, dia_vencimiento = ?, convenio_desde = ?
             WHERE id = ?
-        ''', (cli.nombre_completo, cli.cuit, cli.condicion_iva, cli.telefono_whatsapp, cli.direccion, cli.limite_credito, dia_cobro, cliente_id))
+        ''', (cli.nombre_completo, cli.cuit, cli.condicion_iva, cli.telefono_whatsapp, cli.direccion, cli.limite_credito, dia_cobro, convenio, cliente_id))
         conexion.commit()
         return {"mensaje": f"Ficha de {cli.nombre_completo} actualizada."}
     except Exception as e:

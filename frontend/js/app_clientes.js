@@ -319,7 +319,7 @@ async function seleccionarCliente(id) {
         if (etqDia) {
             etqDia.innerText = est.sin_pactar
                 ? 'Sin día de cobro (no hay mora)'
-                : `Cobra el día ${est.dia_vencimiento}` + (est.ultimo_cierre ? ` · último cierre ${est.ultimo_cierre}` : '');
+                : `Cobra el día ${est.dia_vencimiento}` + (est.ultimo_cierre ? ` · último cierre ${est.ultimo_cierre}` : '') + (est.convenio_desde ? ` · convenio ${est.convenio_desde}` : '');
         }
         if (saldoFinal > 0) {
             cajaSaldo.className = "fw-bold text-danger mb-0";
@@ -389,6 +389,9 @@ async function cargarHistorialCliente(id) {
             } else if (matchTicket && !esPago) {
                 btnAccion = `<button class="btn btn-sm btn-outline-primary py-0 shadow-sm" onclick="verDetalleTicketAdmin(${matchTicket[1]})" title="Ver Ticket">
                                 <i class="bi bi-eye"></i> Ver
+                             </button>
+                             <button class="btn btn-sm btn-outline-success py-0 shadow-sm" onclick="mandarTicketWhatsappAdmin(${matchTicket[1]})" title="Mandar ticket por WhatsApp">
+                                <i class="bi bi-whatsapp"></i>
                              </button>`;
             }
             return `<tr>
@@ -431,16 +434,31 @@ async function verDetalleTicketAdmin(ventaId) {
                 <i class="bi bi-person-badge"></i> Cajero: ${data.encabezado.cajero || data.encabezado.usuario || data.encabezado.vendedor || 'Caja Principal'}
              </div>`;
 
-        Swal.fire({
+        const r = await Swal.fire({
             title: `<i class="bi bi-receipt text-primary"></i> Detalle Remito #${ventaId}`,
             html: html, 
             width: '500px', 
-            showCloseButton: true, 
+            showCloseButton: true,
+            showDenyButton: true,
+            denyButtonText: '<i class="bi bi-whatsapp"></i> WhatsApp',
+            denyButtonColor: '#25D366',
             confirmButtonText: '<i class="bi bi-check-circle"></i> Entendido', 
             confirmButtonColor: '#198754'
         });
+        if (r.isDenied) await mandarTicketWhatsappAdmin(ventaId);
     } catch (e) {
         Swal.fire('Error', 'No se pudo cargar el detalle de la compra.', 'error');
+    }
+}
+
+async function mandarTicketWhatsappAdmin(ventaId) {
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}/whatsapp`, { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        Swal.fire('WhatsApp', data.mensaje || 'Pedido al WhatsApp del cliente.', 'success');
+    } catch (e) {
+        Swal.fire('WhatsApp', e.message || 'No se pudo pedir el envío.', 'error');
     }
 }
 

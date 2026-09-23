@@ -53,9 +53,24 @@ def _detalle_retiros_turno(cursor, turno_id):
     return [{"monto": row["monto"] or 0, "obs": row["obs"] or ""} for row in cursor.fetchall()]
 
 
-def disparar_avisos_cierre(payload_z, fecha_apertura, fecha_cierre, cajero, turno_id):
+def _horas_abierto(fecha_apertura, fecha_cierre):
+    try:
+        a = datetime.strptime(str(fecha_apertura)[:19], "%Y-%m-%d %H:%M:%S")
+        c = datetime.strptime(str(fecha_cierre)[:19], "%Y-%m-%d %H:%M:%S")
+        return max((c - a).total_seconds() / 3600.0, 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def disparar_avisos_cierre(payload_z, fecha_apertura, fecha_cierre, cajero, turno_id, solo_admin=False):
     from backend.whatsapp_puente import avisar_cierre_z, avisar_faltantes_del_turno
+    if solo_admin:
+        print("WhatsApp puente: caja solo_admin, Cierre Z y faltantes omitidos.")
+        return
     avisar_cierre_z(payload_z)
+    if _horas_abierto(fecha_apertura, fecha_cierre) > 20:
+        print("WhatsApp puente: turno de más de 20 h, digest de faltantes omitido.")
+        return
     avisar_faltantes_del_turno(turno_id, fecha_apertura, fecha_cierre, cajero)
 
 class AperturaCaja(BaseModel):
@@ -203,6 +218,9 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         nombre_cajero = fila_cajero['nombre_completo'] if fila_cajero else f"Usuario #{turno['usuario_id']}"
         detalle_retiros = _detalle_retiros_turno(cursor, cierre.turno_id)
         fecha_apertura = turno['fecha_hora_apertura']
+        cursor.execute("SELECT IFNULL(solo_admin, 0) FROM cajas_fisicas WHERE id = ?", (turno["caja_id"],))
+        fila_caja = cursor.fetchone()
+        solo_admin = bool(fila_caja[0]) if fila_caja else False
         
         conexion.commit()
         payload_z = {
@@ -228,6 +246,7 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
             fecha_cierre,
             nombre_cajero,
             cierre.turno_id,
+            solo_admin,
         )
         return {
             "mensaje": "¡Cierre Z realizado con éxito!",

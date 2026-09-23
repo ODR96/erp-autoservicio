@@ -383,7 +383,87 @@ def generar_ticket(venta_id: int):
         return {"error": str(e)}
     finally:
         conexion.close()
-    
+
+
+def _nombre_negocio_ticket():
+    conexion = obtener_conexion()
+    try:
+        fila = conexion.execute("SELECT nombre_negocio FROM configuracion_local WHERE id = 1").fetchone()
+        nombre = (fila[0] if fila else "") or ""
+        return " ".join(str(nombre).split()) or "Venta"
+    except Exception:
+        return "Venta"
+    finally:
+        conexion.close()
+
+
+def _texto_ticket_whatsapp(ticket):
+    enc = ticket.get("encabezado") or {}
+    tot = ticket.get("totales") or {}
+    lineas = [
+        _nombre_negocio_ticket(),
+        f"Ticket {enc.get('numero_ticket') or '-'}",
+        str(enc.get("fecha") or ""),
+        f"Cliente: {enc.get('cliente') or 'Consumidor Final'}",
+        "",
+    ]
+    for item in (ticket.get("detalle_compra") or [])[:40]:
+        cant = item.get("cantidad")
+        nombre = item.get("nombre") or "Artículo"
+        sub = float(item.get("subtotal") or 0)
+        lineas.append(f"• {cant} {nombre}  ${sub:,.2f}")
+    lineas.append("")
+    lineas.append(f"Total: ${float(tot.get('total_a_pagar') or 0):,.2f}")
+    lineas.append(f"Pago: {tot.get('metodo_pago') or '-'}")
+    pie = ""
+    try:
+        conexion = obtener_conexion()
+        fila = conexion.execute("SELECT mensaje_ticket FROM configuracion_local WHERE id = 1").fetchone()
+        conexion.close()
+        pie = (fila[0] if fila else "") or ""
+    except Exception:
+        pie = ""
+    if pie.strip():
+        lineas.append("")
+        lineas.append(pie.strip())
+    return "\n".join(lineas)
+
+
+@router.post("/ticket/{venta_id}/whatsapp", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
+def mandar_ticket_whatsapp(venta_id: int):
+    if venta_id <= 0:
+        return {"error": "Ese ticket no se puede mandar por WhatsApp."}
+    ticket = generar_ticket(venta_id)
+    if ticket.get("error"):
+        return ticket
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    try:
+        venta = conexion.execute(
+            "SELECT cliente_id, estado FROM ventas_cabecera WHERE id = ?",
+            (venta_id,),
+        ).fetchone()
+        if not venta:
+            return {"error": "Ese número de ticket no existe"}
+        if not venta["cliente_id"]:
+            return {"error": "Ese ticket es de consumidor final. Asigná un cliente con WhatsApp."}
+        cli = conexion.execute(
+            "SELECT telefono_whatsapp, nombre_completo FROM clientes WHERE id = ?",
+            (venta["cliente_id"],),
+        ).fetchone()
+        if not cli or not (cli["telefono_whatsapp"] or "").strip():
+            return {"error": "Ese cliente no tiene WhatsApp cargado."}
+        telefono = cli["telefono_whatsapp"]
+    finally:
+        conexion.close()
+    from backend.whatsapp_puente import avisar_ticket_cliente
+    texto = _texto_ticket_whatsapp(ticket)
+    envio = avisar_ticket_cliente(telefono, texto)
+    if not envio.get("ok"):
+        return {"error": envio.get("detalle") or "El puente de WhatsApp no tomó el mensaje."}
+    return {"ok": True, "mensaje": "Pedido al WhatsApp del cliente. Si no llega en un minuto, el bot no está arriba."}
+
+
 @router.get("/historial/{turno_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def historial_ventas_turno(turno_id: int):
     conexion = obtener_conexion()
@@ -396,7 +476,8 @@ def historial_ventas_turno(turno_id: int):
         cursor.execute('''
             SELECT v.id, v.id AS numero_ticket, v.fecha_hora, v.total_venta, v.metodo_pago, v.estado,
                    v.cliente_id,
-                   COALESCE(NULLIF(TRIM(c.nombre_completo), ''), NULLIF(TRIM(v.nombre_cliente_factura), '')) AS nombre_cliente
+                   COALESCE(NULLIF(TRIM(c.nombre_completo), ''), NULLIF(TRIM(v.nombre_cliente_factura), '')) AS nombre_cliente,
+                   NULLIF(TRIM(c.telefono_whatsapp), '') AS telefono_whatsapp
             FROM ventas_cabecera v
             LEFT JOIN clientes c ON c.id = v.cliente_id
             WHERE v.turno_id = ?
