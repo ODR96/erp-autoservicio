@@ -91,11 +91,19 @@ class CierreCaja(BaseModel):
     monto_final_declarado: float 
     
 @router.get("/cajas_fisicas")
-def listar_cajas_fisicas():
+def listar_cajas_fisicas(payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    cursor.execute("SELECT id, nombre FROM cajas_fisicas WHERE activa = 1 ORDER BY id ASC")
+    rol = ((payload or {}).get("rol") or "").upper()
+    if rol == "CAJERO":
+        cursor.execute(
+            "SELECT id, nombre, IFNULL(solo_admin, 0) AS solo_admin FROM cajas_fisicas WHERE activa = 1 AND IFNULL(solo_admin, 0) = 0 ORDER BY id ASC"
+        )
+    else:
+        cursor.execute(
+            "SELECT id, nombre, IFNULL(solo_admin, 0) AS solo_admin FROM cajas_fisicas WHERE activa = 1 ORDER BY id ASC"
+        )
     cajas = [dict(row) for row in cursor.fetchall()]
     conexion.close()
     return {"cajas": cajas}

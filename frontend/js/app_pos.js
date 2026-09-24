@@ -312,17 +312,32 @@ async function iniciarInterfazPOS() {
     const cajaPinAlta = document.getElementById('cajaPinAltaCliente');
     if (cajaPinAlta) cajaPinAlta.classList.toggle('d-none', sesionEsJefe());
 
+    let cajasPermitidas = [];
+    try {
+        const resCajas = await apiFetch(`${obtenerBaseUrl()}/caja/cajas_fisicas`);
+        const dataCajas = await resCajas.json();
+        cajasPermitidas = dataCajas.cajas || [];
+        if (!sesionEsJefe()) {
+            cajasPermitidas = cajasPermitidas.filter(c => !c.solo_admin && Number(c.id) !== 99);
+        }
+    } catch (error) {
+        cajasPermitidas = [];
+    }
+    if (terminal_id && cajasPermitidas.length && !cajasPermitidas.some(c => String(c.id) === String(terminal_id))) {
+        terminal_id = null;
+        localStorage.removeItem('caja_fisica_id');
+    }
+
     if (!terminal_id) {
         try {
-            // 1. Vamos a buscar las cajas activas a tu servidor Python
-            const resCajas = await apiFetch(`${obtenerBaseUrl()}/caja/cajas_fisicas`);
-            const dataCajas = await resCajas.json();
-
-            // 2. Transformamos la respuesta en un diccionario para SweetAlert
             let opcionesCajas = {};
-            dataCajas.cajas.forEach(c => {
-                opcionesCajas[c.id.toString()] = c.nombre; // Ej: "1": "Caja 1 (Mostrador)"
+            cajasPermitidas.forEach(c => {
+                opcionesCajas[c.id.toString()] = c.nombre;
             });
+            if (Object.keys(opcionesCajas).length === 0) {
+                Swal.fire('Error', 'No hay cajas habilitadas para este usuario.', 'error');
+                return;
+            }
 
             // 3. Mostramos el cartel 100% dinámico
             const { value: cajaSeleccionada } = await Swal.fire({
