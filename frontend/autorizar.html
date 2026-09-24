@@ -42,19 +42,19 @@
         }
 
         async function cargar() {
-            if (!token) return mostrar('Falta el pedido.', true);
+            if (!token) return mostrar('Solicitud inexistente.', true);
             const res = await fetch(`${baseUrl()}/usuarios/autorizacion-remota/${encodeURIComponent(token)}`);
             const data = await res.json();
             if (data.error) return mostrar(data.error, true);
             motivo.textContent = data.motivo || '';
             if (data.estado === 'PENDIENTE') {
-                mostrar('El link no alcanza. Poné tu PIN.');
+                mostrar('Ingresá el PIN para confirmar.');
                 form.hidden = false;
                 return;
             }
-            if (data.estado === 'APROBADA') return mostrar('Ya está aprobada' + (data.usuario ? ` por ${data.usuario}` : '') + '.');
-            if (data.estado === 'RECHAZADA') return mostrar('Ya está rechazada.');
-            mostrar('Este pedido venció.');
+            if (data.estado === 'APROBADA') return mostrar('Autorización aprobada' + (data.usuario ? ` por ${data.usuario}` : '') + '.');
+            if (data.estado === 'RECHAZADA') return mostrar('Autorización rechazada.');
+            mostrar('Solicitud vencida.');
         }
 
         form.addEventListener('submit', async (ev) => {
@@ -70,7 +70,7 @@
             const data = await res.json();
             if (data.error) return mostrar(data.error, true);
             form.hidden = true;
-            mostrar(data.estado === 'APROBADA' ? `Aprobado por ${data.usuario}.` : 'Rechazado.');
+            mostrar(data.estado === 'APROBADA' ? `Aprobada por ${data.usuario}.` : 'Rechazada.');
         });
 
         cargar().catch(() => mostrar('No se pudo cargar el pedido.', true));

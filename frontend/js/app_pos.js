@@ -174,7 +174,7 @@ async function pedirAutorizacionRemota(mensaje) {
     let timer = null;
     const espera = await Swal.fire({
         title: 'Esperando autorización',
-        html: 'Le avisé por WhatsApp. Tiene 3 minutos.<br>El link no alcanza: tiene que poner el PIN en el celular.',
+        html: 'Solicitud enviada. Vigencia: 3 minutos.',
         allowOutsideClick: false,
         showConfirmButton: false,
         showCancelButton: true,
@@ -205,7 +205,7 @@ async function pedirAutorizacionRemota(mensaje) {
         return resultado;
     }
     if (espera.dismiss && resultado === null) return false;
-    await Swal.fire('Sin autorización', 'No se aprobó a tiempo.', 'warning');
+    await Swal.fire('Sin respuesta', 'La solicitud venció.', 'warning');
     return false;
 }
 
@@ -217,7 +217,7 @@ async function solicitarAutorizacion(mensaje) {
         showCancelButton: true,
         showDenyButton: true,
         confirmButtonText: 'Autorizar con PIN',
-        denyButtonText: '<i class="bi bi-whatsapp"></i> Avisar por WhatsApp',
+        denyButtonText: '<i class="bi bi-whatsapp"></i> Solicitar por WhatsApp',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: '#d33',
         denyButtonColor: '#25D366',
@@ -230,7 +230,7 @@ async function solicitarAutorizacion(mensaje) {
         preConfirm: () => {
             const pin = (document.getElementById('swal-pin-auth').value || '').trim();
             if (!pin) {
-                Swal.showValidationMessage('Ingresá el PIN, o avisá por WhatsApp.');
+                Swal.showValidationMessage('Ingresá el PIN.');
                 return false;
             }
             return pin;
@@ -544,7 +544,7 @@ async function confirmarAnulacion(ventaId, ticket) {
 
     // EL PATOVICA DIGITAL: Pedir PIN si no es Admin o Encargado
     if (!empleadoLogueado || (empleadoLogueado.rol !== 'ADMIN' && empleadoLogueado.rol !== 'ENCARGADO')) {
-        const autorizadoPor = await solicitarAutorizacion(`Anular el Ticket ${ticket} descontará plata de la caja. Requiere autorización de Supervisor.`);
+        const autorizadoPor = await solicitarAutorizacion(`Anular ticket ${ticket}.`);
         if (!autorizadoPor) {
             modalHistorial.show(); // Si cancela o erra el PIN, le devolvemos el historial
             return;
@@ -901,7 +901,7 @@ async function cambiarPrecioManual(index) {
             if (!baja || esJefe) {
                 aplicarPrecioCambiado(index, nuevoPrecio);
             } else {
-                const autorizadoPor = await solicitarAutorizacion(`Bajar el precio a $${nuevoPrecio.toFixed(2)} requiere permiso de Supervisor.`);
+                const autorizadoPor = await solicitarAutorizacion(`Bajar el precio a $${nuevoPrecio.toFixed(2)}.`);
                 if (autorizadoPor) aplicarPrecioCambiado(index, nuevoPrecio);
             }
         }
@@ -2040,7 +2040,7 @@ async function pedirOverrideMoraFiado(nombre, vencido) {
     let firma = null;
     if (!esJefe) {
         firma = await solicitarAutorizacion(
-            `${nombre} tiene $ ${plata} vencido. No se fía más hasta cobrar la mora, salvo override de Encargado.`
+            `${nombre}: mora vencida $${plata}.`
         );
         if (!firma) return null;
     } else {
@@ -2103,7 +2103,7 @@ async function mandarACtaCte() {
 
             firmaAutorizacion = empleadoLogueado.nombre_completo || empleadoLogueado.usuario || empleadoLogueado.nombre || "Administrador Autorizado";
         } else {
-            const autorizadoPor = await solicitarAutorizacion(`La deuda superará el límite permitido de $${limiteClienteGlobal.toFixed(2)}.`);
+            const autorizadoPor = await solicitarAutorizacion(`Límite de cuenta superado. Deuda proyectada: $${proximaDeuda.toFixed(2)}.`);
             if (!autorizadoPor) return;
 
             firmaAutorizacion = autorizadoPor;

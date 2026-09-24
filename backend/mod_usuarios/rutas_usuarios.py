@@ -318,7 +318,7 @@ def estado_autorizacion_remota(token: str):
         cursor.execute("SELECT * FROM autorizaciones_remotas WHERE token = ?", (token,))
         fila = cursor.fetchone()
         if not fila:
-            return {"error": "Ese pedido no existe."}
+            return {"error": "Solicitud inexistente."}
         if _marcar_vencida(cursor, fila) is None and fila["estado"] == "PENDIENTE":
             conexion.commit()
             return {"estado": "VENCIDA", "motivo": fila["motivo"]}
@@ -343,16 +343,16 @@ def resolver_autorizacion_remota(request: Request, token: str, body: Autorizacio
     try:
         quien = _quien_autoriza(cursor, body.pin_secreto)
         if not quien:
-            return {"error": "PIN incorrecto o sin privilegios de Encargado."}
+            return {"error": "PIN incorrecto."}
         cursor.execute("SELECT * FROM autorizaciones_remotas WHERE token = ?", (token,))
         fila = cursor.fetchone()
         if not fila:
-            return {"error": "Ese pedido no existe."}
+            return {"error": "Solicitud inexistente."}
         if _marcar_vencida(cursor, fila) is None and fila["estado"] == "PENDIENTE":
             conexion.commit()
-            return {"error": "Ese pedido ya venció."}
+            return {"error": "Solicitud vencida."}
         if fila["estado"] != "PENDIENTE":
-            return {"error": "Ese pedido ya se resolvió."}
+            return {"error": "La solicitud ya fue resuelta."}
         cursor.execute(
             "UPDATE autorizaciones_remotas SET estado = ?, resuelta_por = ? WHERE id = ? AND estado = 'PENDIENTE'",
             (decision, quien["nombre_completo"], fila["id"]),

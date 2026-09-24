@@ -126,13 +126,13 @@ def enviar_whatsapp(mensaje: str, numero: str = None):
 
 
 def avisar_autorizacion_remota(motivo: str, link: str):
-    """Aviso al dueño. El link no autoriza: en el celular hace falta el PIN."""
+    """Aviso al dueño. El enlace no autoriza: en el celular se confirma con PIN."""
     lineas = [
-        "Autorización en la caja",
+        "Autorización de caja",
         (motivo or "").strip()[:300],
         "",
         link,
-        "Vence en 3 minutos. El link no alcanza: poné tu PIN.",
+        "Vigencia: 3 minutos. Confirmá con tu PIN.",
     ]
     return enviar_whatsapp("\n".join(lineas))
 
