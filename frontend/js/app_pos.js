@@ -82,46 +82,163 @@ document.addEventListener("DOMContentLoaded", () => {
     const idUsuario = localStorage.getItem('usuario_id') || 1;
     let empleadoGuardado = JSON.parse(localStorage.getItem('empleado_pos'));
 
-    if (empleadoGuardado) {
-        empleadoLogueado = empleadoGuardado; // Mantiene los datos exactos del cajero
+    const sesion = { nombre: nombre, rol: rol, id: parseInt(idUsuario, 10) || 1 };
+    const sesionSupervisor = rol === 'ADMIN' || rol === 'ENCARGADO';
+    const guardadoEsOtro = empleadoGuardado && String(empleadoGuardado.id) !== String(sesion.id);
+    if (!empleadoGuardado || (sesionSupervisor && guardadoEsOtro)) {
+        empleadoLogueado = sesion;
+        localStorage.setItem('empleado_pos', JSON.stringify(sesion));
     } else {
-        empleadoLogueado = { nombre: nombre, rol: rol, id: parseInt(idUsuario) };
+        empleadoLogueado = empleadoGuardado;
     }
     iniciarInterfazPOS();
 });
 
 // --- MOTOR DE AUTORIZACIONES REALES ---
-async function solicitarAutorizacion(mensaje) {
-    const { value: pin } = await Swal.fire({
-        title: '⚠️ Autorización Requerida',
-        html: `${mensaje}<br><br>Ingrese PIN de Encargado o Admin:`,
-        input: 'password',
-        inputAttributes: { autocomplete: 'off' },
-        showCancelButton: true,
-        confirmButtonColor: '#d33',
-        confirmButtonText: 'Autorizar'
+function sesionEsJefe() {
+    const rol = ((empleadoLogueado && empleadoLogueado.rol) || '').toUpperCase();
+    return rol === 'ADMIN' || rol === 'ENCARGADO';
+}
+
+function firmaDeSesion() {
+    return (empleadoLogueado && (empleadoLogueado.nombre_completo || empleadoLogueado.nombre))
+        || localStorage.getItem('usuario_nombre')
+        || 'Encargado';
+}
+
+function enterConfirmaSwal() {
+    const popup = Swal.getPopup();
+    if (!popup) return;
+    popup.querySelectorAll('input, select').forEach((el) => {
+        el.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey) return;
+            e.preventDefault();
+            Swal.clickConfirm();
+        });
     });
+}
 
-    if (!pin) return false;
+function cablearEnterEnOrden(ids, alFinal) {
+    ids.forEach((id, i) => {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.enterCableado) return;
+        el.dataset.enterCableado = '1';
+        el.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            const sig = document.getElementById(ids[i + 1]);
+            if (sig) {
+                sig.focus();
+                if (typeof sig.select === 'function' && sig.tagName !== 'SELECT') sig.select();
+                return;
+            }
+            alFinal();
+        });
+    });
+}
 
+async function autorizarConPin(pin) {
     try {
         Swal.fire({ title: 'Verificando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
         const res = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin_secreto: pin, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
         });
-
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail);
-
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: `Autorizado por ${data.usuario}`, showConfirmButton: false, timer: 1500 });
         return data.usuario;
     } catch (e) {
         Swal.fire('Denegado', 'PIN incorrecto o sin privilegios.', 'error');
         return false;
     }
+}
+
+async function pedirAutorizacionRemota(mensaje) {
+    let creado;
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizacion-remota`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ motivo: String(mensaje || '').replace(/<[^>]+>/g, ' ').slice(0, 300), turno_id: turnoActualId || 0 })
+        });
+        creado = await res.json();
+        if (!res.ok || creado.error) throw new Error(creado.error || creado.detail || 'No se pudo avisar.');
+    } catch (e) {
+        await Swal.fire('WhatsApp', e.message || 'No se pudo avisar.', 'error');
+        return false;
+    }
+
+    let resultado = null;
+    let timer = null;
+    const espera = await Swal.fire({
+        title: 'Esperando autorización',
+        html: 'Le avisé por WhatsApp. Tiene 3 minutos.<br>El link no alcanza: tiene que poner el PIN en el celular.',
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: 'Cancelar',
+        didOpen: () => {
+            Swal.showLoading();
+            timer = setInterval(async () => {
+                if (!Swal.isVisible()) return;
+                try {
+                    const st = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizacion-remota/${creado.token}`);
+                    const data = await st.json();
+                    if (data.estado === 'APROBADA') {
+                        resultado = data.usuario || 'Encargado';
+                        clearInterval(timer);
+                        Swal.close();
+                    } else if (data.estado && data.estado !== 'PENDIENTE') {
+                        resultado = false;
+                        clearInterval(timer);
+                        Swal.close();
+                    }
+                } catch (e) { /* el próximo intento */ }
+            }, 2000);
+        },
+        willClose: () => { if (timer) clearInterval(timer); }
+    });
+    if (resultado) {
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: `Autorizado por ${resultado}`, showConfirmButton: false, timer: 1500 });
+        return resultado;
+    }
+    if (espera.dismiss && resultado === null) return false;
+    await Swal.fire('Sin autorización', 'No se aprobó a tiempo.', 'warning');
+    return false;
+}
+
+async function solicitarAutorizacion(mensaje) {
+    if (sesionEsJefe()) return firmaDeSesion();
+    const pedido = await Swal.fire({
+        title: 'Autorización requerida',
+        html: `${mensaje}<br><br><input id="swal-pin-auth" type="password" class="swal2-input" placeholder="PIN de Encargado o Admin" autocomplete="off">`,
+        showCancelButton: true,
+        showDenyButton: true,
+        confirmButtonText: 'Autorizar con PIN',
+        denyButtonText: '<i class="bi bi-whatsapp"></i> Avisar por WhatsApp',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#d33',
+        denyButtonColor: '#25D366',
+        focusConfirm: false,
+        didOpen: () => {
+            const pin = document.getElementById('swal-pin-auth');
+            if (pin) pin.focus();
+            enterConfirmaSwal();
+        },
+        preConfirm: () => {
+            const pin = (document.getElementById('swal-pin-auth').value || '').trim();
+            if (!pin) {
+                Swal.showValidationMessage('Ingresá el PIN, o avisá por WhatsApp.');
+                return false;
+            }
+            return pin;
+        }
+    });
+    if (pedido.isDenied) return pedirAutorizacionRemota(mensaje);
+    if (!pedido.isConfirmed || !pedido.value) return false;
+    return autorizarConPin(pedido.value);
 }
 
 async function procesarLoginPOS() {
@@ -192,6 +309,8 @@ async function iniciarInterfazPOS() {
     if (flechaAdmin) {
         flechaAdmin.style.display = (rol === 'ADMIN' || rol === 'ENCARGADO') ? 'block' : 'none';
     }
+    const cajaPinAlta = document.getElementById('cajaPinAltaCliente');
+    if (cajaPinAlta) cajaPinAlta.classList.toggle('d-none', sesionEsJefe());
 
     if (!terminal_id) {
         try {
@@ -762,8 +881,9 @@ async function cambiarPrecioManual(index) {
     if (nuevoPrecioStr) {
         const nuevoPrecio = parseFloat(nuevoPrecioStr);
         if (nuevoPrecio >= 0 && nuevoPrecio !== prod.precio_venta_final) {
-            // REGLA DE SEGURIDAD
-            if (empleadoLogueado && (empleadoLogueado.rol === 'ADMIN' || empleadoLogueado.rol === 'ENCARGADO')) {
+            const baja = nuevoPrecio < prod.precio_venta_final;
+            const esJefe = empleadoLogueado && (empleadoLogueado.rol === 'ADMIN' || empleadoLogueado.rol === 'ENCARGADO');
+            if (!baja || esJefe) {
                 aplicarPrecioCambiado(index, nuevoPrecio);
             } else {
                 const autorizadoPor = await solicitarAutorizacion(`Bajar el precio a $${nuevoPrecio.toFixed(2)} requiere permiso de Supervisor.`);
@@ -802,7 +922,8 @@ async function aplicarModificador(tipo) {
         denyButtonText: '<i class="bi bi-trash"></i> Eliminar',
         confirmButtonText: 'Aplicar',
         cancelButtonText: 'Cancelar',
-        denyButtonColor: '#dc3545'
+        denyButtonColor: '#dc3545',
+        didOpen: () => enterConfirmaSwal()
     });
 
     if (isDenied) {
@@ -1913,7 +2034,7 @@ async function pedirOverrideMoraFiado(nombre, vencido) {
     const mot = await Swal.fire({
         title: 'Mora vencida: se puede autorizar',
         html: `<b>${escHtmlPos(nombre)}</b> debe <b>$ ${plata}</b> de períodos cerrados.<br>Un Encargado o Admin puede fiar igual. Escribí el motivo (no borres el día de cobro).`,
-        input: 'textarea',
+        input: 'text',
         inputPlaceholder: 'Motivo del override (obligatorio)',
         inputAttributes: { maxlength: 200 },
         icon: 'warning',
@@ -2011,16 +2132,17 @@ async function guardarNuevoCliente() {
 
     if (!nombre || !dni) return Swal.fire('Error', 'El nombre y el DNI son obligatorios.', 'error');
 
-    // VERIFICACIÓN CON EL BACKEND EN VEZ DE 1234
-    Swal.fire({ title: 'Autorizando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-    try {
-        const resAuth = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin_secreto: pin, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
-        });
-        if (!resAuth.ok) throw new Error("PIN Incorrecto");
-    } catch (e) {
-        return Swal.fire('Denegado', 'PIN de Encargado incorrecto o sin privilegios.', 'error');
+    if (!sesionEsJefe()) {
+        Swal.fire({ title: 'Autorizando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        try {
+            const resAuth = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin_secreto: pin, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
+            });
+            if (!resAuth.ok) throw new Error("PIN Incorrecto");
+        } catch (e) {
+            return Swal.fire('Denegado', 'PIN de Encargado incorrecto o sin privilegios.', 'error');
+        }
     }
 
     Swal.fire({ title: 'Guardando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
@@ -2144,9 +2266,7 @@ async function registrarPagoProveedorDesdePOS() {
         html: estilosInput + opciones +
             `<p style="color:#94a3b8; font-size:0.85rem; width:80%; margin:0 auto 10px auto;">Sale del cajón. No es gasto del mes. Si le debés, baja el saldo.</p>` +
             `<input id="swal-monto" type="number" class="swal2-input input-dark-custom" placeholder="Monto ($)">` +
-            `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (ej: pan, factura 123)">` +
-            `<hr style="border-color: #1F304A; width: 80%; margin: 15px auto;">` +
-            `<input id="swal-pin" type="password" class="swal2-input input-dark-custom" placeholder="PIN Encargado" style="border-color: #f59e0b !important;">`,
+            `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (ej: pan, factura 123)">`,
         background: '#111C2A',
         color: '#fff',
         showCancelButton: true,
@@ -2155,30 +2275,29 @@ async function registrarPagoProveedorDesdePOS() {
         confirmButtonColor: '#38bdf8',
         cancelButtonColor: '#475569',
         focusConfirm: false,
+        didOpen: () => {
+            enterConfirmaSwal();
+            const monto = document.getElementById('swal-monto');
+            if (monto) monto.focus();
+        },
         preConfirm: async () => {
             const provId = document.getElementById('swal-proveedor').value;
             const monto = document.getElementById('swal-monto').value;
             const motivo = (document.getElementById('swal-motivo').value || '').trim();
-            const pinEl = document.getElementById('swal-pin');
             if (!provId) { Swal.showValidationMessage('Elegí el proveedor'); return false; }
             if (!monto || monto <= 0) { Swal.showValidationMessage('Ingrese un monto mayor a 0'); return false; }
             if (!motivo) { Swal.showValidationMessage('Completá el detalle'); return false; }
-            if (!pinEl || !pinEl.value) { Swal.showValidationMessage('Ingrese su PIN secreto'); return false; }
-            try {
-                const resAuth = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pin_secreto: pinEl.value, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
-                });
-                if (!resAuth.ok) throw new Error("Inválido");
-            } catch (e) {
-                Swal.showValidationMessage('PIN incorrecto o sin permisos');
-                return false;
-            }
             return { proveedor_id: parseInt(provId), monto: parseFloat(monto), motivo };
         }
     });
 
     if (!formValues) {
+        inputScan.focus();
+        return;
+    }
+
+    const okProveedor = await solicitarAutorizacion(`Pago a proveedor de $${Number(formValues.monto).toFixed(2)}. ${formValues.motivo}`);
+    if (!okProveedor) {
         inputScan.focus();
         return;
     }
@@ -2275,7 +2394,7 @@ async function registrarMovimientoCaja(tipo) {
             
             if(dataCat.categorias) {
                 opcionesCategoria = '<label class="d-block text-start fw-bold small mb-1" style="width:80%; margin:0 auto; color:#cbd5e1;">Categoría de gasto</label>';
-                opcionesCategoria += '<select id="swal-categoria" class="form-select form-select-lg mb-3" style="background-color: #fff; border: 1px solid #94a3b8; color: #0f172a; width: 80%; margin: 0 auto; border-radius: 8px;">';
+                opcionesCategoria += '<select id="swal-categoria" class="form-select form-select-lg mb-3" style="background-color: #070B14; border: 1px solid #1F304A; color: #F8FAFC; width: 80%; margin: 0 auto; border-radius: 8px;">';
                 opcionesCategoria += '<option value="" disabled selected>-- Elegí una categoría --</option>';
                 dataCat.categorias.forEach(c => {
                     const tipoCat = (c.tipo_categoria || 'OPERATIVO').toUpperCase();
@@ -2306,14 +2425,10 @@ async function registrarMovimientoCaja(tipo) {
     let inputsHtml = estilosInput + `<input id="swal-monto" type="number" class="swal2-input input-dark-custom" placeholder="Monto ($)">`;
 
     if (tipo === 'retiro' && !esSangria) {
-        // Flujo GASTO DEL LOCAL (sin cambios de comportamiento)
         inputsHtml += opcionesCategoria;
         inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (Ej: Luz, limpia, vale Juan)">`;
-        inputsHtml += `<hr style="border-color: #1F304A; width: 80%; margin: 15px auto;"><input id="swal-pin" type="password" class="swal2-input input-dark-custom" placeholder="PIN Encargado" style="border-color: #f59e0b !important;">`;
     } else if (tipo === 'retiro' && esSangria) {
-        // Flujo SANGRÍA / RETIRO FÍSICO (simple, sin categoría de gasto)
         inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Motivo (Ej: Cambio para Caja 2, Retiro dueño)">`;
-        inputsHtml += `<hr style="border-color: #1F304A; width: 80%; margin: 15px auto;"><input id="swal-pin" type="password" class="swal2-input input-dark-custom" placeholder="PIN Encargado" style="border-color: #f59e0b !important;">`;
     } else {
         inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" placeholder="Motivo (Ej: Cambio inicial)">`;
     }
@@ -2329,9 +2444,6 @@ async function registrarMovimientoCaja(tipo) {
         cancelButtonText: 'Cancelar',
         confirmButtonColor: colorBtn,
         cancelButtonColor: '#475569',
-        customClass: {
-            popup: 'rounded-4 shadow-lg border border-secondary'
-        },
         didOpen: () => {
             const popup = Swal.getPopup();
             const inputs = popup.querySelectorAll('input, select');
@@ -2345,7 +2457,6 @@ async function registrarMovimientoCaja(tipo) {
         preConfirm: async () => {
             const monto = document.getElementById('swal-monto').value;
             const motivo = document.getElementById('swal-motivo').value;
-            const pinEl = document.getElementById('swal-pin');
             let catId = null;
 
             if (!monto || monto <= 0) { Swal.showValidationMessage('Ingrese un monto mayor a 0'); return false; }
@@ -2358,18 +2469,6 @@ async function registrarMovimientoCaja(tipo) {
                     if(!catId) { Swal.showValidationMessage('Elegí una categoría de gasto'); return false; }
                 }
                 if (!motivo) { Swal.showValidationMessage('Completá el detalle/motivo'); return false; }
-                if (!pinEl || !pinEl.value) { Swal.showValidationMessage('Ingrese su PIN secreto'); return false; }
-                
-                try {
-                    const resAuth = await apiFetch(`${obtenerBaseUrl()}/usuarios/autorizar`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ pin_secreto: pinEl.value, roles_permitidos: ['ENCARGADO', 'ADMIN'] })
-                    });
-                    if (!resAuth.ok) throw new Error("Inválido");
-                } catch (e) {
-                    Swal.showValidationMessage('PIN incorrecto o sin permisos');
-                    return false;
-                }
             }
 
             return { monto: parseFloat(monto), motivo: motivo, categoria_id: catId };
@@ -2377,6 +2476,14 @@ async function registrarMovimientoCaja(tipo) {
     });
 
     if (formValues) {
+        if (tipo === 'retiro') {
+            const que = esSangria ? 'Sangría' : 'Retiro por gasto';
+            const autorizado = await solicitarAutorizacion(`${que} de $${Number(formValues.monto).toFixed(2)}. ${formValues.motivo}`);
+            if (!autorizado) {
+                inputScan.focus();
+                return;
+            }
+        }
         try {
             Swal.fire({ title: 'Registrando...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
@@ -2541,8 +2648,9 @@ document.getElementById('inputBusquedaAvanzada').addEventListener('keydown', fun
         resaltarFilaF3(filas);
     } else if (e.key === 'Enter') {
         e.preventDefault();
+        if (indexFilaF3 < 0) indexFilaF3 = 0;
         if (indexFilaF3 >= 0 && indexFilaF3 < filas.length) {
-            filas[indexFilaF3].click(); // Simula el click en la fila seleccionada
+            filas[indexFilaF3].click();
         }
     }
 });
@@ -3302,6 +3410,11 @@ async function abrirCobroPedidoMayorista() {
                 focusConfirm: false,
                 showCancelButton: true,
                 confirmButtonText: '<i class="bi bi-cash-coin"></i> Confirmar Pago',
+                didOpen: () => {
+                    enterConfirmaSwal();
+                    const primero = document.getElementById('mixEfe');
+                    if (primero) primero.focus();
+                },
                 preConfirm: () => {
                     let efe = parseFloat(document.getElementById('mixEfe').value) || 0;
                     const tar = parseFloat(document.getElementById('mixTar').value) || 0;
@@ -3423,6 +3536,26 @@ async function descargarCatalogoParaOffline() {
 // 1. Que se descargue apenas el cajero abre la pantalla de la caja
 document.addEventListener("DOMContentLoaded", () => {
     descargarCatalogoParaOffline();
+    cablearEnterEnOrden(
+        ['nuevoClienteDni', 'nuevoClienteNombre', 'nuevoClienteTel', 'nuevoClienteLimite', 'nuevoClienteDiaVencimiento', 'pinAutorizacion'],
+        () => guardarNuevoCliente()
+    );
+    cablearEnterEnOrden(
+        ['mixtoEfectivo', 'mixtoTarjeta', 'mixtoTransferencia', 'mixtoQr'],
+        () => {
+            const btn = document.getElementById('btnConfirmarMixto');
+            if (btn && !btn.disabled) procesarPagoMixto();
+        }
+    );
+    const buscarCliente = document.getElementById('inputBuscarAsignarCliente');
+    if (buscarCliente) {
+        buscarCliente.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            const item = document.querySelector('#listaClientesAsignacion .list-group-item');
+            if (item) item.click();
+        });
+    }
 });
 
 // 2. Que se actualice solo cada 10 minutos por si vos cambiaste algún precio desde la oficina

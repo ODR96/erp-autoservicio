@@ -356,6 +356,80 @@
         .footer-bar span:hover {
             color: white;
         }
+
+        .modal-content {
+            background: #142032;
+            color: #E2E8F0;
+            border: 1px solid #1F304A !important;
+        }
+        .modal-header,
+        .modal-footer {
+            border-color: #1F304A !important;
+        }
+        .modal-body,
+        .modal hr,
+        .modal .border,
+        .modal .border-bottom,
+        .modal .border-end,
+        .modal .border-top {
+            border-color: #1F304A !important;
+        }
+        .modal .bg-light,
+        .modal .bg-white,
+        .modal .table-light {
+            background-color: #070B14 !important;
+            color: #E2E8F0 !important;
+        }
+        .modal .table {
+            --bs-table-bg: transparent;
+            --bs-table-color: #E2E8F0;
+            --bs-table-border-color: #1F304A;
+            --bs-table-hover-bg: #1A2A42;
+        }
+        .modal .form-control,
+        .modal .form-select,
+        .modal .input-group-text {
+            background-color: #1A2A42;
+            color: #F8FAFC;
+            border-color: #1F304A;
+        }
+        .modal .form-control::placeholder {
+            color: #64748B;
+        }
+        .modal .list-group-item {
+            background: #142032;
+            color: #E2E8F0;
+            border-color: #1F304A;
+        }
+        .swal2-popup {
+            background: #142032 !important;
+            color: #E2E8F0 !important;
+            border: 1px solid #1F304A !important;
+        }
+        .swal2-title,
+        .swal2-html-container {
+            color: #E2E8F0 !important;
+        }
+        .swal2-input,
+        .swal2-textarea,
+        .swal2-select,
+        .swal2-file,
+        .swal2-html-container .form-control,
+        .swal2-html-container .form-select {
+            background: #070B14 !important;
+            color: #F8FAFC !important;
+            border: 1px solid #1F304A !important;
+            box-shadow: none !important;
+        }
+        .swal2-input::placeholder,
+        .swal2-textarea::placeholder,
+        .swal2-html-container .form-control::placeholder {
+            color: #64748B !important;
+        }
+        .swal2-validation-message {
+            background: #3f1d1d !important;
+            color: #fecaca !important;
+        }
     </style>
 </head>
 
@@ -704,11 +778,11 @@
                             <select id="nuevoClienteDiaVencimiento" class="form-select"></select>
                         </div>
                     </div>
-                    <div class="alert alert-warning border-warning p-3 mb-0"><label
+                    <div class="alert alert-warning border-warning p-3 mb-0" id="cajaPinAltaCliente"><label
                             class="form-label small fw-bold text-dark"><i class="bi bi-shield-lock-fill"></i>
                             Autorización de Encargado</label><input type="password" id="pinAutorizacion"
                             class="form-control text-center fw-bold" placeholder="Ingrese PIN"
-                            onkeypress="if(event.key === 'Enter') guardarNuevoCliente()"></div>
+                            ></div>
                 </div>
                 <div class="modal-footer"><button class="btn btn-secondary"
                         data-bs-dismiss="modal">Cancelar</button><button class="btn btn-success fw-bold"
@@ -993,7 +1067,7 @@
 
     <!-- ===== ARCHIVOS JS SEPARADOS ===== -->
     <script src="js/layout.js?v=1.0.50"></script>
-    <script src="js/app_pos.js?v=1.0.64"></script>
+    <script src="js/app_pos.js?v=1.0.68"></script>
 
 </body>
 

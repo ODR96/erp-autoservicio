@@ -1,7 +1,9 @@
 import os
+import re
+import secrets
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 import sqlite3
 from jose import jwt, JWTError
@@ -14,6 +16,8 @@ from backend.database import obtener_conexion
 
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter()
+ZONA_AR = timezone(timedelta(hours=-3))
+MINUTOS_AUTORIZACION = 3
 
 load_dotenv()
 
@@ -81,7 +85,17 @@ class LoginRequest(BaseModel):
 
 class AutorizacionRequest(BaseModel):
     pin_secreto: str
-    roles_permitidos: List[str]
+    roles_permitidos: List[str] = []
+
+
+class AutorizacionRemotaNueva(BaseModel):
+    motivo: str = Field(..., min_length=3, max_length=300)
+    turno_id: int = 0
+
+
+class AutorizacionRemotaResolver(BaseModel):
+    pin_secreto: str
+    decision: str
 
 # --- FUNCIONES CRIPTOGRÁFICAS ---
 def obtener_hash_pin(pin):
@@ -95,6 +109,65 @@ def verificar_pin(pin_plano, pin_hasheado):
     except Exception as e:
         print(f"⚠️ Error criptográfico al verificar PIN: {e}")
         return False
+
+def _ahora_ar():
+    return datetime.now(ZONA_AR)
+
+
+def _stamp(cuando=None):
+    return (cuando or _ahora_ar()).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def asegurar_autorizaciones_remotas():
+    conexion = obtener_conexion()
+    try:
+        conexion.execute('''
+            CREATE TABLE IF NOT EXISTS autorizaciones_remotas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token TEXT NOT NULL UNIQUE,
+                motivo TEXT NOT NULL,
+                turno_id INTEGER DEFAULT 0,
+                estado TEXT NOT NULL,
+                creada_en TEXT NOT NULL,
+                vence_en TEXT NOT NULL,
+                resuelta_por TEXT
+            )
+        ''')
+        conexion.commit()
+    finally:
+        conexion.close()
+
+
+asegurar_autorizaciones_remotas()
+
+
+def _motivo_plano(texto):
+    limpio = re.sub(r"<[^>]+>", " ", texto or "")
+    return " ".join(limpio.split())[:300]
+
+
+def _quien_autoriza(cursor, pin):
+    """Solo Admin o Encargado. El rol que mande el cliente no cuenta."""
+    cursor.execute(
+        "SELECT id, nombre_completo, rol, pin_secreto FROM usuarios WHERE rol IN ('ADMIN', 'ENCARGADO') AND estado = 'ACTIVO'"
+    )
+    for fila in cursor.fetchall():
+        if verificar_pin(pin, fila["pin_secreto"]):
+            return fila
+    return None
+
+
+def _marcar_vencida(cursor, fila):
+    if not fila or fila["estado"] != "PENDIENTE":
+        return fila
+    if str(fila["vence_en"]) > _stamp():
+        return fila
+    cursor.execute(
+        "UPDATE autorizaciones_remotas SET estado = 'VENCIDA' WHERE id = ? AND estado = 'PENDIENTE'",
+        (fila["id"],),
+    )
+    return None
+
 
 def crear_token_acceso(data: dict):
     a_codificar = data.copy()
@@ -184,19 +257,113 @@ def autorizar_accion(request: Request, req: AutorizacionRequest):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
-    
-    placeholders = ','.join('?' for _ in req.roles_permitidos)
-    query = f"SELECT nombre_completo, rol, pin_secreto FROM usuarios WHERE rol IN ({placeholders}) AND estado = 'ACTIVO'"
-    
-    cursor.execute(query, req.roles_permitidos)
-    usuarios_autorizados = cursor.fetchall()
+    quien = _quien_autoriza(cursor, req.pin_secreto)
     conexion.close()
-    
-    for u in usuarios_autorizados:
-        if verificar_pin(req.pin_secreto, u['pin_secreto']):
-            return {"autorizado": True, "usuario": u['nombre_completo'], "rol": u['rol']}
-            
-    raise HTTPException(status_code=401, detail="PIN incorrecto o sin privilegios de Encargado.")
+    if not quien:
+        raise HTTPException(status_code=401, detail="PIN incorrecto o sin privilegios de Encargado.")
+    return {"autorizado": True, "usuario": quien["nombre_completo"], "rol": quien["rol"]}
+
+
+def _url_publica():
+    base = (os.getenv("ERP_PUBLIC_URL") or "http://185.249.225.63:8000").rstrip("/")
+    return base
+
+
+@router.post("/autorizacion-remota", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
+@limiter.limit("8/minute")
+def pedir_autorizacion_remota(request: Request, body: AutorizacionRemotaNueva):
+    motivo = _motivo_plano(body.motivo)
+    if len(motivo) < 3:
+        return {"error": "Falta el motivo de la autorización."}
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        ahora = _ahora_ar()
+        cursor.execute(
+            "UPDATE autorizaciones_remotas SET estado = 'VENCIDA' WHERE turno_id = ? AND estado = 'PENDIENTE'",
+            (body.turno_id,),
+        )
+        token = secrets.token_urlsafe(24)
+        vence = ahora + timedelta(minutes=MINUTOS_AUTORIZACION)
+        cursor.execute(
+            '''
+            INSERT INTO autorizaciones_remotas (token, motivo, turno_id, estado, creada_en, vence_en)
+            VALUES (?, ?, ?, 'PENDIENTE', ?, ?)
+            ''',
+            (token, motivo, body.turno_id, _stamp(ahora), _stamp(vence)),
+        )
+        conexion.commit()
+        link = f"{_url_publica()}/frontend/autorizar.html?t={token}"
+        from backend.whatsapp_puente import avisar_autorizacion_remota
+        envio = avisar_autorizacion_remota(motivo, link)
+        if not envio.get("ok"):
+            cursor.execute("UPDATE autorizaciones_remotas SET estado = 'VENCIDA' WHERE token = ?", (token,))
+            conexion.commit()
+            return {"error": envio.get("detalle") or "No se pudo avisar por WhatsApp."}
+        return {"token": token, "vence_en": _stamp(vence)}
+    except Exception as e:
+        conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        conexion.close()
+
+
+@router.get("/autorizacion-remota/{token}")
+def estado_autorizacion_remota(token: str):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute("SELECT * FROM autorizaciones_remotas WHERE token = ?", (token,))
+        fila = cursor.fetchone()
+        if not fila:
+            return {"error": "Ese pedido no existe."}
+        if _marcar_vencida(cursor, fila) is None and fila["estado"] == "PENDIENTE":
+            conexion.commit()
+            return {"estado": "VENCIDA", "motivo": fila["motivo"]}
+        return {
+            "estado": fila["estado"],
+            "motivo": fila["motivo"],
+            "usuario": fila["resuelta_por"] or "",
+        }
+    finally:
+        conexion.close()
+
+
+@router.post("/autorizacion-remota/{token}/resolver")
+@limiter.limit("10/minute")
+def resolver_autorizacion_remota(request: Request, token: str, body: AutorizacionRemotaResolver):
+    decision = (body.decision or "").strip().upper()
+    if decision not in ("APROBADA", "RECHAZADA"):
+        return {"error": "La decisión tiene que ser aprobar o rechazar."}
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        quien = _quien_autoriza(cursor, body.pin_secreto)
+        if not quien:
+            return {"error": "PIN incorrecto o sin privilegios de Encargado."}
+        cursor.execute("SELECT * FROM autorizaciones_remotas WHERE token = ?", (token,))
+        fila = cursor.fetchone()
+        if not fila:
+            return {"error": "Ese pedido no existe."}
+        if _marcar_vencida(cursor, fila) is None and fila["estado"] == "PENDIENTE":
+            conexion.commit()
+            return {"error": "Ese pedido ya venció."}
+        if fila["estado"] != "PENDIENTE":
+            return {"error": "Ese pedido ya se resolvió."}
+        cursor.execute(
+            "UPDATE autorizaciones_remotas SET estado = ?, resuelta_por = ? WHERE id = ? AND estado = 'PENDIENTE'",
+            (decision, quien["nombre_completo"], fila["id"]),
+        )
+        conexion.commit()
+        return {"estado": decision, "usuario": quien["nombre_completo"]}
+    except Exception as e:
+        conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        conexion.close()
 
 
 @router.get("/listar", dependencies=[Depends(VerificarRol(["ADMIN"]))])

@@ -125,6 +125,18 @@ def enviar_whatsapp(mensaje: str, numero: str = None):
         return {"ok": False, "detalle": f"Node no respondió en {PUENTE_URL}."}
 
 
+def avisar_autorizacion_remota(motivo: str, link: str):
+    """Aviso al dueño. El link no autoriza: en el celular hace falta el PIN."""
+    lineas = [
+        "Autorización en la caja",
+        (motivo or "").strip()[:300],
+        "",
+        link,
+        "Vence en 3 minutos. El link no alcanza: poné tu PIN.",
+    ]
+    return enviar_whatsapp("\n".join(lineas))
+
+
 def avisar_ticket_cliente(telefono: str, texto: str):
     destino = _normalizar_destino(telefono)
     if not destino:
