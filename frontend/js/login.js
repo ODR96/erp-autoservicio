@@ -7,7 +7,7 @@ function obtenerBaseUrl() {
         return 'http://localhost:8000';
     }
 
-    // Electron (file://): el instalador 1.0.38 sigue :8000. Nginx :80 es el admin en browser.
+    // Electron (file://): el instalador 1.0.39 sigue :8000. Nginx :80 es el admin en browser.
     if (protocolo === 'file:' || !host) {
         return 'http://185.249.225.63:8000';
     }

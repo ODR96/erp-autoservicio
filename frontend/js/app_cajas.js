@@ -83,10 +83,13 @@ async function cargarMonitor() {
                                     <span>Retiros/Gastos:</span> <b>-$${t.retiros.toFixed(2)}</b>
                                 </li>
                                 <li class="list-group-item d-flex justify-content-between px-0 bg-light mt-2 border-top border-secondary">
-                                    <span class="text-muted"><i class="bi bi-credit-card"></i> Tarjetas:</span> <b class="text-muted">$${t.ventas_tarjeta.toFixed(2)}</b>
+                                    <span class="text-muted"><i class="bi bi-credit-card"></i> Tarjetas:</span> <b class="text-muted">$${(t.ventas_tarjeta || 0).toFixed(2)}</b>
                                 </li>
                                 <li class="list-group-item d-flex justify-content-between px-0 bg-light">
-                                    <span class="text-muted"><i class="bi bi-qr-code-scan"></i> Billeteras Virtuales:</span> <b class="text-muted">$${t.ventas_virtual.toFixed(2)}</b>
+                                    <span class="text-muted"><i class="bi bi-qr-code"></i> QR:</span> <b class="text-muted">$${(t.ventas_qr || 0).toFixed(2)}</b>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between px-0 bg-light">
+                                    <span class="text-muted"><i class="bi bi-qr-code-scan"></i> Billeteras Virtuales:</span> <b class="text-muted">$${(t.ventas_virtual || 0).toFixed(2)}</b>
                                 </li>
                             </ul>
                             

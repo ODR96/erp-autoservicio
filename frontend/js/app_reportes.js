@@ -104,6 +104,7 @@ async function cargarRentabilidad() {
         ['CMV (costo mercadería)', a['2_costo_de_la_mercaderia'], b['2_costo_de_la_mercaderia']],
         ['Gastos del local', a['3_gastos_del_local'], b['3_gastos_del_local']],
         ['Mermas', a['8_mermas_del_mes'], b['8_mermas_del_mes']],
+        ['Comisiones de cobro', a['9_comisiones_medios'], b['9_comisiones_medios']],
         ['Ganancia neta', a['4_GANANCIA_NETA_PURA'], b['4_GANANCIA_NETA_PURA']],
         ['Sueldos pendientes de liquidar', a['6_sueldos_comprometidos'], b['6_sueldos_comprometidos']],
         ['Piso operativo (gastos + sueldos)', a['7_piso_operativo_mes'], b['7_piso_operativo_mes']],

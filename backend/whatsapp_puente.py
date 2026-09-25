@@ -8,7 +8,7 @@ Contrato con el bot whatsapp-web.js:
 Python NUNCA espera a que WhatsApp entregue. Si Node está caído, se loguea y el ERP sigue.
 
 Destinos en configuracion_local:
-  telefono                 → dueño (Cierre Z, retiros, gasto alto sin caja)
+  telefono                 → dueño (Cierre Z, retiros, descuento sobre el umbral)
   whatsapp_grupo_compras   → grupo (digest de faltantes del turno)
 """
 import os
@@ -181,6 +181,17 @@ def avisar_liquidacion_sueldo(telefono: str, datos: dict):
     return enviar_whatsapp("\n".join(lineas), numero=destino)
 
 
+def avisar_descuento_caja(ticket_id, pesos, pct, cajero: str = "", turno_id=None):
+    lineas = [
+        "Descuento de caja",
+        f"Ticket {ticket_id}: {_plata(pesos)} ({float(pct):.1f}%)",
+        f"Cajero: {cajero or '-'}",
+    ]
+    if turno_id:
+        lineas.append(f"Turno #{turno_id}")
+    return enviar_whatsapp("\n".join(lineas))
+
+
 def avisar_retiro(monto, motivo: str, usuario: str = "", turno_id=None):
     lineas = [f"Retiro de caja {_plata(monto)}"]
     if usuario:
@@ -199,12 +210,21 @@ def avisar_cierre_z(datos: dict):
         f"Fondo inicial: {_plata(datos.get('fondo_inicial'))}",
         f"Efectivo: {_plata(datos.get('ventas_efectivo'))}",
         f"Tarjeta: {_plata(datos.get('ventas_tarjeta'))}",
-        f"Transferencia / QR: {_plata(datos.get('ventas_transferencia'))}",
+    ]
+    if float(datos.get("ventas_tarjeta") or 0) > 0.009:
+        lineas.append(f"Comisión tarjeta: {_plata(datos.get('comision_tarjeta'))}")
+        lineas.append(f"Neto tarjeta: {_plata(datos.get('neto_tarjeta'))}")
+    lineas.append(f"QR: {_plata(datos.get('ventas_qr'))}")
+    if float(datos.get("ventas_qr") or 0) > 0.009:
+        lineas.append(f"Comisión QR: {_plata(datos.get('comision_qr'))}")
+        lineas.append(f"Neto QR: {_plata(datos.get('neto_qr'))}")
+    lineas.extend([
+        f"Transferencia: {_plata(datos.get('ventas_transferencia'))}",
         f"Billetera: {_plata(datos.get('ventas_virtual'))}",
         f"Fiado: {_plata(datos.get('ventas_fiados'))}",
         f"Ingresos extra: {_plata(datos.get('ingresos'))}",
         f"Retiros: {_plata(datos.get('retiros'))}",
-    ]
+    ])
     detalle_retiros = datos.get("detalle_retiros") or []
     for item in detalle_retiros[:12]:
         obs = (item.get("obs") or "Retiro").strip()

@@ -6,6 +6,7 @@ import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
 from backend.mod_clientes.rutas_clientes import persistir_imputacion_fifo, _estado_cuenta_de
+from backend.mod_config.rutas_config import liquidar_comision, plata
 
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
@@ -23,6 +24,12 @@ def asegurar_columnas_multi_caja():
     try: cursor.execute("ALTER TABLE ventas_cabecera ADD COLUMN override_mora_motivo TEXT")
     except: pass
     try: cursor.execute("ALTER TABLE ventas_cabecera ADD COLUMN cajero_nombre TEXT")
+    except: pass
+    try: cursor.execute("ALTER TABLE ventas_cabecera ADD COLUMN comision_medio REAL DEFAULT 0")
+    except: pass
+    try: cursor.execute("ALTER TABLE ventas_cabecera ADD COLUMN recargo_medio REAL DEFAULT 0")
+    except: pass
+    try: cursor.execute("ALTER TABLE ventas_pagos_mixtos ADD COLUMN comision REAL DEFAULT 0")
     except: pass
     conexion.commit()
     conexion.close()
@@ -173,6 +180,8 @@ class NuevaVenta(BaseModel):
     override_mora_motivo: Optional[str] = None
     cobro_externo_id: Optional[int] = None
     facturar_afip: bool = False
+    recargo_cobrado: bool = False
+    absorber_recargo: bool = False
     items: List[ItemVenta]
     pagos_mixtos: Optional[List[PagoMixto]] = None
     cajero_nombre: str = "Sistema"
@@ -236,7 +245,29 @@ def _supervisor_override(cursor, nombre):
 
 
 @router.post("/cobrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def registrar_venta(venta: NuevaVenta):
+def _aviso_descuento(cursor, descuento, base, cajero, turno_id):
+    if descuento >= -0.009 or base <= 0.009:
+        return None
+    try:
+        fila = cursor.execute(
+            "SELECT umbral_descuento_pct, umbral_descuento_pesos FROM configuracion_local WHERE id = 1"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    if not fila:
+        return None
+    umbral_pct = float(fila["umbral_descuento_pct"] or 0)
+    umbral_pesos = float(fila["umbral_descuento_pesos"] or 0)
+    pesos = abs(float(descuento))
+    pct = pesos / float(base) * 100
+    supera_pct = umbral_pct > 0 and pct + 1e-9 >= umbral_pct
+    supera_pesos = umbral_pesos > 0 and pesos + 0.009 >= umbral_pesos
+    if not (supera_pct or supera_pesos):
+        return None
+    return {"pesos": round(pesos, 2), "pct": round(pct, 1), "cajero": cajero or "", "turno_id": turno_id}
+
+
+def registrar_venta(venta: NuevaVenta, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row 
     cursor = conexion.cursor()
@@ -342,6 +373,30 @@ def registrar_venta(venta: NuevaVenta):
             ''', (venta_id, item.producto_id, prod_info['nombre'], item.cantidad, item.precio_unitario, subtotal_item, costo_unitario))
         
         total_con_descuento = total_venta + venta.descuento_recargo_global
+        cobrar_recargo = bool(venta.recargo_cobrado) and not bool(venta.absorber_recargo)
+        if venta.absorber_recargo:
+            if not _supervisor_override(cursor, venta.autorizado_por):
+                raise Exception("Absorber el recargo lo tiene que autorizar un Encargado.")
+            cobrar_recargo = False
+
+        pagos_ajustados = None
+        if (venta.metodo_pago or "").upper() == "MIXTO" and venta.pagos_mixtos:
+            pagos_ajustados = []
+            recargo_total = 0.0
+            comision_total = 0.0
+            for p in venta.pagos_mixtos:
+                cobrado, recargo, comision = liquidar_comision(cursor, p.metodo, p.monto, cobrar_recargo)
+                pagos_ajustados.append({"metodo": p.metodo, "monto": cobrado, "comision": comision})
+                recargo_total += recargo
+                comision_total += comision
+            total_final = plata(total_con_descuento + recargo_total)
+            recargo_total = plata(recargo_total)
+            comision_total = plata(comision_total)
+            venta.pagos_mixtos = [PagoMixto(metodo=p["metodo"], monto=p["monto"]) for p in pagos_ajustados]
+        else:
+            total_final, recargo_total, comision_total = liquidar_comision(
+                cursor, venta.metodo_pago, total_con_descuento, cobrar_recargo
+            )
         
         if venta.metodo_pago.upper() in ["CUENTA CORRIENTE", "FIADO"]:
             if not venta.cliente_id: raise Exception("Para vender fiado, seleccione un cliente.")
@@ -370,10 +425,22 @@ def registrar_venta(venta: NuevaVenta):
 
         if venta.metodo_pago == "MIXTO" and venta.pagos_mixtos:
             cursor.execute('''CREATE TABLE IF NOT EXISTS ventas_pagos_mixtos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, venta_id INTEGER, metodo_pago TEXT, monto REAL
+                id INTEGER PRIMARY KEY AUTOINCREMENT, venta_id INTEGER, metodo_pago TEXT, monto REAL, comision REAL DEFAULT 0
             )''')
+            try:
+                cursor.execute("ALTER TABLE ventas_pagos_mixtos ADD COLUMN comision REAL DEFAULT 0")
+            except Exception:
+                pass
+            comision_por_metodo = {}
+            if pagos_ajustados:
+                for p in pagos_ajustados:
+                    comision_por_metodo[(p["metodo"], round(p["monto"], 2))] = p["comision"]
             for p in venta.pagos_mixtos:
-                cursor.execute("INSERT INTO ventas_pagos_mixtos (venta_id, metodo_pago, monto) VALUES (?, ?, ?)", (venta_id, p.metodo, p.monto))
+                comision_pata = comision_por_metodo.get((p.metodo, round(p.monto, 2)), 0)
+                cursor.execute(
+                    "INSERT INTO ventas_pagos_mixtos (venta_id, metodo_pago, monto, comision) VALUES (?, ?, ?, ?)",
+                    (venta_id, p.metodo, p.monto, comision_pata),
+                )
                 if p.metodo == "EFECTIVO":
                     # EL ARREGLO: Inyectamos explícitamente el turno_id de la venta
                     cursor.execute('''
@@ -381,22 +448,44 @@ def registrar_venta(venta: NuevaVenta):
                         VALUES (?, ?, 'INGRESO', ?, ?, ?)
                     ''', (fecha_actual, 1, p.monto, f"Efectivo de Ticket #{venta_id} (Mixto)", venta.turno_id))
 
-        _atar_cobro_qr(cursor, venta, venta_id, total_con_descuento)
+        _atar_cobro_qr(cursor, venta, venta_id, total_final)
 
         ahorro_manual = abs(venta.descuento_recargo_global) if venta.descuento_recargo_global < 0 else 0
-        cursor.execute("UPDATE ventas_cabecera SET total_venta = ? WHERE id = ?", (total_con_descuento, venta_id))
-        vuelto_cliente = venta.monto_entregado - total_con_descuento if venta.monto_entregado > total_con_descuento and venta.metodo_pago.upper() not in ["CUENTA CORRIENTE", "FIADO", "MIXTO"] else 0
+        cursor.execute(
+            "UPDATE ventas_cabecera SET total_venta = ?, comision_medio = ?, recargo_medio = ? WHERE id = ?",
+            (total_final, comision_total, recargo_total, venta_id),
+        )
+        vuelto_cliente = venta.monto_entregado - total_final if venta.monto_entregado > total_final and venta.metodo_pago.upper() not in ["CUENTA CORRIENTE", "FIADO", "MIXTO"] else 0
         
         cae_afip = None
         if venta.facturar_afip:
             cae_afip = "SIMULADO-736482649274"
             cursor.execute("UPDATE ventas_cabecera SET tipo_comprobante = 'FACTURA B', estado = 'FACTURADO_AFIP' WHERE id = ?", (venta_id,))
 
+        aviso = _aviso_descuento(
+            cursor,
+            venta.descuento_recargo_global,
+            total_venta,
+            nombre_cajero,
+            venta.turno_id,
+        )
         conexion.commit()
+        if aviso:
+            from backend.whatsapp_puente import avisar_descuento_caja
+            background_tasks.add_task(
+                avisar_descuento_caja,
+                venta_id,
+                aviso["pesos"],
+                aviso["pct"],
+                aviso["cajero"],
+                aviso["turno_id"],
+            )
         return {
             "mensaje": "¡Venta registrada con éxito!",
             "numero_ticket": venta_id,
-            "total_cobrado": total_con_descuento,
+            "total_cobrado": total_final,
+            "recargo_medio": recargo_total,
+            "comision_medio": comision_total,
             "vuelto": vuelto_cliente,
             "ahorro_total": ahorro_manual + ahorro_por_promos,
             "cae_afip": cae_afip
@@ -432,6 +521,8 @@ def generar_ticket(venta_id: int):
                 desglose_mixto = [dict(row) for row in cursor.fetchall()]
             except: pass
         
+        recargo_medio = _campo_fila(venta, "recargo_medio", 0) or 0
+        descuento = venta["descuento_recargo_global"] or 0
         return {
             "encabezado": {
                 "comercio": "Autoservicio 20 de Junio",
@@ -444,8 +535,9 @@ def generar_ticket(venta_id: int):
             },
             "detalle_compra": [dict(item) for item in detalle],
             "totales": {
-                "subtotal_articulos": venta['total_venta'] - venta['descuento_recargo_global'],
+                "subtotal_articulos": venta['total_venta'] - descuento - recargo_medio,
                 "descuentos_o_recargos": venta['descuento_recargo_global'],
+                "recargo_medio": recargo_medio,
                 "total_a_pagar": venta['total_venta'],
                 "metodo_pago": venta['metodo_pago'],
                 "desglose_mixto": desglose_mixto

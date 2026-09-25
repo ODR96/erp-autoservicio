@@ -108,6 +108,24 @@
                                             sola liquidación, más de este % de adelantos/consumos pendientes sobre su
                                             sueldo bruto. El resto queda para la próxima.</small>
                                     </div>
+
+                                    <hr class="mt-4">
+                                    <h6 class="fw-bold text-primary"><i class="bi bi-percent"></i> Descuento de caja</h6>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold small">Avisar desde este porcentaje</label>
+                                        <input type="number" id="confUmbralDescuentoPct" class="form-control" min="0"
+                                            max="100" step="0.1">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold small">Avisar desde este monto ($)</label>
+                                        <input type="number" id="confUmbralDescuentoPesos" class="form-control" min="0"
+                                            step="1">
+                                    </div>
+                                    <div class="col-12">
+                                        <small class="text-muted">Te llega un WhatsApp si el descuento llega al % o al
+                                            monto. En cero, ese tope no avisa. No pide PIN. El descuento queda en el
+                                            ticket igual.</small>
+                                    </div>
                                 </div>
                                 <div class="mt-4 text-end">
                                     <button type="submit" class="btn btn-primary btn-lg fw-bold px-5 shadow-sm">
@@ -115,6 +133,21 @@
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm border-0 mt-4">
+                        <div class="card-header bg-dark text-white fw-bold">
+                            <i class="bi bi-percent"></i> Comisiones de cobro
+                        </div>
+                        <div class="card-body bg-light">
+                            <p class="small text-muted">El costo es lo que se queda el banco. Con el recargo activo, el POS se lo suma al cliente para dejarte el precio de góndola. Apagado, lo absorbe el local y la ganancia igual lo descuenta. El cajero no tipea el porcentaje.</p>
+                            <div id="tablaComisiones" class="d-flex flex-column gap-3"></div>
+                            <div class="mt-4 text-end">
+                                <button type="button" class="btn btn-primary fw-bold px-4" onclick="guardarComisiones()">
+                                    <i class="bi bi-save"></i> Guardar comisiones
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -138,15 +171,10 @@
 
                     <div class="card shadow-sm border-info">
                         <div class="card-header bg-info text-dark fw-bold">
-                            <i class="bi bi-cloud-sync"></i> Sistema Híbrido / Nube
+                            <i class="bi bi-database"></i> Copia de la base
                         </div>
                         <div class="card-body bg-light text-center">
-                            <p class="small text-muted mb-3">Panel de control de conexión y versiones.</p>
-
-                            <button class="btn btn-warning w-100 fw-bold mb-2 shadow-sm" onclick="actualizarSistema()">
-                                <i class="bi bi-github"></i> Actualizar Sistema
-                            </button>
-
+                            <p class="small text-muted mb-3">Bajá el archivo SQLite de este servidor.</p>
                             <button class="btn btn-outline-danger w-100 fw-bold btn-sm shadow-sm"
                                 onclick="descargarBackup()">
                                 <i class="bi bi-database-down"></i> Descargar Backup Local
@@ -161,7 +189,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="js/layout.js?v=1.0.42"></script>
-    <script src="js/app_config.js?v=1.0.33"></script>
+    <script src="js/app_config.js?v=1.0.36"></script>
 </body>
 
 </html>

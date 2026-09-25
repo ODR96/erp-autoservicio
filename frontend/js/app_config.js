@@ -67,11 +67,65 @@ async function cargarConfiguracionActual() {
         document.getElementById('confImpresora').value = config.impresora_por_defecto || '80mm';
         document.getElementById('confMsj').value = config.mensaje_ticket || '';
         document.getElementById('confTopeDescuento').value = config.tope_maximo_descuento_sueldo_pct ?? 50;
+        document.getElementById('confUmbralDescuentoPct').value = config.umbral_descuento_pct ?? 5;
+        document.getElementById('confUmbralDescuentoPesos').value = config.umbral_descuento_pesos ?? 0;
 
         if (config.ruta_logo) {
             document.getElementById('previewLogo').src = `${baseUrl}/static/logos/${config.ruta_logo}?t=${new Date().getTime()}`;
         }
+        await cargarComisiones();
     } catch (e) { console.error("Error al cargar config", e); }
+}
+
+async function cargarComisiones() {
+    const caja = document.getElementById('tablaComisiones');
+    if (!caja) return;
+    const res = await fetch(`${obtenerBaseUrl()}/config/comisiones`);
+    const medios = await res.json();
+    if (!Array.isArray(medios)) return;
+    caja.innerHTML = medios.map((m) => `
+        <div class="row g-2 align-items-end border-bottom pb-3">
+            <div class="col-md-4">
+                <label class="form-label fw-bold small mb-1">${m.nombre}</label>
+                <input type="hidden" class="comision-codigo" value="${m.codigo}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">Costo del banco (%)</label>
+                <input type="number" class="form-control comision-pct" min="0" max="99.99" step="0.01" value="${Number(m.pct_costo || 0)}">
+            </div>
+            <div class="col-md-4">
+                <div class="form-check mt-4">
+                    <input class="form-check-input comision-recargo" type="checkbox" ${m.recargo_activo ? 'checked' : ''}>
+                    <label class="form-check-label">Cobrar recargo al cliente</label>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function guardarComisiones() {
+    const filas = [...document.querySelectorAll('#tablaComisiones .row')];
+    const medios = filas.map((fila) => ({
+        codigo: fila.querySelector('.comision-codigo').value,
+        pct_costo: Number(fila.querySelector('.comision-pct').value || 0),
+        recargo_activo: fila.querySelector('.comision-recargo').checked
+    }));
+    Swal.fire({ title: 'Guardando...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/config/comisiones`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(medios)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = data.detail;
+            throw new Error(typeof detalle === 'string' ? detalle : 'No se pudieron guardar las comisiones.');
+        }
+        Swal.fire('Listo', 'Comisiones guardadas.', 'success');
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
 }
 
 async function guardarConfiguracion(event) {
@@ -88,6 +142,8 @@ async function guardarConfiguracion(event) {
     formData.append('impresora_por_defecto', document.getElementById('confImpresora').value);
     formData.append('mensaje_ticket', document.getElementById('confMsj').value);
     formData.append('tope_maximo_descuento_sueldo_pct', document.getElementById('confTopeDescuento').value || 50);
+    formData.append('umbral_descuento_pct', document.getElementById('confUmbralDescuentoPct').value || 0);
+    formData.append('umbral_descuento_pesos', document.getElementById('confUmbralDescuentoPesos').value || 0);
 
     try {
         const baseUrl = obtenerBaseUrl();
@@ -131,31 +187,6 @@ function descargarBackup() {
         const baseUrl = obtenerBaseUrl();
         window.open(`${baseUrl}/config/descargar_backup`, '_blank');
     });
-}
-
-async function actualizarSistema() {
-    Swal.fire({ 
-        title: 'Actualizando Sistema...', 
-        text: 'Descargando las últimas mejoras de la nube al equipo físico.', 
-        allowOutsideClick: false,
-        didOpen: () => { Swal.showLoading() }
-    });
-
-    try {
-        const baseUrl = obtenerBaseUrl(); 
-        const res = await fetch(`${baseUrl}/actualizar-sistema`, { method: 'POST' });
-        const data = await res.json();
-
-        if (res.ok) {
-            Swal.fire('¡Actualizado!', data.mensaje, 'success').then(() => {
-                window.location.reload(); 
-            });
-        } else {
-            Swal.fire('Error', data.error || 'Fallo en la actualización', 'error');
-        }
-    } catch (e) {
-        Swal.fire('Error', 'No se pudo contactar al servidor para actualizar.', 'error');
-    }
 }
 
 async function probarWhatsapp() {

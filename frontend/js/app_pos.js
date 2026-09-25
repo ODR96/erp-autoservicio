@@ -45,9 +45,11 @@ function armarSelectDiaCobro(id, valor) {
 
 setInterval(() => {
     const d = new Date();
-    // Le agregamos el hour12: false para forzar el formato militar/24hs
-    document.getElementById('reloj').innerText = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-    document.getElementById('fecha').innerText = d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    const reloj = document.getElementById('reloj');
+    const fecha = document.getElementById('fecha');
+    if (!reloj || !fecha) return;
+    reloj.innerText = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+    fecha.innerText = d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }, 1000);
 
 // ===== VARIABLES GLOBALES Y SEGURIDAD =====
@@ -92,6 +94,7 @@ document.addEventListener("DOMContentLoaded", () => {
         empleadoLogueado = empleadoGuardado;
     }
     iniciarInterfazPOS();
+    asegurarComisiones();
 });
 
 // --- MOTOR DE AUTORIZACIONES REALES ---
@@ -526,6 +529,7 @@ async function verDetalleTicketGlobal(ventaId) {
 
         html += `</tbody></table></div>
                  <div class="text-end fw-bold fs-5 mt-2 text-primary">Total: $${data.totales.total_a_pagar.toFixed(2)}</div>
+                 ${Number(data.totales.recargo_medio) > 0 ? `<div class="text-end small">Recargo medio: $${Number(data.totales.recargo_medio).toFixed(2)}</div>` : ''}
                  <div class="text-start text-muted small mt-2">Método: ${escHtmlPos(metodoTicket)}</div>
                  ${lineaCliente}`;
 
@@ -568,10 +572,7 @@ async function confirmarAnulacion(ventaId, ticket) {
             // LLamada a tu backend para anular (CON TOKEN Y USUARIO)
             const res = await apiFetch(`${obtenerBaseUrl()}/ventas/anular/${ventaId}`, {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     usuario_id: empleadoLogueado.id,
                     turno_id: turnoActualId
@@ -631,26 +632,6 @@ async function iniciarTurno() {
         Swal.fire({ title: '¡Caja Abierta!', icon: 'success', timer: 1500, showConfirmButton: false });
         setTimeout(() => inputScan.focus(), 1500);
     } catch (error) { Swal.fire('Error', error.message, 'error'); }
-}
-
-async function anularVentaConAviso() {
-    if (carrito.length === 0) return inputScan.focus();
-
-    const result = await Swal.fire({
-        title: '¿Anular venta?',
-        text: "Se borrarán todos los artículos del ticket.",
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#d33',
-        cancelButtonColor: '#6c757d',
-        confirmButtonText: 'Sí, anular'
-    });
-
-    if (result.isConfirmed) {
-        limpiarMostrador();
-    } else {
-        inputScan.focus();
-    }
 }
 
 function pressNumpad(n) { inputScan.value += n; inputScan.focus(); }
@@ -1245,6 +1226,8 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
         autorizado_por: autorizadoPor,
         override_mora_motivo: extras && extras.override_mora_motivo ? extras.override_mora_motivo : null,
         cobro_externo_id: extras && extras.cobro_externo_id ? extras.cobro_externo_id : null,
+        recargo_cobrado: !!(extras && extras.recargo_cobrado),
+        absorber_recargo: !!(extras && extras.absorber_recargo),
         turno_id: turnoActualId
     };
 
@@ -1436,38 +1419,114 @@ async function confirmarCobroEfectivo() {
     }
 }
 
-// ===== BOTONES TARJETA / BILLETERA CONECTADOS =====
+// ===== COMISIÓN DEL MEDIO (la pone Configuración; el cajero no la tipea) =====
+let comisionesMedio = null;
+
+function plataPos(n) {
+    return Math.round(Number(n) * 100) / 100;
+}
+
+function codigoMedio(metodo) {
+    const m = String(metodo || '').toUpperCase();
+    if (m.includes('QR')) return 'QR';
+    if (m.includes('TARJETA')) return 'TARJETA';
+    if (m.includes('TRANSFERENCIA') || m.includes('BILLETERA')) return 'TRANSFERENCIA';
+    if (m.includes('EFECTIVO')) return 'EFECTIVO';
+    return '';
+}
+
+async function asegurarComisiones() {
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/config/comisiones`);
+        const data = await res.json();
+        if (Array.isArray(data)) comisionesMedio = data;
+    } catch (e) { /* queda la copia de esta sesión */ }
+    return comisionesMedio;
+}
+
+function reglaMedio(metodo) {
+    const codigo = codigoMedio(metodo);
+    const fila = (comisionesMedio || []).find((r) => r.codigo === codigo);
+    return fila || { codigo, pct_costo: 0, recargo_activo: false };
+}
+
+function liquidarMedio(metodo, base, cobrarRecargo) {
+    const regla = reglaMedio(metodo);
+    const pct = Number(regla.pct_costo || 0);
+    const baseR = plataPos(base);
+    if (!(pct > 0) || pct >= 100) return { cobrado: baseR, recargo: 0, comision: 0 };
+    const tasa = pct / 100;
+    if (cobrarRecargo && regla.recargo_activo) {
+        const cobrado = plataPos(baseR / (1 - tasa));
+        const comision = plataPos(cobrado * tasa);
+        return { cobrado, recargo: plataPos(cobrado - baseR), comision };
+    }
+    return { cobrado: baseR, recargo: 0, comision: plataPos(baseR * tasa) };
+}
+
+async function pedirAbsorberRecargo(mensaje) {
+    const firma = await solicitarAutorizacion(mensaje);
+    if (!firma) return null;
+    return firma;
+}
+
 // ===== BOTONES TARJETA / BILLETERA CONECTADOS =====
 async function cerrarVentaBasica(metodo) {
     if (carrito.length === 0) return Swal.fire('Error', 'El ticket está vacío.', 'error');
+    await asegurarComisiones();
+    if (!comisionesMedio && (codigoMedio(metodo) === 'TARJETA' || codigoMedio(metodo) === 'QR')) {
+        inputScan.focus();
+        return Swal.fire('Sin conexión', 'No se pudo leer la comisión. Reintentá o cobrá en efectivo.', 'warning');
+    }
 
-    // EL ESCUDO: Mini confirmación para evitar cobros accidentales por el lector láser
+    const conRecargo = liquidarMedio(metodo, totalVenta, true);
+    const hayRecargo = conRecargo.recargo > 0.009;
+    const htmlCobro = hayRecargo
+        ? `Precio: $${totalVenta.toFixed(2)}<br>Recargo: $${conRecargo.recargo.toFixed(2)}<br><b>A cobrar: $${conRecargo.cobrado.toFixed(2)}</b>`
+        : `Total a cobrar: $${totalVenta.toFixed(2)}`;
+
     const confirm = await Swal.fire({
         title: `¿Cobrar con ${metodo}?`,
-        text: `Total a cobrar: $${totalVenta.toFixed(2)}`,
+        html: htmlCobro,
         icon: 'question',
         showCancelButton: true,
+        showDenyButton: hayRecargo,
         confirmButtonColor: '#198754',
         cancelButtonColor: '#6c757d',
+        denyButtonColor: '#6c757d',
         confirmButtonText: 'Sí, cobrar (Enter)',
+        denyButtonText: 'Absorber recargo',
         cancelButtonText: 'Cancelar (Esc)'
     });
 
-    // Si cancela, devolvemos el cursor a la barra de búsqueda
-    if (!confirm.isConfirmed) {
+    let absorber = false;
+    let firma = null;
+    if (confirm.isDenied) {
+        firma = await pedirAbsorberRecargo(`Absorber recargo de ${metodo}.`);
+        if (!firma) {
+            inputScan.focus();
+            return;
+        }
+        absorber = true;
+    } else if (!confirm.isConfirmed) {
         inputScan.focus();
         return;
     }
 
+    const liq = liquidarMedio(metodo, totalVenta, !absorber);
     Swal.fire({ title: 'Procesando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
-    const resultado = await procesarVentaBackend(metodo, totalVenta);
+    const resultado = await procesarVentaBackend(metodo, liq.cobrado, null, firma, {
+        recargo_cobrado: !absorber && liq.recargo > 0.009,
+        absorber_recargo: absorber
+    });
 
     if (resultado) {
+        const cobrado = Number(resultado.total_cobrado != null ? resultado.total_cobrado : liq.cobrado);
         await preguntarTicketDespuesDeVenta({
             titulo: `Cobrado con ${metodo}`,
-            html: `Ticket N°: <b>${resultado.numero_ticket}</b>`,
-            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, totalVenta, 0, resultado.ahorro_total),
+            html: `Total: <b>$${cobrado.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b>`,
+            imprimir: () => imprimirTicket80mm(resultado.numero_ticket, cobrado, 0, resultado.ahorro_total),
             ventaId: resultado.numero_ticket
         });
     }
@@ -1591,9 +1650,39 @@ async function esperarPagoQr(monto, { titulo = 'Cobrar con QR' } = {}) {
 
 async function cobrarConQrMp() {
     if (carrito.length === 0) return Swal.fire('Ticket vacío', 'Agregá productos antes de cobrar con QR.', 'error');
+    await asegurarComisiones();
+    if (!comisionesMedio) {
+        return Swal.fire('Sin conexión', 'No se pudo leer la comisión del QR. Reintentá o cobrá en efectivo.', 'warning');
+    }
+
+    let absorber = false;
+    let firma = null;
+    const preview = liquidarMedio('QR Mercado Pago', totalVenta, true);
+    if (preview.recargo > 0.009) {
+        const confirm = await Swal.fire({
+            title: '¿Cobrar con QR?',
+            html: `Precio: $${totalVenta.toFixed(2)}<br>Recargo: $${preview.recargo.toFixed(2)}<br><b>A cobrar: $${preview.cobrado.toFixed(2)}</b>`,
+            icon: 'question',
+            showCancelButton: true,
+            showDenyButton: true,
+            confirmButtonText: 'Sí, cobrar',
+            denyButtonText: 'Absorber recargo',
+            cancelButtonText: 'Cancelar'
+        });
+        if (confirm.isDenied) {
+            firma = await pedirAbsorberRecargo('Absorber recargo de QR.');
+            if (!firma) return inputScan.focus();
+            absorber = true;
+        } else if (!confirm.isConfirmed) {
+            inputScan.focus();
+            return;
+        }
+    }
+
+    const liq = liquidarMedio('QR Mercado Pago', totalVenta, !absorber);
     let cobroId;
     try {
-        cobroId = await esperarPagoQr(totalVenta);
+        cobroId = await esperarPagoQr(liq.cobrado);
     } catch (e) {
         return Swal.fire('No se pudo cargar el QR', e.message || 'Reintentá o cobrá por otro medio.', 'error');
     }
@@ -1602,15 +1691,21 @@ async function cobrarConQrMp() {
         return;
     }
 
-    qrAcreditadoSinTicket = { cobroId, monto: totalVenta };
+    qrAcreditadoSinTicket = { cobroId, monto: liq.cobrado };
     Swal.fire({ title: 'Pagó. Guardando el ticket...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-    const venta = await procesarVentaBackend('QR Mercado Pago', totalVenta, null, null, { sin_offline: true, cobro_externo_id: cobroId });
+    const venta = await procesarVentaBackend('QR Mercado Pago', liq.cobrado, null, firma, {
+        sin_offline: true,
+        cobro_externo_id: cobroId,
+        recargo_cobrado: !absorber && liq.recargo > 0.009,
+        absorber_recargo: absorber
+    });
     if (!venta) return;
     qrAcreditadoSinTicket = null;
+    const cobrado = Number(venta.total_cobrado != null ? venta.total_cobrado : liq.cobrado);
     await preguntarTicketDespuesDeVenta({
         titulo: 'Cobrado con QR',
-        html: `Pagó ${plataFiado(totalVenta)} por Mercado Pago.<br>Ticket N°: <b>${venta.numero_ticket}</b>`,
-        imprimir: () => imprimirTicket80mm(venta.numero_ticket, totalVenta, 0, venta.ahorro_total),
+        html: `Pagó ${plataFiado(cobrado)} por Mercado Pago.<br>Ticket N°: <b>${venta.numero_ticket}</b>`,
+        imprimir: () => imprimirTicket80mm(venta.numero_ticket, cobrado, 0, venta.ahorro_total),
         ventaId: venta.numero_ticket
     });
 }
@@ -2737,9 +2832,14 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
     const vTransf = d.ventas_transferencia ?? 0;
     const vBilletera = d.ventas_virtual ?? 0;
     const vTarjetas = d.ventas_tarjeta ?? d.tarjetas ?? 0;
+    const vQr = d.ventas_qr ?? 0;
+    const comTar = d.comision_tarjeta ?? 0;
+    const comQr = d.comision_qr ?? 0;
+    const netoTar = d.neto_tarjeta ?? (vTarjetas - comTar);
+    const netoQr = d.neto_qr ?? (vQr - comQr);
     const vFiados = d.ventas_fiados ?? d.fiados ?? d.ventas_cta_cte ?? d.cta_cte ?? 0;
 
-    const vTotales = vEfectivo + vTransf + vBilletera + vTarjetas + vFiados;
+    const vTotales = vEfectivo + vTransf + vBilletera + vTarjetas + vQr + vFiados;
     const ingresos = d.ingresos_extras ?? 0;
     const retiros = d.retiros_y_gastos ?? 0;
 
@@ -2770,9 +2870,14 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
 
     <div class="center bold" style="margin-bottom: 6px;">--- VENTAS DEL TURNO ---</div>
     <div class="fila"><span>Efectivo:</span> <span>$${vEfectivo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
-    <div class="fila"><span>Transferencia / QR:</span> <span>$${vTransf.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
+    <div class="fila"><span>Transferencia:</span> <span>$${vTransf.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
+    <div class="fila"><span>QR Mercado Pago:</span> <span>$${vQr.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
+    ${comQr > 0.009 ? `<div class="fila"><span>Comisión QR:</span> <span>$${comQr.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
+    <div class="fila"><span>Neto QR:</span> <span>$${netoQr.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>` : ''}
     <div class="fila"><span>Virtual / Billeteras:</span> <span>$${vBilletera.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
     <div class="fila"><span>Tarjetas (POS):</span> <span>$${vTarjetas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
+    ${comTar > 0.009 ? `<div class="fila"><span>Comisión tarjeta:</span> <span>$${comTar.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
+    <div class="fila"><span>Neto tarjeta:</span> <span>$${netoTar.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>` : ''}
     <div class="fila"><span>Fiados (Cta. Cte.):</span> <span>$${vFiados.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
     <div class="divisor"></div>
     <div class="fila bold" style="font-size: 14px;"><span>TOTAL VENDIDO:</span> <span>$${vTotales.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
@@ -3074,6 +3179,9 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
             let descGlobal = Math.abs(ticket.totales.descuentos_o_recargos);
             html += `<div style="display: flex; justify-content: space-between;"><span>DESC. MANUAL:</span><span>-$ ${descGlobal.toFixed(2)}</span></div>`;
         }
+        if (Number(ticket.totales.recargo_medio) > 0) {
+            html += `<div style="display: flex; justify-content: space-between;"><span>RECARGO MEDIO:</span><span>$ ${Number(ticket.totales.recargo_medio).toFixed(2)}</span></div>`;
+        }
 
         html += `
                 <div class="divisor"></div>
@@ -3315,6 +3423,39 @@ async function procesarPagoMixto() {
     const vuelto = suma > totalVenta ? (suma - totalVenta) : 0;
     const efectivoRealCaja = efOriginal - vuelto;
 
+    await asegurarComisiones();
+    if (!comisionesMedio && (ta > 0 || qr > 0.01)) {
+        return Swal.fire('Sin conexión', 'No se pudo leer la comisión. Reintentá o sacá tarjeta y QR.', 'warning');
+    }
+
+    const pataTarjeta = ta > 0 ? liquidarMedio('TARJETA', ta, true) : null;
+    const pataQr = qr > 0.01 ? liquidarMedio('QR Mercado Pago', qr, true) : null;
+    let absorber = false;
+    let firma = null;
+    const avisos = [];
+    if (pataTarjeta && pataTarjeta.recargo > 0.009) avisos.push(`Tarjeta en el posnet: $${pataTarjeta.cobrado.toFixed(2)}`);
+    if (pataQr && pataQr.recargo > 0.009) avisos.push(`QR a cargar: $${pataQr.cobrado.toFixed(2)}`);
+    if (avisos.length) {
+        const confirm = await Swal.fire({
+            title: 'Recargo del medio',
+            html: avisos.join('<br>'),
+            icon: 'question',
+            showCancelButton: true,
+            showDenyButton: true,
+            confirmButtonText: 'Cobrar con recargo',
+            denyButtonText: 'Absorber recargo',
+            cancelButtonText: 'Volver'
+        });
+        if (confirm.isDenied) {
+            firma = await pedirAbsorberRecargo('Absorber recargo de esta venta.');
+            if (!firma) return;
+            absorber = true;
+        } else if (!confirm.isConfirmed) {
+            return;
+        }
+    }
+
+    const qrCobrado = pataQr ? liquidarMedio('QR Mercado Pago', qr, !absorber).cobrado : 0;
     const desglosePagos = [];
     if (efectivoRealCaja > 0) desglosePagos.push({ metodo: "EFECTIVO", monto: efectivoRealCaja });
     if (ta > 0) desglosePagos.push({ metodo: "TARJETA", monto: ta });
@@ -3325,7 +3466,7 @@ async function procesarPagoMixto() {
     if (qr > 0.01) {
         modalPagoMixto.hide();
         try {
-            cobroId = await esperarPagoQr(qr, { titulo: 'QR del pago dividido' });
+            cobroId = await esperarPagoQr(qrCobrado, { titulo: 'QR del pago dividido' });
         } catch (e) {
             modalPagoMixto.show();
             return Swal.fire('No se pudo cargar el QR', e.message || 'Reintentá o sacá la pata QR.', 'error');
@@ -3334,20 +3475,27 @@ async function procesarPagoMixto() {
             modalPagoMixto.show();
             return;
         }
-        qrAcreditadoSinTicket = { cobroId, monto: qr };
+        qrAcreditadoSinTicket = { cobroId, monto: qrCobrado };
     } else {
         modalPagoMixto.hide();
     }
 
     Swal.fire({ title: 'Procesando Venta Mixta...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-    const extras = cobroId ? { sin_offline: true, cobro_externo_id: cobroId } : {};
-    const resultado = await procesarVentaBackend('MIXTO', suma, desglosePagos, null, extras);
+    const extras = {
+        recargo_cobrado: !absorber && avisos.length > 0,
+        absorber_recargo: absorber
+    };
+    if (cobroId) {
+        extras.sin_offline = true;
+        extras.cobro_externo_id = cobroId;
+    }
+    const resultado = await procesarVentaBackend('MIXTO', suma, desglosePagos, firma, extras);
 
     if (resultado) {
         qrAcreditadoSinTicket = null;
         await preguntarTicketDespuesDeVenta({
             titulo: 'Venta exitosa',
-            html: `Venta dividida cobrada.${qr > 0.01 ? `<br>QR Mercado Pago: ${plataFiado(qr)}` : ''}<br><b>Entregar vuelto en efectivo: $${vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b>`,
+            html: `Venta dividida cobrada.${qr > 0.01 ? `<br>QR Mercado Pago: ${plataFiado(qrCobrado)}` : ''}<br><b>Entregar vuelto en efectivo: $${vuelto.toFixed(2)}</b><br>Ticket N°: <b>${resultado.numero_ticket}</b>`,
             imprimir: () => imprimirTicket80mm(resultado.numero_ticket, suma, vuelto, resultado.ahorro_total),
             ventaId: resultado.numero_ticket
         });
@@ -3355,6 +3503,7 @@ async function procesarPagoMixto() {
 }
 
 // --- COBRO DE PEDIDOS MAYORISTAS (CON SOPORTE MIXTO Y VUELTOS) ---
+// El botón no está en la cara de venta hasta que el módulo de pedidos cierre. El cobro queda.
 async function abrirCobroPedidoMayorista() {
     const { value: pedidoId } = await Swal.fire({
         title: 'Cobrar Pedido de Oficina',

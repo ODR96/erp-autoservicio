@@ -45,6 +45,7 @@ async function cargarMeticasFinancieras() {
             const sueldosComprometidos = rf['6_sueldos_comprometidos'] || 0;
             const pisoMes = (rf['7_piso_operativo_mes'] != null) ? rf['7_piso_operativo_mes'] : (gastos + sueldosComprometidos);
             const mermas = rf['8_mermas_del_mes'] || 0;
+            const comisiones = rf['9_comisiones_medios'] || 0;
 
             // 1. Llenamos las cajas de texto de arriba (hechos: la ganancia neta NO mete proyección)
             document.getElementById('dash-ingresos-mes').innerText = formatiarDinero(ingresos);
@@ -52,11 +53,13 @@ async function cargarMeticasFinancieras() {
             document.getElementById('dash-gastos').innerText = formatiarDinero(gastos);
             const cajaMermas = document.getElementById('dash-mermas');
             if (cajaMermas) cajaMermas.innerText = formatiarDinero(mermas);
+            const cajaComisiones = document.getElementById('dash-comisiones');
+            if (cajaComisiones) cajaComisiones.innerText = formatiarDinero(comisiones);
             document.getElementById('dash-ganancia').innerText = formatiarDinero(gananciaNeta);
             document.getElementById('dash-rentabilidad').innerText = rf['5_rentabilidad_del_mes'];
 
             // 2. Piso del mes = gastos ya anotados + sueldos que todavía no se liquidaron
-            const gananciaBruta = ingresos - cmv;
+            const gananciaBruta = ingresos - cmv - comisiones;
             let porcentajeEquilibrio = 0;
             
             if (pisoMes > 0) {

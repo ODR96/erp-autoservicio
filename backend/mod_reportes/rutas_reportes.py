@@ -202,6 +202,17 @@ def calcular_ganancia_neta(mes: str = None):
         ''', (mes,))
         ingresos = cursor.fetchone()[0] or 0.0
 
+        comisiones = 0.0
+        try:
+            cursor.execute('''
+                SELECT IFNULL(SUM(comision_medio), 0) FROM ventas_cabecera
+                WHERE strftime('%Y-%m', fecha_hora) = ?
+                AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
+            ''', (mes,))
+            comisiones = cursor.fetchone()[0] or 0.0
+        except sqlite3.OperationalError:
+            comisiones = 0.0
+
         # 2. CMV: costo del lote al momento de vender. Ventas viejas (NULL) usan el maestro.
         cursor.execute('''
             SELECT SUM(v.cantidad * COALESCE(v.costo_unitario_historico, p.costo_sin_iva, 0))
@@ -241,7 +252,7 @@ def calcular_ganancia_neta(mes: str = None):
             mermas = 0.0
 
         # 4. MATEMÁTICA PURA DE NEGOCIOS (hechos: no mezcla proyección)
-        ganancia_neta = ingresos - costos_mercaderia - gastos - mermas
+        ganancia_neta = ingresos - costos_mercaderia - comisiones - gastos - mermas
         
         # Sacamos el porcentaje de rentabilidad
         margen_porcentaje = (ganancia_neta / ingresos * 100) if ingresos > 0 else 0
@@ -258,7 +269,8 @@ def calcular_ganancia_neta(mes: str = None):
                 "5_rentabilidad_del_mes": f"{round(margen_porcentaje, 2)}%",
                 "6_sueldos_comprometidos": sueldos_comprometidos,
                 "7_piso_operativo_mes": piso_operativo_mes,
-                "8_mermas_del_mes": round(mermas, 2)
+                "8_mermas_del_mes": round(mermas, 2),
+                "9_comisiones_medios": round(comisiones, 2)
             }
         }
     except Exception as e:
@@ -641,7 +653,8 @@ def listar_cierres_mes(mes: str = None, incluir_oficina: bool = False):
             WITH ventas_turno AS (
                 SELECT turno_id,
                        COUNT(id) AS tickets,
-                       IFNULL(SUM(total_venta), 0) AS ventas
+                       IFNULL(SUM(total_venta), 0) AS ventas,
+                       IFNULL(SUM(IFNULL(comision_medio, 0)), 0) AS comision
                 FROM ventas_cabecera
                 WHERE estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
                 GROUP BY turno_id
@@ -663,8 +676,9 @@ def listar_cierres_mes(mes: str = None, incluir_oficina: bool = False):
                    IFNULL(cf.solo_admin, 0) as solo_admin,
                    IFNULL(vt.tickets, 0) as tickets,
                    IFNULL(vt.ventas, 0) as ventas,
+                   IFNULL(vt.comision, 0) as comision,
                    IFNULL(ct.cmv, 0) as cmv,
-                   ROUND(IFNULL(vt.ventas, 0) - IFNULL(ct.cmv, 0), 2) as ganancia_bruta
+                   ROUND(IFNULL(vt.ventas, 0) - IFNULL(ct.cmv, 0) - IFNULL(vt.comision, 0), 2) as ganancia_bruta
             FROM turnos_caja t
             LEFT JOIN usuarios u ON t.usuario_id = u.id
             LEFT JOIN cajas_fisicas cf ON t.caja_id = cf.id

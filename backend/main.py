@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles 
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware 
-import subprocess
 from contextlib import asynccontextmanager
 import os
 import sqlite3
@@ -101,22 +100,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- 4. LA RUTA DE ACTUALIZACIÓN GIT (Webhook Contabo) ---
-@app.post("/actualizar-sistema")
-def actualizar_codigo_git():
-    try:
-        resultado = subprocess.run(["git", "pull"], capture_output=True, text=True, check=True)
-        return {
-            "mensaje": "¡Sistema actualizado con éxito desde la nube!", 
-            "detalle": resultado.stdout
-        }
-    except subprocess.CalledProcessError as e:
-        return {
-            "error": "Hubo un problema al intentar descargar la actualización.", 
-            "detalle": e.stderr
-        }
-
-# --- 5. ENCHUFAMOS TODOS LOS MÓDULOS ---
+# --- 4. ENCHUFAMOS TODOS LOS MÓDULOS ---
 app.include_router(router_dashboard, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(router_productos, prefix="/productos", tags=["Productos"])
 app.include_router(router_lotes, prefix="/lotes", tags=["Lotes y Stock (FIFO)"])
