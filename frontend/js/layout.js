@@ -1,7 +1,7 @@
 // ========================================================
 // CONFIGURACIÓN GLOBAL
 // ========================================================
-const APP_VERSION = "v1.0.39"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
+const APP_VERSION = "v1.0.40"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
 
 function obtenerBaseUrl() {
     const protocolo = window.location.protocol;
@@ -12,7 +12,7 @@ function obtenerBaseUrl() {
         return 'http://localhost:8000';
     }
 
-    // Electron (file://): el instalador 1.0.39 sigue :8000. Nginx :80 es el admin en browser.
+    // file://: un instalador viejo o el HTML abierto desde disco. El 1.0.40 abre el puerto 80.
     if (protocolo === 'file:' || !host) {
         return 'http://185.249.225.63:8000';
     }

@@ -1,6 +1,9 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+
+// Instalador de caja: Nginx :80. El :8000 queda abierto hasta que todas las cajas tengan este build.
+const URL_CAJA = 'http://185.249.225.63/frontend/index.html';
 
 process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true';
 
@@ -22,8 +25,23 @@ function crearVentana() {
         }
     });
 
-    // Le decimos que cargue tu index.html
-    ventanaPrincipal.loadFile('index.html');
+    // Empaquetado: la pantalla sale del servidor (puerto 80).
+    // electron . en esta PC: el HTML local, y la API sigue en localhost:8000.
+    if (app.isPackaged) {
+        ventanaPrincipal.loadURL(URL_CAJA);
+        ventanaPrincipal.webContents.on('did-fail-load', (_evento, codigo, descripcion, url, esMarcoPrincipal) => {
+            if (!esMarcoPrincipal || codigo === -3) return;
+            if (!String(url || '').startsWith('http://185.249.225.63/')) return;
+            dialog.showMessageBox(ventanaPrincipal, {
+                type: 'error',
+                title: 'Sin conexión con el servidor',
+                message: 'La caja no pudo abrir el sistema. Revisá internet y volvé a abrir el programa.',
+                detail: descripcion || ''
+            });
+        });
+    } else {
+        ventanaPrincipal.loadFile('index.html');
+    }
 
     // Quitamos el menú clásico de Windows (Archivo, Editar, Ver...)
     ventanaPrincipal.setMenuBarVisibility(false);
