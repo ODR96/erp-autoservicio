@@ -787,7 +787,7 @@ window.elegirSugerenciaCompra = function(i) {
 };
 
 document.getElementById('inputScanCompra')?.addEventListener('input', function () {
-    const query = this.value.trim();
+        const query = this.value.trim();
     clearTimeout(timeoutSugerirCompra);
     if (query.length < 2) {
         ocultarSugerenciasCompra();
@@ -856,7 +856,7 @@ document.addEventListener('click', (e) => {
 async function buscarParaCompra(query) {
     try {
         const res = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(query)}`);
-        const data = await res.json();
+        const data = await res.json(); 
         const productos = Array.isArray(data) ? data : (data.productos || []);
 
         if (productos.length === 0) {
@@ -880,8 +880,8 @@ async function buscarParaCompra(query) {
         }
 
         mostrarSugerenciasCompra(productos.slice(0, 12));
-    } catch (e) {
-        console.error(e);
+    } catch (e) { 
+        console.error(e); 
         Swal.fire('Error', 'Fallo de conexión al buscar.', 'error');
     }
 }
@@ -1099,7 +1099,7 @@ function htmlFilaFactura(item, idx) {
                             <option value="UN" ${!esCaja ? 'selected' : ''}>Un</option>
                             <option value="CAJA" ${esCaja ? 'selected' : ''}>Caja</option>
                         </select>
-                    </div>
+            </div>
                     <small class="text-muted" id="equiv-fila-${idx}">${esCaja ? `= ${stock} un. (x${uxb})` : (uxb > 1 ? `Caja x${uxb}` : '')}</small>
                 </td>
                 <td class="text-start" data-label="Producto">
@@ -1710,7 +1710,7 @@ async function registrarPagoProveedor() {
         }
         if (data.error) throw new Error(data.error);
 
-        Swal.fire('¡Éxito!', 'Pago registrado y deuda actualizada.', 'success');
+Swal.fire('¡Éxito!', 'Pago registrado y deuda actualizada.', 'success');
         
         // Limpiamos los inputs
         document.getElementById('montoPagoProv').value = '';
@@ -2025,6 +2025,7 @@ function exportarComprasAExcel(proveedorNombre) {
 let faltantesCache = [];
 let alertasStockCache = [];
 let filtroFaltantes = 'PENDIENTE';
+let textoBusquedaFaltantes = '';
 let seleccionFaltantes = new Set();
 let seleccionAlertas = new Set();
 
@@ -2043,6 +2044,13 @@ function fechaHoyAR() {
     return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
 }
 
+function textoCostoFaltante(valor) {
+    if (valor === null || valor === undefined || valor === '') return '';
+    const n = Number(valor);
+    if (!Number.isFinite(n)) return '';
+    return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function formatearCantidadPedido(valor) {
     const n = parseFloat(valor);
     if (!Number.isFinite(n)) return '1';
@@ -2055,11 +2063,28 @@ function etiquetaEstadoFaltante(estado) {
     return '<span class="badge bg-warning text-dark">Pendiente</span>';
 }
 
+function textoPlanoFaltante(valor) {
+    return String(valor ?? '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+}
+
 function faltantesVisibles() {
+    const palabras = textoBusquedaFaltantes.split(' ').filter(Boolean);
     return faltantesCache.filter(f => {
         const estado = f.estado || 'PENDIENTE';
-        return estado === filtroFaltantes;
+        if (estado !== filtroFaltantes) return false;
+        if (palabras.length === 0) return true;
+        const fuente = textoPlanoFaltante(`${f.descripcion_producto || ''} ${f.notas || ''} ${f.usuario_anoto || ''}`);
+        return palabras.every(pal => fuente.includes(pal));
     });
+}
+
+function buscarFaltantes() {
+    const crudo = document.getElementById('inputBuscarFaltantes')?.value || '';
+    textoBusquedaFaltantes = textoPlanoFaltante(crudo.trim());
+    dibujarFaltantesCaja();
 }
 
 function idsFaltantesVisibles() {
@@ -2139,13 +2164,17 @@ function dibujarFaltantesCaja() {
         chkTodos.disabled = recibidos;
         if (recibidos) chkTodos.checked = false;
     }
-
+    
     if (lista.length === 0) {
-        const vacio = recibidos
-            ? 'No hay recibidos. Cuando llega la mercadería, marcala desde Pedidos.'
-            : 'No hay ítems en este filtro.';
+        const buscando = textoBusquedaFaltantes.length > 0;
+        const vacio = buscando
+            ? 'Ningún ítem de esta pestaña coincide con la búsqueda.'
+            : (recibidos
+                ? 'No hay recibidos. Cuando llega la mercadería, marcala desde Pedidos.'
+                : 'No hay ítems en este filtro.');
+        const icono = buscando ? 'bi-search text-secondary' : 'bi-check-circle text-success';
         tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">
-            <i class="bi bi-check-circle fs-4 d-block mb-2 text-success"></i>
+            <i class="bi ${icono} fs-4 d-block mb-2"></i>
             ${vacio}
         </td></tr>`;
         actualizarResumenSeleccion();
@@ -2157,6 +2186,8 @@ function dibujarFaltantesCaja() {
         const estado = f.estado || 'PENDIENTE';
         const claseFila = estado === 'PEDIDO' ? 'fila-faltante-pedido' : (estado === 'RECIBIDO' ? 'fila-faltante-recibido' : '');
         const quien = f.usuario_anoto ? `<div class="small text-muted">Por ${escapeHtmlPedidos(f.usuario_anoto)}</div>` : '';
+        const costoTxt = textoCostoFaltante(f.costo_sin_iva);
+        const costoHtml = costoTxt ? `<div class="small text-muted">Costo $${costoTxt}</div>` : '';
         const obs = f.notas ? escapeHtmlPedidos(f.notas) : '<span class="text-muted">—</span>';
         const cuando = f.fecha_recibido || f.fecha_pedido || f.fecha_hora || '';
         const colCheck = recibidos ? '' : `
@@ -2200,7 +2231,7 @@ function dibujarFaltantesCaja() {
         return `
             <tr class="${claseFila}" ${clickFila}>
                 ${colCheck}
-                <td class="text-start fw-bold">${escapeHtmlPedidos(f.descripcion_producto)}${quien}</td>
+                <td class="text-start fw-bold">${escapeHtmlPedidos(f.descripcion_producto)}${costoHtml}${quien}</td>
                 ${cantCell}
                 <td class="small col-hide-xs">${obs}</td>
                 ${colEstado}
@@ -2219,7 +2250,7 @@ function dibujarAlertasStock() {
     const tbody = document.getElementById('tablaFaltantesSistema');
     if (!tbody) return;
     const lista = alertasStockCache;
-
+    
     if (lista.length === 0) {
         tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4">
             <i class="bi bi-box-seam fs-4 d-block mb-2 text-success"></i>
@@ -2243,7 +2274,7 @@ function dibujarAlertasStock() {
                         onclick="event.stopPropagation()"
                         onchange="toggleSeleccionAlerta(${id}, this.checked)">
                 </td>
-                <td class="text-start fw-bold">${escapeHtmlPedidos(p.nombre)}</td>
+                <td class="text-start fw-bold">${escapeHtmlPedidos(p.nombre)}${textoCostoFaltante(p.costo_sin_iva) ? `<div class="small text-muted">Costo $${textoCostoFaltante(p.costo_sin_iva)}</div>` : ''}</td>
                 <td class="text-danger fw-bold">${p.stock_actual}</td>
                 <td class="text-muted">${p.stock_minimo_alerta}</td>
                 <td class="col-hide-xs"><span class="badge bg-secondary">${escapeHtmlPedidos(nombreProv)}</span></td>
@@ -2505,7 +2536,8 @@ function recolectarItemsPedido() {
         pedidoPor: f.usuario_anoto || '',
         estado: f.estado || 'PENDIENTE',
         origen: 'Caja',
-        proveedor: ''
+        proveedor: '',
+        costo: f.costo_sin_iva
     }));
 
     const hayAlertas = seleccionAlertas.size > 0;
@@ -2521,7 +2553,8 @@ function recolectarItemsPedido() {
             pedidoPor: 'Stock mínimo',
             estado: 'PENDIENTE',
             origen: 'Stock',
-            proveedor: provSugerido ? provSugerido.nombre_comercial : 'Sin asignar'
+            proveedor: provSugerido ? provSugerido.nombre_comercial : 'Sin asignar',
+            costo: p.costo_sin_iva
         };
     });
 
@@ -2538,11 +2571,12 @@ function exportarPedidoExcel() {
     if (items.length === 0) return Swal.fire('Aviso', 'No hay productos para exportar.', 'info');
 
     let csv = '\uFEFF';
-    csv += 'Producto;Cantidad;Observacion;Pedido por;Estado;Origen;Proveedor\n';
+    csv += 'Producto;Cantidad;Costo;Observacion;Pedido por;Estado;Origen;Proveedor\n';
     items.forEach(item => {
         csv += [
             csvCeldaPedido(item.producto),
             csvCeldaPedido(item.cantidad),
+            csvCeldaPedido(textoCostoFaltante(item.costo)),
             csvCeldaPedido(item.observacion),
             csvCeldaPedido(item.pedidoPor),
             csvCeldaPedido(item.estado),
@@ -2567,6 +2601,7 @@ function htmlPedidoFaltantes(items) {
         <tr>
             <td>${escapeHtmlPedidos(item.producto)}</td>
             <td style="text-align:center;">${escapeHtmlPedidos(item.cantidad)}</td>
+            <td style="text-align:right;">${textoCostoFaltante(item.costo) ? ('$' + escapeHtmlPedidos(textoCostoFaltante(item.costo))) : '—'}</td>
             <td>${escapeHtmlPedidos(item.observacion || '—')}</td>
             <td>${escapeHtmlPedidos(item.pedidoPor || '—')}</td>
             <td>${escapeHtmlPedidos(item.estado)}</td>
@@ -2581,11 +2616,12 @@ function htmlPedidoFaltantes(items) {
                 <tr>
                     <th>Producto</th>
                     <th>Cant.</th>
+                    <th>Costo</th>
                     <th>Obs.</th>
                     <th>Pedido por</th>
                     <th>Estado</th>
                     <th>Proveedor / origen</th>
-                </tr>
+            </tr>
             </thead>
             <tbody>${filas}</tbody>
         </table>`;
@@ -2602,6 +2638,7 @@ function htmlHojaCotizacion(items, columnas) {
         <tr>
             <td>${escapeHtmlPedidos(item.producto)}</td>
             <td style="text-align:center;">${escapeHtmlPedidos(item.cantidad)}</td>
+            <td style="text-align:right;font-weight:700;">${textoCostoFaltante(item.costo) ? ('$' + escapeHtmlPedidos(textoCostoFaltante(item.costo))) : '—'}</td>
             ${celdasPrecio}
         </tr>`).join('');
 
@@ -2614,6 +2651,7 @@ function htmlHojaCotizacion(items, columnas) {
                 <tr>
                     <th>Producto</th>
                     <th style="width:70px;">Cant.</th>
+                    <th style="width:90px;">Mi costo</th>
                     ${thPrecios}
                 </tr>
             </thead>

@@ -159,6 +159,7 @@ def obtener_alertas_dashboard():
         # EL ARREGLO: Agregamos p.proveedor_habitual_id a la consulta SELECT
         cursor.execute('''
             SELECT p.id as producto_id, p.nombre, p.stock_minimo_alerta, p.proveedor_habitual_id,
+                   IFNULL(p.costo_sin_iva, 0) as costo_sin_iva,
                    IFNULL((SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo'), 0) as stock_actual
             FROM productos p
             WHERE stock_actual <= p.stock_minimo_alerta 
@@ -331,22 +332,29 @@ def obtener_faltantes_pendientes():
     cursor = conexion.cursor()
     try:
         cursor.execute('''
-            SELECT id,
-                   descripcion_producto,
-                   cantidad_pedida,
-                   notas,
-                   usuario_anoto,
-                   fecha_hora,
-                   IFNULL(estado, 'PENDIENTE') AS estado,
-                   fecha_pedido,
-                   fecha_recibido
-            FROM productos_solicitados_faltantes
-            ORDER BY CASE IFNULL(estado, 'PENDIENTE')
+            SELECT f.id,
+                   f.descripcion_producto,
+                   f.cantidad_pedida,
+                   f.notas,
+                   f.usuario_anoto,
+                   f.fecha_hora,
+                   IFNULL(f.estado, 'PENDIENTE') AS estado,
+                   f.fecha_pedido,
+                   f.fecha_recibido,
+                   CASE
+                       WHEN COUNT(p.id) = 1 THEN IFNULL(MAX(p.costo_sin_iva), 0)
+                       ELSE NULL
+                   END AS costo_sin_iva
+            FROM productos_solicitados_faltantes f
+            LEFT JOIN productos p
+              ON lower(trim(p.nombre)) = lower(trim(f.descripcion_producto))
+            GROUP BY f.id
+            ORDER BY CASE IFNULL(f.estado, 'PENDIENTE')
                         WHEN 'PENDIENTE' THEN 0
                         WHEN 'PEDIDO' THEN 1
                         ELSE 2
                      END,
-                     id DESC
+                     f.id DESC
         ''')
         faltantes = [dict(row) for row in cursor.fetchall()]
         return {"faltantes": faltantes}
