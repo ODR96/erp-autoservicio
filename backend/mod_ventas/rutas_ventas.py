@@ -244,7 +244,6 @@ def _supervisor_override(cursor, nombre):
     return fila["id"]
 
 
-@router.post("/cobrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def _aviso_descuento(cursor, descuento, base, cajero, turno_id):
     if descuento >= -0.009 or base <= 0.009:
         return None
@@ -267,6 +266,7 @@ def _aviso_descuento(cursor, descuento, base, cajero, turno_id):
     return {"pesos": round(pesos, 2), "pct": round(pct, 1), "cajero": cajero or "", "turno_id": turno_id}
 
 
+@router.post("/cobrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def registrar_venta(venta: NuevaVenta, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row 
