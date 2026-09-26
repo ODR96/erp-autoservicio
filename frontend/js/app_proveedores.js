@@ -2594,10 +2594,44 @@ function exportarPedidoExcel() {
     document.body.removeChild(link);
 }
 
+function claveOrdenPedido(nombre) {
+    return String(nombre || '')
+        .trim()
+        .toLocaleLowerCase('es-AR')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+}
+
+function letraGrupoPedido(nombre) {
+    const c = claveOrdenPedido(nombre).charAt(0);
+    if (c >= 'a' && c <= 'z') return c.toUpperCase();
+    return '#';
+}
+
+function itemsPedidoAlfabeticos(items) {
+    return items.slice().sort((a, b) =>
+        claveOrdenPedido(a.producto).localeCompare(claveOrdenPedido(b.producto), 'es')
+    );
+}
+
+function filasConLetraPedido(items, columnas, filaHtml) {
+    let letra = '';
+    const partes = [];
+    itemsPedidoAlfabeticos(items).forEach(item => {
+        const actual = letraGrupoPedido(item.producto);
+        if (actual !== letra) {
+            letra = actual;
+            partes.push(`<tr class="fila-letra"><td class="letra-pedido" colspan="${columnas}">${escapeHtmlPedidos(letra)}</td></tr>`);
+        }
+        partes.push(filaHtml(item));
+    });
+    return partes.join('');
+}
+
 function htmlPedidoFaltantes(items) {
     const config = JSON.parse(localStorage.getItem('config_negocio')) || { nombre_negocio: 'Autoservicio 20 de Junio' };
     const nombreLocal = config.nombre_negocio || 'Autoservicio 20 de Junio';
-    const filas = items.map(item => `
+    const filas = filasConLetraPedido(items, 7, item => `
         <tr>
             <td>${escapeHtmlPedidos(item.producto)}</td>
             <td style="text-align:center;">${escapeHtmlPedidos(item.cantidad)}</td>
@@ -2606,7 +2640,7 @@ function htmlPedidoFaltantes(items) {
             <td>${escapeHtmlPedidos(item.pedidoPor || '—')}</td>
             <td>${escapeHtmlPedidos(item.estado)}</td>
             <td>${escapeHtmlPedidos(item.proveedor || item.origen)}</td>
-        </tr>`).join('');
+        </tr>`);
 
     return `
         <h2>Pedido de faltantes</h2>
@@ -2634,13 +2668,19 @@ function htmlHojaCotizacion(items, columnas) {
     const celdasPrecio = Array.from({ length: n }, () => '<td class="celda-precio"></td>').join('');
     const encabezadosRayas = Array.from({ length: n }, (_, i) => `Prov. ${i + 1}: ____________`).join(' &nbsp;&nbsp; ');
     const thPrecios = Array.from({ length: n }, (_, i) => `<th>Precio ${i + 1}</th>`).join('');
-    const filas = items.map(item => `
+    const filas = filasConLetraPedido(items, 3 + n, item => {
+        const nota = String(item.observacion || '').trim();
+        const notaHtml = nota
+            ? `<div style="font-weight:500;font-size:11px;color:#495057;">${escapeHtmlPedidos(nota)}</div>`
+            : '';
+        return `
         <tr>
-            <td>${escapeHtmlPedidos(item.producto)}</td>
+            <td>${escapeHtmlPedidos(item.producto)}${notaHtml}</td>
             <td style="text-align:center;">${escapeHtmlPedidos(item.cantidad)}</td>
             <td style="text-align:right;font-weight:700;">${textoCostoFaltante(item.costo) ? ('$' + escapeHtmlPedidos(textoCostoFaltante(item.costo))) : '—'}</td>
             ${celdasPrecio}
-        </tr>`).join('');
+        </tr>`;
+    });
 
     return `
         <h2>Hoja de cotización</h2>
@@ -2820,6 +2860,8 @@ function imprimirPedidoDesdePreview() {
                 table { width: 100%; border-collapse: collapse; font-size: 13px; }
                 th { background: #f8f9fa; text-align: left; padding: 8px; border-bottom: 2px solid #1b365d; text-transform: uppercase; font-size: 11px; letter-spacing: .03em; }
                 td { padding: 8px; border-bottom: 1px solid #e9ecef; vertical-align: top; }
+                td.letra-pedido { background: #1b365d; color: #fff; font-weight: 800; font-size: 15px; letter-spacing: .08em; padding: 4px 8px; }
+                tr.fila-letra { break-after: avoid; page-break-after: avoid; }
                 td.celda-precio { width: 18%; height: 28px; border: 1px solid #adb5bd; }
             </style>
         </head>
