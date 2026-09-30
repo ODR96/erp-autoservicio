@@ -3549,6 +3549,7 @@ async function procesarPagoMixto() {
 // --- COBRO DE PEDIDOS MAYORISTAS (CON SOPORTE MIXTO Y VUELTOS) ---
 // El botón no está en la cara de venta hasta que el módulo de pedidos cierre. El cobro queda.
 async function abrirCobroPedidoMayorista() {
+    if (!turnoActualId) return Swal.fire('Error', 'No hay turno abierto.', 'error');
     const { value: pedidoId } = await Swal.fire({
         title: 'Cobrar Pedido de Oficina',
         input: 'number',
@@ -3675,7 +3676,8 @@ async function abrirCobroPedidoMayorista() {
                 pedido_id: data.id,
                 monto_total: data.total_venta,
                 metodo_pago: metodoPago,
-                pagos_mixtos: pagosMixtosData.length > 0 ? pagosMixtosData : null
+                pagos_mixtos: pagosMixtosData.length > 0 ? pagosMixtosData : null,
+                turno_id: turnoActualId
             })
         });
 

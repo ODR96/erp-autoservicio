@@ -390,7 +390,7 @@ async function imprimirRemitoA5(docId) {
             titulo = "ORDEN DE PEDIDO";
             watermark = "FALTA PAGAR";
             watermarkColor = "rgba(220, 53, 69, 0.15)"; 
-            textoLegales = "<strong>ATENCIÓN:</strong> Pase por línea de cajas con este comprobante para abonar y liberar la mercadería en depósito.";
+            textoLegales = "<strong>ATENCIÓN:</strong> Este pedido se cobra en la caja o en el depósito. Recién ahí se libera la mercadería.";
         } else if (cab.estado === 'PAGADO_PENDIENTE_ENTREGA') {
             titulo = "ORDEN DE RETIRO";
             watermark = "PAGADO";
@@ -401,6 +401,16 @@ async function imprimirRemitoA5(docId) {
             watermark = "ENTREGADO";
             watermarkColor = "rgba(13, 110, 253, 0.1)"; 
             textoLegales = "<strong>FINALIZADO:</strong> La mercadería detallada en este documento ya fue entregada y despachada por nuestro depósito. ¡Gracias por su compra!";
+        } else if (cab.estado === 'VENCIDO') {
+            titulo = "PRESUPUESTO VENCIDO";
+            watermark = "VENCIDO";
+            watermarkColor = "rgba(220, 53, 69, 0.15)";
+            textoLegales = "<strong>VENCIDO:</strong> Este presupuesto no mantiene el precio. Hay que armar uno nuevo.";
+        } else if (cab.estado === 'ANULADO') {
+            titulo = "PEDIDO ANULADO";
+            watermark = "ANULADO";
+            watermarkColor = "rgba(220, 53, 69, 0.15)";
+            textoLegales = "<strong>ANULADO:</strong> Este pedido se anuló antes de cobrar. La reserva volvió al disponible.";
         } else {
             titulo = "COMPROBANTE ANULADO";
             watermark = "ANULADO";
@@ -512,7 +522,7 @@ function guardarComoPresupuesto() {
 function confirmarYReservar() {
     Swal.fire({
         title: '¿Confirmar Pedido?',
-        text: "Esto bloqueará el stock físico para que nadie más lo venda.",
+        text: "Reserva esa cantidad para el pedido. Se suelta si lo anulás antes de cobrar.",
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#198754',
@@ -549,7 +559,7 @@ let monitorDataGlobal = [];
 function convertirAPedido(docId) {
     Swal.fire({
         title: '¿Pasar a Caja?',
-        text: "El presupuesto se convertirá en un Pedido en firme y quedará pendiente de pago.",
+        text: "Pasa a pedido y reserva el stock. Si no alcanza, no se convierte.",
         icon: 'question',
         showCancelButton: true,
         confirmButtonColor: '#ffc107',
@@ -567,7 +577,7 @@ function convertirAPedido(docId) {
                 
                 if (data.error) throw new Error(data.error);
                 
-                Swal.fire('¡Listo para Cobrar!', `El cliente ya puede ir a la caja a pagar el Pedido #${docId}.`, 'success');
+                Swal.fire('¡Listo para cobrar!', `El pedido #${docId} se puede cobrar en la caja o en este monitor.`, 'success');
                 cargarMonitorPedidos(); 
                 
             } catch (e) {
@@ -614,6 +624,7 @@ function dibujarMonitor(lista) {
             
             // EL NUEVO ESTADO: VENCIDO
             case 'VENCIDO': badgeEstado = '<span class="badge bg-danger"><i class="bi bi-hourglass-bottom"></i> Vencido</span>'; break;
+            case 'ANULADO': badgeEstado = '<span class="badge bg-dark"><i class="bi bi-x-circle"></i> Anulado</span>'; break;
             
             default: badgeEstado = `<span class="badge bg-secondary">${doc.estado}</span>`;
         }
@@ -637,7 +648,15 @@ function dibujarMonitor(lista) {
                     
                     ${doc.estado === 'PRESUPUESTO_ACTIVO' ? `
                     <button class="btn btn-sm btn-warning shadow-sm ms-1 fw-bold" onclick="convertirAPedido(${doc.id})" title="Convertir en Pedido Real">
-                        <i class="bi bi-cart-check"></i> Cobrar
+                        <i class="bi bi-cart-check"></i> A pedido
+                    </button>` : ''}
+
+                    ${doc.estado === 'PENDIENTE_PAGO' ? `
+                    <button class="btn btn-sm btn-success shadow-sm ms-1 fw-bold" onclick="cobrarPedidoDeposito(${doc.id})" title="Cobrar en el depósito, sin pasar por el cajón">
+                        <i class="bi bi-cash-coin"></i> Cobrar
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger shadow-sm ms-1" onclick="anularPedido(${doc.id})" title="Anular y soltar la reserva">
+                        <i class="bi bi-x-circle"></i> Anular
                     </button>` : ''}
 
                     ${doc.estado === 'PAGADO_PENDIENTE_ENTREGA' ? `
@@ -808,6 +827,69 @@ async function imprimirPicking(docId) {
     } catch (e) {
         Swal.fire('Error', e.message, 'error');
     }
+}
+
+async function cobrarPedidoDeposito(docId) {
+    const { value: metodo } = await Swal.fire({
+        title: `Cobrar pedido #${docId}`,
+        html: '<div class="small text-muted">El efectivo de acá no entra al cajón del salón. El QR no se manda a Mercado Pago.</div>',
+        input: 'select',
+        inputOptions: {
+            'EFECTIVO': 'Efectivo en depósito',
+            'TARJETA DEBITO': 'Tarjeta débito',
+            'TARJETA CREDITO': 'Tarjeta crédito',
+            'TRANSFERENCIA': 'Transferencia',
+            'QR': 'QR manual',
+            'CTA_CTE': 'Fiado (cuenta corriente)'
+        },
+        inputPlaceholder: 'Medio de pago',
+        showCancelButton: true,
+        confirmButtonText: 'Cobrar',
+        confirmButtonColor: '#198754',
+        inputValidator: (value) => {
+            if (!value) return 'Elegí el medio.';
+        }
+    });
+    if (!metodo) return;
+    Swal.fire({ title: 'Cobrando...', didOpen: () => Swal.showLoading() });
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/deposito/cobrar/${docId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ metodo_pago: metodo })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await Swal.fire('Cobrado', data.mensaje || 'Queda listo para entregar.', 'success');
+        cargarMonitorPedidos();
+        imprimirRemitoA5(docId);
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
+function anularPedido(docId) {
+    Swal.fire({
+        title: '¿Anular el pedido?',
+        text: 'Se suelta la reserva. Después no se puede cobrar.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Sí, anular'
+    }).then(async (result) => {
+        if (!result.isConfirmed) return;
+        Swal.fire({ title: 'Anulando...', didOpen: () => Swal.showLoading() });
+        try {
+            const res = await fetch(`${obtenerBaseUrl()}/deposito/anular/${docId}`, { method: 'PUT' });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            Swal.fire('Anulado', data.mensaje, 'success');
+            cargarMonitorPedidos();
+        } catch (e) {
+            Swal.fire('Error', e.message, 'error');
+        }
+    });
 }
 
 // --- DESPACHAR MERCADERÍA (EL CAMIONCITO VERDE) ---

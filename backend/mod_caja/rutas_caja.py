@@ -38,7 +38,7 @@ def _sumar_medio(cursor, turno_id, patron):
         """
         SELECT IFNULL(SUM(total_venta), 0), IFNULL(SUM(IFNULL(comision_medio, 0)), 0)
         FROM ventas_cabecera
-        WHERE UPPER(metodo_pago) LIKE ? AND turno_id = ? AND estado = 'COMPLETADA'
+        WHERE UPPER(metodo_pago) LIKE ? AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
         """,
         (patron, turno_id),
     )
@@ -50,7 +50,7 @@ def _sumar_medio(cursor, turno_id, patron):
             SELECT IFNULL(SUM(m.monto), 0), IFNULL(SUM(IFNULL(m.comision, 0)), 0)
             FROM ventas_pagos_mixtos m
             JOIN ventas_cabecera c ON c.id = m.venta_id
-            WHERE UPPER(m.metodo_pago) LIKE ? AND c.turno_id = ? AND c.estado = 'COMPLETADA'
+            WHERE UPPER(m.metodo_pago) LIKE ? AND c.turno_id = ? AND c.estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
             """,
             (patron, turno_id),
         )
@@ -58,6 +58,24 @@ def _sumar_medio(cursor, turno_id, patron):
     except sqlite3.OperationalError:
         pass
     return float(bruto or 0) + float(mixto_bruto or 0), float(comision or 0) + float(mixto_comision or 0)
+
+
+def _fiado_mixto(cursor, turno_id):
+    try:
+        cursor.execute(
+            """
+            SELECT IFNULL(SUM(m.monto), 0)
+            FROM ventas_pagos_mixtos m
+            JOIN ventas_cabecera c ON c.id = m.venta_id
+            WHERE UPPER(m.metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE', 'CTA_CTE')
+              AND c.turno_id = ?
+              AND c.estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
+            """,
+            (turno_id,),
+        )
+        return float(cursor.fetchone()[0] or 0)
+    except sqlite3.OperationalError:
+        return 0.0
 
 
 def _sumar_transferencias(cursor, turno_id):
@@ -218,17 +236,18 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
             
         fecha_cierre = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')", (cierre.turno_id,))
         ventas_efectivo = cursor.fetchone()[0] or 0.0
         
         ventas_tarjeta, comision_tarjeta = _sumar_medio(cursor, cierre.turno_id, "%TARJETA%")
         ventas_qr, comision_qr = _sumar_medio(cursor, cierre.turno_id, "%QR%")
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%BILLETERA%' AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%BILLETERA%' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')", (cierre.turno_id,))
         ventas_virtual = cursor.fetchone()[0] or 0.0    
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado = 'COMPLETADA'", (cierre.turno_id,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')", (cierre.turno_id,))
         ventas_fiados = cursor.fetchone()[0] or 0.0
+        ventas_fiados += _fiado_mixto(cursor, cierre.turno_id)
         ventas_transferencia = _sumar_transferencias(cursor, cierre.turno_id)
         
         cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (cierre.turno_id,))
@@ -325,17 +344,18 @@ def sacar_informe_x(turno_id: int):
             
         fondo_inicial = turno['monto_inicial']
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado = 'COMPLETADA'", (turno_id,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')", (turno_id,))
         v_efectivo = cursor.fetchone()[0] or 0.0
         
         v_tarjeta, comision_tarjeta = _sumar_medio(cursor, turno_id, "%TARJETA%")
         v_qr, comision_qr = _sumar_medio(cursor, turno_id, "%QR%")
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%BILLETERA%' AND turno_id = ? AND estado = 'COMPLETADA'", (turno_id,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%BILLETERA%' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')", (turno_id,))
         v_virtual = cursor.fetchone()[0] or 0.0
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado = 'COMPLETADA'", (turno_id,))
+        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')", (turno_id,))
         v_fiados = cursor.fetchone()[0] or 0.0
+        v_fiados += _fiado_mixto(cursor, turno_id)
         v_transferencia = _sumar_transferencias(cursor, turno_id)
         
         cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (turno_id,))
@@ -385,7 +405,7 @@ def monitor_cajas_vivo():
         
         for turno in turnos_abiertos:
             turno_id_actual = turno['turno_id']
-            cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago = 'EFECTIVO' AND turno_id = ?", (turno_id_actual,))
+            cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago = 'EFECTIVO' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')", (turno_id_actual,))
             ventas_efectivo = cursor.fetchone()[0] or 0.0
             ventas_tarjeta, _comision_tarjeta = _sumar_medio(cursor, turno_id_actual, "%TARJETA%")
             ventas_qr, _comision_qr = _sumar_medio(cursor, turno_id_actual, "%QR%")
@@ -445,46 +465,23 @@ class CobroPedido(BaseModel):
 
 @router.post("/cobrar_pedido", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def cobrar_pedido_mayorista(cobro: CobroPedido):
+    from backend.mod_venta_deposito.rutas_deposito import liquidar_pedido_mayorista
+
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        # EL ARREGLO: Ya no buscamos el turno a ciegas, usamos el que mandó el cajero
-        cursor.execute("SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (cobro.turno_id,))
-        turno_abierto = cursor.fetchone()
-        if not turno_abierto: raise Exception("Este turno de caja no está activo o no existe.")
-            
-        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
-        pagos_a_procesar = cobro.pagos_mixtos if cobro.metodo_pago == 'MIXTO' and cobro.pagos_mixtos else [PagoMixtoCaja(metodo=cobro.metodo_pago, monto=cobro.monto_total)]
-
-        for pago in pagos_a_procesar:
-            if pago.monto > 0:
-                if pago.metodo == 'EFECTIVO':
-                    cursor.execute('''
-                        INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
-                        VALUES (?, 1, 'INGRESO', ?, ?, ?)
-                    ''', (fecha_actual, pago.monto, f"Cobro Pedido Mayorista #{cobro.pedido_id} ({pago.metodo})", cobro.turno_id))
-                elif pago.metodo == 'CTA_CTE':
-                    cursor.execute("SELECT cliente_id FROM ventas_cabecera WHERE id = ?", (cobro.pedido_id,))
-                    row_pedido = cursor.fetchone()
-                    if row_pedido and row_pedido['cliente_id']:
-                        cliente_id = row_pedido['cliente_id']
-                        cursor.execute("UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor + ? WHERE id = ?", (pago.monto, cliente_id))
-                        cursor.execute('''
-                            INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
-                            VALUES (?, ?, 'DEUDA', ?, ?, 1)
-                        ''', (cliente_id, fecha_actual, pago.monto, f"Pedido Mayorista #{cobro.pedido_id} (Pago Mixto)"))
-
-        cursor.execute('''
-            UPDATE ventas_cabecera 
-            SET estado = 'PAGADO_PENDIENTE_ENTREGA', metodo_pago = ? 
-            WHERE id = ? AND estado = 'PENDIENTE_PAGO'
-        ''', (cobro.metodo_pago, cobro.pedido_id))
-        
-        if cursor.rowcount == 0: raise Exception("El pedido no existe o ya fue cobrado.")
-            
+        if cobro.metodo_pago == "MIXTO" and cobro.pagos_mixtos:
+            pagos = [{"metodo": p.metodo, "monto": p.monto} for p in cobro.pagos_mixtos]
+        else:
+            cursor.execute("SELECT total_venta FROM ventas_cabecera WHERE id = ?", (cobro.pedido_id,))
+            pedido = cursor.fetchone()
+            if not pedido:
+                raise Exception("El documento no existe.")
+            pagos = [{"metodo": cobro.metodo_pago, "monto": pedido["total_venta"]}]
+        resultado = liquidar_pedido_mayorista(cursor, cobro.pedido_id, pagos, "CAJA", cobro.turno_id)
         conexion.commit()
-        return {"mensaje": "¡Cobro registrado exitosamente!"}
+        return resultado
     except Exception as e:
         if conexion: conexion.rollback()
         return {"error": str(e)}
