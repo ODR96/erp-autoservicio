@@ -279,6 +279,27 @@ def listar_todos_los_productos(
         if sin_codigo:
             query_base += " AND (p.codigo_barras IS NULL OR TRIM(p.codigo_barras) = '')"
 
+        if alerta_stock:
+            query_base += """
+                AND (SELECT COUNT(*) FROM productos_combos WHERE producto_padre_id = p.id) = 0
+                AND IFNULL((SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo'), 0) <= IFNULL(p.stock_minimo_alerta, 0)
+            """
+
+        if alerta_vencimiento:
+            query_base += """
+                AND IFNULL(p.dias_alerta_vencimiento, 0) > 0
+                AND (SELECT COUNT(*) FROM productos_combos WHERE producto_padre_id = p.id) = 0
+                AND (
+                    SELECT MIN(fecha_vencimiento) FROM lotes_stock
+                    WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible > 0
+                ) IS NOT NULL
+                AND julianday((
+                    SELECT MIN(fecha_vencimiento) FROM lotes_stock
+                    WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible > 0
+                )) - julianday(?) <= p.dias_alerta_vencimiento
+            """
+            parametros.append(date.today().isoformat())
+
         # 2. Contamos cuántos registros totales hay (para armar los botones de paginación)
         cursor.execute(f"SELECT COUNT(p.id) {query_base}", tuple(parametros))
         total_registros = cursor.fetchone()[0]
@@ -301,27 +322,8 @@ def listar_todos_los_productos(
         parametros.extend([limit, offset])
         
         cursor.execute(query_final, tuple(parametros))
-        productos_raw = cursor.fetchall()
-        productos = [dict(prod) for prod in productos_raw]
-        
-        # Filtros de Alertas (Se aplican sobre la página actual para no matar el rendimiento)
-        if alerta_stock:
-            productos = [p for p in productos if p["es_combo"] == 0 and (p["stock_total"] or 0) <= (p["stock_minimo_alerta"] or 0)]
-            total_registros = len(productos)
-            
-        if alerta_vencimiento:
-            hoy = date.today()
-            prod_venc = []
-            for p in productos:
-                if p["es_combo"] > 0 or not p["prox_vencimiento"] or not p["dias_alerta_vencimiento"]: continue 
-                try:
-                    dif_dias = (date.fromisoformat(p["prox_vencimiento"][:10]) - hoy).days
-                    if dif_dias <= p["dias_alerta_vencimiento"]:
-                        prod_venc.append(p)
-                except Exception: pass
-            productos = prod_venc
-            total_registros = len(productos)
-            
+        productos = [dict(prod) for prod in cursor.fetchall()]
+
         return {
             "total_registros": total_registros,
             "total_paginas": (total_registros + limit - 1) // limit,
