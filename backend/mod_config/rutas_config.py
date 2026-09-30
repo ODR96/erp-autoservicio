@@ -58,7 +58,8 @@ asegurar_tabla_configuracion()
 SEMILLA_COMISIONES = (
     ("EFECTIVO", "Efectivo", 0.0, 0),
     ("TRANSFERENCIA", "Transferencia", 0.0, 0),
-    ("TARJETA", "Tarjeta", 7.0, 1),
+    ("TARJETA", "Tarjeta crédito", 7.0, 1),
+    ("TARJETA_DEBITO", "Tarjeta débito", 0.0, 0),
     ("QR", "QR", 0.8, 0),
 )
 
@@ -78,6 +79,9 @@ def asegurar_comisiones_medio():
         "INSERT OR IGNORE INTO comisiones_medio (codigo, nombre, pct_costo, recargo_activo) VALUES (?, ?, ?, ?)",
         SEMILLA_COMISIONES,
     )
+    cursor.execute(
+        "UPDATE comisiones_medio SET nombre = 'Tarjeta crédito' WHERE codigo = 'TARJETA' AND nombre = 'Tarjeta'"
+    )
     conexion.commit()
     conexion.close()
 
@@ -93,7 +97,9 @@ def clasificar_medio(metodo: str) -> str:
     m = (metodo or "").upper()
     if "QR" in m:
         return "QR"
-    if "TARJETA" in m:
+    if "DEBITO" in m or "DÉBITO" in m:
+        return "TARJETA_DEBITO"
+    if "TARJETA" in m or "CREDITO" in m or "CRÉDITO" in m:
         return "TARJETA"
     if "TRANSFERENCIA" in m or "BILLETERA" in m:
         return "TRANSFERENCIA"
@@ -252,7 +258,8 @@ def leer_comisiones():
                     WHEN 'EFECTIVO' THEN 1
                     WHEN 'TRANSFERENCIA' THEN 2
                     WHEN 'TARJETA' THEN 3
-                    WHEN 'QR' THEN 4
+                    WHEN 'TARJETA_DEBITO' THEN 4
+                    WHEN 'QR' THEN 5
                     ELSE 9 END"""
         )
         return [

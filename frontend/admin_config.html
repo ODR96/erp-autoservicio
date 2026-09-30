@@ -141,7 +141,7 @@
                             <i class="bi bi-percent"></i> Comisiones de cobro
                         </div>
                         <div class="card-body bg-light">
-                            <p class="small text-muted">El costo es lo que se queda el banco. Con el recargo activo, el POS se lo suma al cliente para dejarte el precio de góndola. Apagado, lo absorbe el local y la ganancia igual lo descuenta. El cajero no tipea el porcentaje.</p>
+                            <p class="small text-muted">El costo es lo que se queda el banco. Con el recargo activo, el POS se lo suma al cliente para dejarte el precio de góndola. Apagado, lo absorbe el local y la ganancia igual lo descuenta. El cajero no tipea el porcentaje. Crédito y débito son dos contratos: el débito en cero no se puede cobrar, para no anotar una comisión falsa. En el QR, si Mercado Pago informa la comisión al acreditar, esa es la que queda. Este 0,8 % se usa solo cuando ese dato no llega.</p>
                             <div id="tablaComisiones" class="d-flex flex-column gap-3"></div>
                             <div class="mt-4 text-end">
                                 <button type="button" class="btn btn-primary fw-bold px-4" onclick="guardarComisiones()">
@@ -189,7 +189,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="js/layout.js?v=1.0.42"></script>
-    <script src="js/app_config.js?v=1.0.36"></script>
+    <script src="js/app_config.js?v=1.0.37"></script>
 </body>
 
 </html>

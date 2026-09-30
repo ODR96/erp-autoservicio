@@ -84,11 +84,93 @@ def inicializar_cobros():
         )
         """
     )
+    try:
+        conexion.execute("ALTER TABLE cobros_externos ADD COLUMN comision_mp REAL")
+    except sqlite3.OperationalError:
+        pass
     conexion.commit()
     conexion.close()
 
 
 inicializar_cobros()
+
+
+def _numero_mp(valor):
+    try:
+        return round(float(valor), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _comision_de_pago(pago):
+    """Pesos que se quedó Mercado Pago. None si el pago no trae el dato."""
+    if not isinstance(pago, dict):
+        return None
+    total = 0.0
+    hubo = False
+    for fee in pago.get("fee_details") or []:
+        if not isinstance(fee, dict):
+            continue
+        quien = str(fee.get("fee_payer") or "collector").lower()
+        if quien not in ("collector", "merchant"):
+            continue
+        monto = _numero_mp(fee.get("amount"))
+        if monto is None:
+            continue
+        total += monto
+        hubo = True
+    if hubo:
+        return round(total, 2)
+    bruto = _numero_mp(pago.get("transaction_amount"))
+    neto = _numero_mp((pago.get("transaction_details") or {}).get("net_received_amount"))
+    if bruto is None or neto is None or neto > bruto + 0.05:
+        return None
+    return round(bruto - neto, 2)
+
+
+def _pago_de_orden(order):
+    pagos = ((order or {}).get("transactions") or {}).get("payments") or []
+    return pagos[0] if pagos else {}
+
+
+def comision_orden_mp(order):
+    pago = _pago_de_orden(order)
+    directa = _comision_de_pago(pago)
+    if directa is not None:
+        return directa
+    pago_id = pago.get("id") or pago.get("payment_id")
+    if not pago_id:
+        return None
+    try:
+        completo = _mp("GET", f"/v1/payments/{pago_id}")
+    except RuntimeError:
+        return None
+    return _comision_de_pago(completo)
+
+
+def guardar_comision_qr(cursor, cobro_id, order):
+    comision = comision_orden_mp(order)
+    if comision is None:
+        return None
+    cursor.execute("UPDATE cobros_externos SET comision_mp = ? WHERE id = ?", (comision, cobro_id))
+    return comision
+
+
+def comision_acreditada(cursor, cobro_id):
+    """Comisión real del QR. None deja la estimación de configuración."""
+    cursor.execute("SELECT mp_order_id, comision_mp FROM cobros_externos WHERE id = ?", (cobro_id,))
+    fila = cursor.fetchone()
+    if not fila:
+        return None
+    if fila["comision_mp"] is not None:
+        return round(float(fila["comision_mp"]), 2)
+    if not fila["mp_order_id"]:
+        return None
+    try:
+        order = _mp("GET", f"/v1/orders/{fila['mp_order_id']}")
+    except RuntimeError:
+        return None
+    return guardar_comision_qr(cursor, cobro_id, order)
 
 
 def _listar_sucursales(user_id):
@@ -359,6 +441,11 @@ def estado_cobro_qr(cobro_id: int):
             nuevo = _estado_order(order)
             if nuevo != "pendiente":
                 cursor.execute("UPDATE cobros_externos SET estado = ? WHERE id = ?", (nuevo, cobro_id))
+                if nuevo == "aprobado":
+                    try:
+                        guardar_comision_qr(cursor, cobro_id, order)
+                    except Exception:
+                        pass
                 conexion.commit()
                 estado = nuevo
         return {

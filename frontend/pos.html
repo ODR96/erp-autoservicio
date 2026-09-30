@@ -579,7 +579,7 @@
                         <button class="btn-pago bg-virtual" onclick="cobrarConQrMp()">
                             <i class="bi bi-qr-code-scan fs-5"></i> QR
                         </button>
-                        <button class="btn-pago bg-tarjeta" onclick="cerrarVentaBasica('Tarjeta / POS')">
+                        <button class="btn-pago bg-tarjeta" onclick="elegirTarjeta()">
                             <i class="bi bi-credit-card fs-5"></i> TARJETA
                         </button>
                         <button class="btn-pago bg-transf" onclick="cerrarVentaBasica('Transferencia')">
@@ -1019,6 +1019,10 @@
                                 <input type="number" class="form-control text-end fw-bold" id="mixtoTarjeta"
                                     placeholder="0.00" oninput="calcularMixto()">
                             </div>
+                            <div class="btn-group w-100 mt-2" id="mixtoTipoTarjeta" role="group">
+                                <button type="button" class="btn btn-outline-success fw-bold" onclick="marcarMixtoTarjeta('TARJETA DEBITO', this)">Débito</button>
+                                <button type="button" class="btn btn-outline-primary fw-bold" onclick="marcarMixtoTarjeta('TARJETA CREDITO', this)">Crédito</button>
+                            </div>
                         </div>
                         <div class="col-6">
                             <label class="form-label fw-bold"><i class="bi bi-bank text-secondary"></i> Transferencia</label>
@@ -1060,7 +1064,7 @@
 
     <!-- ===== ARCHIVOS JS SEPARADOS ===== -->
     <script src="js/layout.js?v=1.0.50"></script>
-    <script src="js/app_pos.js?v=1.0.72"></script>
+    <script src="js/app_pos.js?v=1.0.73"></script>
 
 </body>
 

@@ -522,7 +522,8 @@ def ventas_por_metodo(mes: str = None):
                 -- 2. Ventas Mixtas (TRADUCIMOS los nombres internos para que coincidan con los puros)
                 SELECT 
                     CASE 
-                        WHEN UPPER(vm.metodo_pago) = 'TARJETA' THEN 'Tarjeta / POS'
+                        WHEN UPPER(vm.metodo_pago) LIKE '%DEBITO%' THEN 'Tarjeta débito'
+                        WHEN UPPER(vm.metodo_pago) LIKE '%TARJETA%' OR UPPER(vm.metodo_pago) LIKE '%CREDITO%' THEN 'Tarjeta crédito'
                         WHEN UPPER(vm.metodo_pago) = 'TRANSFERENCIA' THEN 'Billetera Virtual / QR'
                         WHEN UPPER(vm.metodo_pago) = 'EFECTIVO' THEN 'EFECTIVO'
                         ELSE vm.metodo_pago 
@@ -541,7 +542,14 @@ def ventas_por_metodo(mes: str = None):
                 SUM(cantidad_transacciones) as cantidad_transacciones, 
                 SUM(total_dinero) as total_dinero
             FROM (
-                SELECT metodo_pago as metodo_pago_traducido, cantidad_transacciones, total_dinero FROM VentasPuras
+                SELECT
+                    CASE
+                        WHEN UPPER(metodo_pago) LIKE '%DEBITO%' THEN 'Tarjeta débito'
+                        WHEN UPPER(metodo_pago) LIKE '%TARJETA%' OR UPPER(metodo_pago) LIKE '%CREDITO%' THEN 'Tarjeta crédito'
+                        ELSE metodo_pago
+                    END as metodo_pago_traducido,
+                    cantidad_transacciones, total_dinero
+                FROM VentasPuras
                 UNION ALL
                 SELECT metodo_pago_traducido, cantidad_transacciones, total_dinero FROM VentasMixtas
             )

@@ -196,6 +196,31 @@ def _monto_qr_mixto(pagos) -> float:
     return round(sum(float(p.monto or 0) for p in (pagos or []) if _metodo_es_qr(p.metodo)), 2)
 
 
+def _comision_qr_real(cursor, venta, pagos_ajustados, comision_total):
+    """Si Mercado Pago ya dijo cuánto se quedó, esa cifra pisa la estimación del 0,8 %."""
+    if not venta.cobro_externo_id:
+        return comision_total
+    es_mixto = (venta.metodo_pago or "").upper() == "MIXTO"
+    if not es_mixto and not _metodo_es_qr(venta.metodo_pago):
+        return comision_total
+    if es_mixto and _monto_qr_mixto(venta.pagos_mixtos) <= 0.05:
+        return comision_total
+    try:
+        from backend.mod_pagos.rutas_pagos import comision_acreditada
+        real = comision_acreditada(cursor, venta.cobro_externo_id)
+    except Exception:
+        return comision_total
+    if real is None:
+        return comision_total
+    real = plata(real)
+    if es_mixto and pagos_ajustados:
+        for pata in pagos_ajustados:
+            if _metodo_es_qr(pata.get("metodo")):
+                pata["comision"] = real
+        return plata(sum(float(p.get("comision") or 0) for p in pagos_ajustados))
+    return real
+
+
 def _atar_cobro_qr(cursor, venta, venta_id, total_con_descuento):
     monto_esperado = float(total_con_descuento)
     if (venta.metodo_pago or "").upper() == "MIXTO":
@@ -397,6 +422,7 @@ def registrar_venta(venta: NuevaVenta, background_tasks: BackgroundTasks):
             total_final, recargo_total, comision_total = liquidar_comision(
                 cursor, venta.metodo_pago, total_con_descuento, cobrar_recargo
             )
+        comision_total = _comision_qr_real(cursor, venta, pagos_ajustados, comision_total)
         
         if venta.metodo_pago.upper() in ["CUENTA CORRIENTE", "FIADO"]:
             if not venta.cliente_id: raise Exception("Para vender fiado, seleccione un cliente.")

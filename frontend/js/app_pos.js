@@ -1429,7 +1429,8 @@ function plataPos(n) {
 function codigoMedio(metodo) {
     const m = String(metodo || '').toUpperCase();
     if (m.includes('QR')) return 'QR';
-    if (m.includes('TARJETA')) return 'TARJETA';
+    if (m.includes('DEBITO') || m.includes('DÉBITO')) return 'TARJETA_DEBITO';
+    if (m.includes('TARJETA') || m.includes('CREDITO') || m.includes('CRÉDITO')) return 'TARJETA';
     if (m.includes('TRANSFERENCIA') || m.includes('BILLETERA')) return 'TRANSFERENCIA';
     if (m.includes('EFECTIVO')) return 'EFECTIVO';
     return '';
@@ -1470,13 +1471,41 @@ async function pedirAbsorberRecargo(mensaje) {
     return firma;
 }
 
+function debitoSinContrato(metodo) {
+    return codigoMedio(metodo) === 'TARJETA_DEBITO' && !(Number(reglaMedio(metodo).pct_costo) > 0);
+}
+
+async function elegirTarjeta() {
+    if (carrito.length === 0) return Swal.fire('Error', 'El ticket está vacío.', 'error');
+    const eleccion = await Swal.fire({
+        title: 'Tarjeta',
+        html: '¿Débito o crédito?',
+        showCancelButton: true,
+        showDenyButton: true,
+        confirmButtonText: 'Crédito',
+        denyButtonText: 'Débito',
+        cancelButtonText: 'Volver',
+        confirmButtonColor: '#0d6efd',
+        denyButtonColor: '#198754',
+        cancelButtonColor: '#6c757d'
+    });
+    if (eleccion.isConfirmed) return cerrarVentaBasica('TARJETA CREDITO');
+    if (eleccion.isDenied) return cerrarVentaBasica('TARJETA DEBITO');
+    inputScan.focus();
+}
+
 // ===== BOTONES TARJETA / BILLETERA CONECTADOS =====
 async function cerrarVentaBasica(metodo) {
     if (carrito.length === 0) return Swal.fire('Error', 'El ticket está vacío.', 'error');
     await asegurarComisiones();
-    if (!comisionesMedio && (codigoMedio(metodo) === 'TARJETA' || codigoMedio(metodo) === 'QR')) {
+    const codigo = codigoMedio(metodo);
+    if (!comisionesMedio && (codigo === 'TARJETA' || codigo === 'TARJETA_DEBITO' || codigo === 'QR')) {
         inputScan.focus();
         return Swal.fire('Sin conexión', 'No se pudo leer la comisión. Reintentá o cobrá en efectivo.', 'warning');
+    }
+    if (debitoSinContrato(metodo)) {
+        inputScan.focus();
+        return Swal.fire('Falta el débito', 'Cargá el porcentaje de débito en Configuración. Sin ese número no se cobra, para no anotar una comisión en cero.', 'warning');
     }
 
     const conRecargo = liquidarMedio(metodo, totalVenta, true);
@@ -3364,6 +3393,13 @@ async function cargarCategoriasRapidas() {
 // MOTOR DE PAGO MÚLTIPLE (MIXTO)
 // =========================================================
 const modalPagoMixto = new bootstrap.Modal(document.getElementById('modalPagoMixto'));
+let mixtoTipoTarjeta = '';
+
+function marcarMixtoTarjeta(tipo, boton) {
+    mixtoTipoTarjeta = tipo;
+    document.querySelectorAll('#mixtoTipoTarjeta .btn').forEach((b) => b.classList.remove('active'));
+    if (boton) boton.classList.add('active');
+}
 
 function abrirPagoMixto() {
     if (carrito.length === 0) return Swal.fire('Error', 'El mostrador está vacío.', 'error');
@@ -3376,6 +3412,7 @@ function abrirPagoMixto() {
     document.getElementById('mixtoTarjeta').value = '';
     document.getElementById('mixtoTransferencia').value = '';
     document.getElementById('mixtoQr').value = '';
+    marcarMixtoTarjeta('', null);
 
     calcularMixto();
     modalPagoMixto.show();
@@ -3419,6 +3456,10 @@ async function procesarPagoMixto() {
     const suma = efOriginal + ta + tr + qr;
     if (suma < totalVenta) return Swal.fire('Falta dinero', 'La suma de los pagos no cubre el total de la venta.', 'warning');
     if (qr > 0.01 && qr < 15) return Swal.fire('QR mínimo', 'La pata QR tiene que ser de $15 o más.', 'warning');
+    if (ta > 0 && mixtoTipoTarjeta !== 'TARJETA DEBITO' && mixtoTipoTarjeta !== 'TARJETA CREDITO') {
+        return Swal.fire('Tarjeta', 'Elegí débito o crédito.', 'warning');
+    }
+    const metodoTarjeta = ta > 0 ? mixtoTipoTarjeta : '';
 
     const vuelto = suma > totalVenta ? (suma - totalVenta) : 0;
     const efectivoRealCaja = efOriginal - vuelto;
@@ -3427,8 +3468,11 @@ async function procesarPagoMixto() {
     if (!comisionesMedio && (ta > 0 || qr > 0.01)) {
         return Swal.fire('Sin conexión', 'No se pudo leer la comisión. Reintentá o sacá tarjeta y QR.', 'warning');
     }
+    if (ta > 0 && debitoSinContrato(metodoTarjeta)) {
+        return Swal.fire('Falta el débito', 'Cargá el porcentaje de débito en Configuración. Sin ese número no se cobra, para no anotar una comisión en cero.', 'warning');
+    }
 
-    const pataTarjeta = ta > 0 ? liquidarMedio('TARJETA', ta, true) : null;
+    const pataTarjeta = ta > 0 ? liquidarMedio(metodoTarjeta, ta, true) : null;
     const pataQr = qr > 0.01 ? liquidarMedio('QR Mercado Pago', qr, true) : null;
     let absorber = false;
     let firma = null;
@@ -3458,7 +3502,7 @@ async function procesarPagoMixto() {
     const qrCobrado = pataQr ? liquidarMedio('QR Mercado Pago', qr, !absorber).cobrado : 0;
     const desglosePagos = [];
     if (efectivoRealCaja > 0) desglosePagos.push({ metodo: "EFECTIVO", monto: efectivoRealCaja });
-    if (ta > 0) desglosePagos.push({ metodo: "TARJETA", monto: ta });
+    if (ta > 0) desglosePagos.push({ metodo: metodoTarjeta, monto: ta });
     if (tr > 0) desglosePagos.push({ metodo: "TRANSFERENCIA", monto: tr });
     if (qr > 0.01) desglosePagos.push({ metodo: "QR Mercado Pago", monto: qr });
 
