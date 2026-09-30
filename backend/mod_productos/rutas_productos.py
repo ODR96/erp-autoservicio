@@ -151,6 +151,9 @@ class AltaDesdeFactura(BaseModel):
     unidades_por_bulto: int = 1
     precio_venta_final: Optional[float] = None
     categoria_id: Optional[int] = None
+    unidad_medida: str = "Unidad"
+    stock_minimo_alerta: float = 5
+    dias_alerta_vencimiento: int = 10
 
 
 @router.post("/alta_desde_factura", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
@@ -177,21 +180,24 @@ def alta_producto_desde_factura(alta: AltaDesdeFactura):
                     "existente": True,
                 }
 
-        categoria_id = alta.categoria_id
-        if not categoria_id:
-            cursor.execute("SELECT id FROM categorias_productos ORDER BY id ASC LIMIT 1")
-            cat = cursor.fetchone()
-            if cat:
-                categoria_id = cat["id"]
-            else:
-                cursor.execute("INSERT INTO categorias_productos (nombre) VALUES ('General')")
-                categoria_id = cursor.lastrowid
+        if not alta.categoria_id:
+            return {"error": "Falta el rubro."}
+        cursor.execute("SELECT id FROM categorias_productos WHERE id = ?", (alta.categoria_id,))
+        if not cursor.fetchone():
+            return {"error": "Ese rubro no existe."}
+        categoria_id = int(alta.categoria_id)
 
+        precio = alta.precio_venta_final
+        if precio is None or float(precio) <= 0:
+            return {"error": "Falta el precio de venta."}
+
+        unidad = (alta.unidad_medida or "Unidad").strip()
+        if unidad not in ("Unidad", "Kg", "Litro"):
+            unidad = "Unidad"
         uxb = max(1, int(alta.unidades_por_bulto or 1))
         costo = max(0.0, float(alta.costo_sin_iva or 0))
-        precio = alta.precio_venta_final
-        if precio is None:
-            precio = round(costo * 1.4, 2) if costo > 0 else 0.0
+        stock_min = max(0.0, float(alta.stock_minimo_alerta or 0))
+        dias_venc = max(0, int(alta.dias_alerta_vencimiento or 0))
 
         cursor.execute(
             '''
@@ -199,16 +205,19 @@ def alta_producto_desde_factura(alta: AltaDesdeFactura):
                 codigo_barras, nombre, categoria_id, proveedor_habitual_id, costo_sin_iva,
                 porcentaje_iva, precio_venta_final, stock_minimo_alerta, dias_alerta_vencimiento,
                 unidad_medida, activo, unidades_por_bulto
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 30, 'Unidad', 1, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             ''',
             (
                 codigo,
                 nombre[:120],
-                int(categoria_id),
+                categoria_id,
                 int(alta.proveedor_habitual_id or 0),
                 costo,
                 float(alta.porcentaje_iva or 21),
                 float(precio),
+                stock_min,
+                dias_venc,
+                unidad,
                 uxb,
             ),
         )

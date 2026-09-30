@@ -862,10 +862,10 @@ async function buscarParaCompra(query) {
         if (productos.length === 0) {
             const alta = await Swal.fire({
                 title: 'No está en el catálogo',
-                text: '¿Alta rápida desde esta factura? El stock entra al Guardar ingreso, no ahora.',
+                text: '¿Darlo de alta desde esta factura? El stock entra al Guardar ingreso, no ahora.',
                 icon: 'question',
                 showCancelButton: true,
-                confirmButtonText: 'Alta rápida',
+                confirmButtonText: 'Dar de alta',
                 cancelButtonText: 'Volver',
                 confirmButtonColor: '#1b365d'
             });
@@ -1111,7 +1111,7 @@ function htmlFilaFactura(item, idx) {
                     <small class="text-muted">${escapeHtmlFactura(item.codigo_ocr || item.codigo_barras || 'sin código')} · del papel</small>
                     <div class="d-flex flex-wrap gap-1 mt-1">
                         <button type="button" class="btn btn-outline-primary btn-sm py-0" onclick="vincularProductoFila(${idx})">Vincular</button>
-                        <button type="button" class="btn btn-primary btn-sm py-0" onclick="altaRapidaFila(${idx})">Alta rápida</button>
+                        <button type="button" class="btn btn-primary btn-sm py-0" onclick="altaRapidaFila(${idx})">Dar de alta</button>
                     </div>`}
                 </td>
                 <td data-label="Vencimiento">
@@ -1193,10 +1193,10 @@ async function vincularProductoFila(idx) {
         if (!productos.length) {
             const alta = await Swal.fire({
                 title: 'No está',
-                text: '¿Alta rápida con ese nombre?',
+                text: '¿Darlo de alta con ese nombre?',
                 icon: 'question',
                 showCancelButton: true,
-                confirmButtonText: 'Alta rápida',
+                confirmButtonText: 'Dar de alta',
                 cancelButtonText: 'Volver',
                 confirmButtonColor: '#1b365d'
             });
@@ -1223,35 +1223,142 @@ async function vincularProductoFila(idx) {
     }
 }
 
+function recalcularPrecioAltaFactura() {
+    const costo = parseFloat(document.getElementById('altaFacCosto')?.value) || 0;
+    const iva = parseFloat(document.getElementById('altaFacIva')?.value) || 0;
+    const margen = parseFloat(document.getElementById('altaFacMargen')?.value) || 0;
+    const precio = document.getElementById('altaFacPrecio');
+    if (!precio) return;
+    precio.value = ((costo + costo * iva / 100) * (1 + margen / 100)).toFixed(2);
+}
+
+function toggleDiasAltaFactura() {
+    const caja = document.getElementById('altaFacCajaDias');
+    const control = document.getElementById('altaFacVence');
+    if (caja && control) caja.style.display = control.value === 'SI' ? 'block' : 'none';
+}
+
 async function altaRapidaProducto(prefill, idxFila) {
     prefill = prefill || {};
-    const provId = document.getElementById('selectProvIngreso')?.value || '0';
+    const provSel = document.getElementById('selectProvIngreso');
+    const provId = provSel?.value || '0';
+    const provNombre = provSel && provSel.selectedIndex >= 0 ? provSel.options[provSel.selectedIndex].text : 'Sin proveedor';
+    let rubros = [];
+    try {
+        const resRub = await fetch(`${obtenerBaseUrl()}/productos/categorias`);
+        const dataRub = await resRub.json();
+        rubros = dataRub.categorias || [];
+    } catch (e) {
+        rubros = [];
+    }
+    if (!rubros.length) {
+        Swal.fire('Sin rubros', 'Primero cargá un rubro en Productos.', 'warning');
+        return null;
+    }
+    const ivaPref = String(prefill.porcentaje_iva ?? 21);
+    const opcionesRubro = rubros.map(c => `<option value="${c.id}">${escapeHtmlFactura(c.nombre)}</option>`).join('');
     const html = `
-        <input id="altaFacNombre" class="swal2-input" placeholder="Nombre" value="${escapeHtmlFactura(prefill.nombre || '')}">
-        <input id="altaFacCodigo" class="swal2-input" placeholder="Código (opcional)" value="${escapeHtmlFactura(prefill.codigo_barras || '')}">
-        <input id="altaFacCosto" class="swal2-input" type="number" step="0.01" placeholder="Costo unitario" value="${prefill.costo_unitario || ''}">
-        <input id="altaFacIva" class="swal2-input" type="number" step="0.01" placeholder="IVA %" value="${prefill.porcentaje_iva || 21}">
-        <input id="altaFacUxb" class="swal2-input" type="number" step="1" min="1" placeholder="Unidades por caja" value="${prefill.unidades_por_bulto || 1}">
-        <p class="small text-muted mb-0">No entra stock ahora. El lote se crea al Guardar ingreso.</p>`;
+        <div class="text-start">
+            <div class="row g-2">
+                <div class="col-8">
+                    <label class="form-label fw-bold small mb-1">Nombre</label>
+                    <input id="altaFacNombre" class="form-control" value="${escapeHtmlFactura(prefill.nombre || '')}">
+                </div>
+                <div class="col-4">
+                    <label class="form-label fw-bold small mb-1">Código</label>
+                    <input id="altaFacCodigo" class="form-control" value="${escapeHtmlFactura(prefill.codigo_barras || '')}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label fw-bold small mb-1">Rubro</label>
+                    <select id="altaFacRubro" class="form-select">${opcionesRubro}</select>
+                </div>
+                <div class="col-3">
+                    <label class="form-label fw-bold small mb-1">Unidad</label>
+                    <select id="altaFacUnidad" class="form-select">
+                        <option value="Unidad">Unidad</option>
+                        <option value="Kg">Kg</option>
+                        <option value="Litro">Litro</option>
+                    </select>
+                </div>
+                <div class="col-3">
+                    <label class="form-label fw-bold small mb-1">Un. por caja</label>
+                    <input id="altaFacUxb" class="form-control text-center" type="number" min="1" step="1" value="${prefill.unidades_por_bulto || 1}">
+                </div>
+                <div class="col-4">
+                    <label class="form-label fw-bold small mb-1">Costo s/IVA</label>
+                    <input id="altaFacCosto" class="form-control text-end" type="number" min="0" step="0.01" value="${prefill.costo_unitario || ''}" oninput="recalcularPrecioAltaFactura()">
+                </div>
+                <div class="col-4">
+                    <label class="form-label fw-bold small mb-1">IVA</label>
+                    <select id="altaFacIva" class="form-select" onchange="recalcularPrecioAltaFactura()">
+                        <option value="21" ${ivaPref === '21' || ivaPref === '21.0' ? 'selected' : ''}>21%</option>
+                        <option value="10.5" ${ivaPref === '10.5' ? 'selected' : ''}>10.5%</option>
+                        <option value="0" ${ivaPref === '0' || ivaPref === '0.0' ? 'selected' : ''}>Exento</option>
+                    </select>
+                </div>
+                <div class="col-4">
+                    <label class="form-label fw-bold small mb-1">Margen %</label>
+                    <input id="altaFacMargen" class="form-control text-end" type="number" step="0.01" value="" oninput="recalcularPrecioAltaFactura()">
+                </div>
+                <div class="col-6">
+                    <label class="form-label fw-bold small mb-1">Precio de venta</label>
+                    <input id="altaFacPrecio" class="form-control text-end fw-bold" type="number" min="0" step="0.01" value="">
+                </div>
+                <div class="col-6">
+                    <label class="form-label fw-bold small mb-1">Stock mínimo</label>
+                    <input id="altaFacStock" class="form-control text-center" type="number" min="0" step="1" value="5">
+                </div>
+                <div class="col-6">
+                    <label class="form-label fw-bold small mb-1">Vencimiento</label>
+                    <select id="altaFacVence" class="form-select" onchange="toggleDiasAltaFactura()">
+                        <option value="NO">No (secos)</option>
+                        <option value="SI" selected>Sí</option>
+                    </select>
+                </div>
+                <div class="col-6" id="altaFacCajaDias">
+                    <label class="form-label fw-bold small mb-1">Avisar con</label>
+                    <input id="altaFacDias" class="form-control text-center" type="number" min="1" step="1" value="10">
+                </div>
+            </div>
+            <p class="small text-muted mt-2 mb-0">Proveedor: ${escapeHtmlFactura(provNombre)}. No entra stock ahora. El lote se crea al Guardar ingreso.</p>
+        </div>`;
     const dlg = await Swal.fire({
-        title: 'Alta rápida',
+        title: 'Alta de producto',
         html,
+        width: 680,
         showCancelButton: true,
         confirmButtonText: 'Crear y usar',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: '#1b365d',
+        didOpen: () => recalcularPrecioAltaFactura(),
         preConfirm: () => {
             const nombre = document.getElementById('altaFacNombre').value.trim();
+            const rubro = parseInt(document.getElementById('altaFacRubro').value, 10);
+            const precio = parseFloat(document.getElementById('altaFacPrecio').value);
             if (!nombre) {
                 Swal.showValidationMessage('Falta el nombre');
                 return false;
             }
+            if (!rubro) {
+                Swal.showValidationMessage('Falta el rubro');
+                return false;
+            }
+            if (!(precio > 0)) {
+                Swal.showValidationMessage('Falta el precio. Cargá el margen o el precio de venta.');
+                return false;
+            }
+            const vence = document.getElementById('altaFacVence').value === 'SI';
             return {
                 nombre,
                 codigo_barras: document.getElementById('altaFacCodigo').value.trim(),
-                costo_sin_iva: parseFloat(document.getElementById('altaFacCosto').value) || 0,
-                porcentaje_iva: parseFloat(document.getElementById('altaFacIva').value) || 21,
+                categoria_id: rubro,
+                unidad_medida: document.getElementById('altaFacUnidad').value,
                 unidades_por_bulto: parseInt(document.getElementById('altaFacUxb').value, 10) || 1,
+                costo_sin_iva: parseFloat(document.getElementById('altaFacCosto').value) || 0,
+                porcentaje_iva: parseFloat(document.getElementById('altaFacIva').value) || 0,
+                precio_venta_final: precio,
+                stock_minimo_alerta: parseFloat(document.getElementById('altaFacStock').value) || 0,
+                dias_alerta_vencimiento: vence ? (parseInt(document.getElementById('altaFacDias').value, 10) || 10) : 0,
                 proveedor_habitual_id: parseInt(provId, 10) || 0
             };
         }
@@ -1268,14 +1375,14 @@ async function altaRapidaProducto(prefill, idxFila) {
             const bus = await fetch(`${obtenerBaseUrl()}/productos/buscar?termino=${encodeURIComponent(dlg.value.codigo_barras || dlg.value.nombre)}`);
             const lista = await bus.json().catch(() => ({}));
             const productos = Array.isArray(lista) ? lista : (lista.productos || []);
-            const prod = productos.find(p => Number(p.id) === Number(data.id)) || { id: data.id, nombre: dlg.value.nombre, codigo_barras: dlg.value.codigo_barras, costo_sin_iva: dlg.value.costo_sin_iva, unidades_por_bulto: dlg.value.unidades_por_bulto, porcentaje_iva: dlg.value.porcentaje_iva, precio_venta_final: 0 };
+            const prod = productos.find(p => Number(p.id) === Number(data.id)) || { id: data.id, ...dlg.value };
             if (idxFila != null) aplicarProductoAFila(idxFila, prod);
             else agregarProductoAFactura(prod);
             Swal.fire('Ya existía', data.error || 'Se vinculó al código existente.', 'info');
             return prod;
         }
         if (!res.ok || data.error) throw new Error(detalleApi(data));
-        const prod = data.producto || { id: data.id, ...dlg.value, precio_venta_final: 0 };
+        const prod = data.producto || { id: data.id, ...dlg.value };
         if (idxFila != null) aplicarProductoAFila(idxFila, prod);
         else agregarProductoAFactura(prod);
         return prod;
@@ -1325,7 +1432,7 @@ async function ocrBorradorFactura() {
         const h = ocr.n_huerfanos || 0;
         Swal.fire(
             'Papel leído',
-            `${ocr.n_items || facturaActualItems.length} ítems. ${h ? h + ' sin catálogo: vinculá o alta rápida. ' : ''}No se tocó stock.`,
+            `${ocr.n_items || facturaActualItems.length} ítems. ${h ? h + ' sin catálogo: vinculá o dalos de alta. ' : ''}No se tocó stock.`,
             'success'
         );
     } catch (e) {
