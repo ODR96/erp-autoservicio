@@ -14,6 +14,18 @@ async function apiFetch(recurso, config = {}) {
     return respuesta;
 }
 
+function alicuotaFicha(iva) {
+    let tasa = Number(iva);
+    if (!Number.isFinite(tasa) || tasa < 0) return 21;
+    if (tasa > 0 && tasa <= 1) tasa = tasa * 100;
+    return tasa;
+}
+
+function costoConIvaLista(p) {
+    const neto = Number(p && p.costo_sin_iva) || 0;
+    return neto * (1 + alicuotaFicha(p && p.porcentaje_iva) / 100);
+}
+
 let productosGlobales = [];
 let categoriasGlobales = [];
 let reglasMayoristas = [];
@@ -157,7 +169,7 @@ function dibujarTablaCatalogo(listaProductos, estadoSeleccionado) {
         let catReal = categoriasGlobales.find(c => c.id === p.categoria_id);
         let nombreCat = catReal ? catReal.nombre : 'Sin Rubro';
 
-        let costoF = (p.costo_sin_iva || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+        let costoF = costoConIvaLista(p).toLocaleString('es-AR', {minimumFractionDigits: 2});
         let unidad = p.unidad_medida && p.unidad_medida !== 'Unidad' ? `x ${p.unidad_medida}` : '';
         let precioF = (p.precio_venta_final || 0).toLocaleString('es-AR', {minimumFractionDigits: 2}) + ` <span class="small text-muted">${unidad}</span>`;
         
@@ -461,7 +473,7 @@ async function abrirModalExportar() {
                             <div class="col-6"><div class="form-check"><input class="form-check-input col-export" type="checkbox" value="nombre" checked> <label class="form-check-label small">Nombre</label></div></div>
                             <div class="col-6"><div class="form-check"><input class="form-check-input col-export" type="checkbox" value="rubro" checked> <label class="form-check-label small">Rubro</label></div></div>
                             <div class="col-6"><div class="form-check"><input class="form-check-input col-export" type="checkbox" value="stock"> <label class="form-check-label small">Stock Actual</label></div></div>
-                            <div class="col-6"><div class="form-check"><input class="form-check-input col-export" type="checkbox" value="costo"> <label class="form-check-label small text-danger">Costo Neto</label></div></div>
+                            <div class="col-6"><div class="form-check"><input class="form-check-input col-export" type="checkbox" value="costo"> <label class="form-check-label small text-danger">Costo c/IVA</label></div></div>
                             <div class="col-6"><div class="form-check"><input class="form-check-input col-export" type="checkbox" value="precio" checked> <label class="form-check-label small text-success">Precio Público</label></div></div>
                             <div class="col-6"><div class="form-check"><input class="form-check-input col-export" type="checkbox" value="mayorista"> <label class="form-check-label small">Precio Mayorista</label></div></div>
                         </div>
@@ -486,7 +498,7 @@ async function abrirModalExportar() {
         if (cols.includes('codigo')) headers.push("Código");
         if (cols.includes('nombre')) headers.push("Producto");
         if (cols.includes('rubro')) headers.push("Rubro ID");
-        if (cols.includes('costo')) headers.push("Costo Neto");
+        if (cols.includes('costo')) headers.push("Costo c/IVA");
         if (cols.includes('precio')) headers.push("Precio Final");
         if (cols.includes('mayorista')) headers.push("Precio Oferta/Mayorista");
         if (cols.includes('stock')) headers.push("Stock");
@@ -498,7 +510,7 @@ async function abrirModalExportar() {
             if (cols.includes('codigo')) row.push(p.codigo_barras ? `="${p.codigo_barras}"` : "");
             if (cols.includes('nombre')) row.push(`"${p.nombre}"`);
             if (cols.includes('rubro')) row.push(p.categoria_id);
-            if (cols.includes('costo')) row.push((p.costo_sin_iva || 0).toFixed(2).replace('.', ','));
+            if (cols.includes('costo')) row.push(costoConIvaLista(p).toFixed(2).replace('.', ','));
             if (cols.includes('precio')) row.push((p.precio_venta_final || 0).toFixed(2).replace('.', ','));
             if (cols.includes('mayorista')) { let pm = p.precio_promo || p.precio_venta_final; row.push(pm.toFixed(2).replace('.', ',')); }
             if (cols.includes('stock')) row.push(p.stock_total || 0);
