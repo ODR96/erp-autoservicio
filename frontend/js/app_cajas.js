@@ -16,11 +16,28 @@ async function apiFetch(recurso, config = {}) {
 
 let empleadosCache = [];
 
+let monitorTimer = null;
+
 function cambiarPestana(id, evento) {
     document.querySelectorAll('#cajaTabs .nav-link').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
     evento.target.classList.add('active');
     document.getElementById('tab-' + id).classList.add('active');
+    if (id === 'vivo') iniciarRelojMonitor();
+    else frenarRelojMonitor();
+}
+
+function iniciarRelojMonitor() {
+    if (monitorTimer) return;
+    monitorTimer = setInterval(() => {
+        if (document.getElementById('tab-vivo')?.classList.contains('active')) cargarMonitor();
+    }, 30000);
+}
+
+function frenarRelojMonitor() {
+    if (!monitorTimer) return;
+    clearInterval(monitorTimer);
+    monitorTimer = null;
 }
 
 async function cargarDatosEnVivo() {
@@ -63,7 +80,6 @@ async function cargarMonitor() {
                     <div class="card border-success h-100 shadow-sm">
                         <div class="card-header bg-success text-white fw-bold d-flex justify-content-between align-items-center">
                             <span><i class="bi bi-display"></i> CAJA ${t.caja_id}</span>
-                            <span class="badge bg-light text-success"><i class="bi bi-circle-fill text-success" style="font-size:0.5rem; vertical-align: middle;"></i> ONLINE</span>
                         </div>
                         <div class="card-body">
                             <h5 class="fw-bold mb-0 text-primary">${t.cajero || "Cajero Desconocido"}</h5>
@@ -736,4 +752,5 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     cargarDatosEnVivo();
+    iniciarRelojMonitor();
 });

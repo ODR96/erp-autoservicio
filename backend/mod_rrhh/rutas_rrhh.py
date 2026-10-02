@@ -16,6 +16,7 @@ ZONA_AR = timezone(timedelta(hours=-3))
 ModalidadPago = Literal["MENSUAL", "JORNAL", "POR_HORA"]
 PeriodicidadPago = Literal["SEMANAL", "QUINCENAL", "MENSUAL"]
 ResolucionConsumo = Literal["DESCUENTA_SUELDO", "GASTO_LOCAL"]
+OrigenAdelanto = Literal["CAJA", "EXTERNO"]
 
 
 # =================================================================
@@ -109,11 +110,8 @@ def asegurar_tablas_rrhh():
     if 'monto_saldado' not in cols_cuenta:
         cursor.execute("ALTER TABLE movimientos_cuenta_empleado ADD COLUMN monto_saldado REAL NOT NULL DEFAULT 0")
 
-    # Semilla amigable: si todavía no existe ninguna categoría de gasto para sueldos,
-    # creamos una por defecto (OPERATIVO, para que impacte la rentabilidad y el Punto de
-    # Equilibrio). El usuario puede después crear categorías más específicas si quiere
-    # separar "Sueldo Gerencia" de "Sueldo Empleados" desde la pantalla de Gastos.
-    # (defensivo: si mod_gastos todavía no creó la tabla, no rompemos el arranque)
+    # La liquidación siempre usa esta fila. Insumos y el resto son gastos reales,
+    # no un sueldo. (Si la tabla de categorías todavía no existe, no rompemos el arranque.)
     try:
         cursor.execute("SELECT COUNT(*) FROM categorias_gasto WHERE nombre = 'Sueldos'")
         if cursor.fetchone()[0] == 0:
@@ -150,7 +148,10 @@ class AdelantoNuevo(BaseModel):
     usuario_id: int
     monto: float = Field(..., gt=0)
     detalle: str = Field(..., min_length=3, max_length=255)
-    turno_id: int
+    # CAJA: efectivo del turno abierto. EXTERNO: transferencia o bolsillo, la caja no se mueve.
+    # Si el cliente no manda origen, sigue siendo CAJA (pantallas viejas).
+    origen: OrigenAdelanto = "CAJA"
+    turno_id: Optional[int] = None
     usuario_registro: int
     pin_autorizante: str
 
@@ -168,7 +169,8 @@ class LiquidacionNueva(BaseModel):
     usuario_id: int
     periodo_desde: date
     periodo_hasta: date
-    categoria_gasto_id: int
+    # Lo manda una pantalla vieja. El servidor no lo usa: el sueldo va a Sueldos.
+    categoria_gasto_id: Optional[int] = None
     liquidado_por: int
     pin_autorizante: str
 
@@ -493,35 +495,38 @@ def registrar_adelanto(adelanto: AdelantoNuevo, background_tasks: BackgroundTask
         cursor.execute("SELECT id FROM usuarios WHERE id = ?", (adelanto.usuario_id,))
         if not cursor.fetchone(): raise Exception("El empleado no existe.")
 
-        cursor.execute("SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (adelanto.turno_id,))
-        if not cursor.fetchone(): raise Exception("El turno de caja indicado no está abierto.")
-
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        sale_de_caja = adelanto.origen == "CAJA"
 
-        # 1. Sale plata física del cajón: se registra como RETIRO de tesorería (NO es Gasto Operativo,
-        #    igual que una Sangría de Caja) para que el Cierre Z siga cuadrando.
-        cursor.execute('''
-            INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
-            VALUES (?, ?, 'RETIRO', ?, ?, ?)
-        ''', (fecha_actual, adelanto.usuario_registro, adelanto.monto,
-              f"[ADELANTO DE SUELDO] {adelanto.detalle}", adelanto.turno_id))
+        if sale_de_caja:
+            if not adelanto.turno_id:
+                raise Exception("Elegí la caja de la que sale el efectivo.")
+            cursor.execute("SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (adelanto.turno_id,))
+            if not cursor.fetchone(): raise Exception("El turno de caja indicado no está abierto.")
+            # Sale plata del cajón: RETIRO, no gasto. El costo aparece al liquidar el sueldo.
+            cursor.execute('''
+                INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+                VALUES (?, ?, 'RETIRO', ?, ?, ?)
+            ''', (fecha_actual, adelanto.usuario_registro, adelanto.monto,
+                  f"[ADELANTO DE SUELDO] {adelanto.detalle}", adelanto.turno_id))
 
-        # 2. Queda como deuda del empleado, pendiente de descontarse en su próxima liquidación
         cursor.execute('''
             INSERT INTO movimientos_cuenta_empleado (usuario_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_registro)
             VALUES (?, ?, 'ADELANTO', ?, ?, ?)
         ''', (adelanto.usuario_id, fecha_actual, adelanto.monto, adelanto.detalle, adelanto.usuario_registro))
 
         conexion.commit()
-        from backend.whatsapp_puente import avisar_retiro, nombre_usuario
-        background_tasks.add_task(
-            avisar_retiro,
-            adelanto.monto,
-            f"[ADELANTO DE SUELDO] {adelanto.detalle}",
-            nombre_usuario(adelanto.usuario_registro),
-            adelanto.turno_id,
-        )
-        return {"mensaje": f"Adelanto de ${adelanto.monto} registrado. Se descontará en la próxima liquidación."}
+        if sale_de_caja:
+            from backend.whatsapp_puente import avisar_retiro, nombre_usuario
+            background_tasks.add_task(
+                avisar_retiro,
+                adelanto.monto,
+                f"[ADELANTO DE SUELDO] {adelanto.detalle}",
+                nombre_usuario(adelanto.usuario_registro),
+                adelanto.turno_id,
+            )
+            return {"mensaje": f"Adelanto de ${adelanto.monto} registrado. Salió de la caja y se descuenta en la próxima liquidación."}
+        return {"mensaje": f"Adelanto de ${adelanto.monto} registrado. No salió de una caja. Se descuenta en la próxima liquidación."}
     except Exception as e:
         conexion.rollback()
         return {"error": str(e)}
@@ -668,6 +673,24 @@ def previsualizar_liquidacion(usuario_id: int, periodo_desde: date, periodo_hast
         conexion.close()
 
 
+def _id_categoria_sueldos(cursor):
+    """La liquidación no elige rubro. Sueldos es la fila fija; si falta, se crea."""
+    cursor.execute(
+        """
+        SELECT id FROM categorias_gasto
+        WHERE lower(trim(nombre)) = 'sueldos'
+          AND upper(IFNULL(tipo_categoria, 'OPERATIVO')) = 'OPERATIVO'
+        ORDER BY id
+        LIMIT 1
+        """
+    )
+    fila = cursor.fetchone()
+    if fila:
+        return fila["id"]
+    cursor.execute("INSERT INTO categorias_gasto (nombre, tipo_categoria) VALUES ('Sueldos', 'OPERATIVO')")
+    return cursor.lastrowid
+
+
 @router.post("/liquidar", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def liquidar_sueldo(liq: LiquidacionNueva):
     conexion = obtener_conexion()
@@ -684,11 +707,7 @@ def liquidar_sueldo(liq: LiquidacionNueva):
         empleado = cursor.fetchone()
         if not empleado: raise Exception("El empleado no existe.")
 
-        cursor.execute("SELECT id, tipo_categoria FROM categorias_gasto WHERE id = ?", (liq.categoria_gasto_id,))
-        categoria = cursor.fetchone()
-        if not categoria: raise Exception("La categoría de gasto indicada no existe.")
-        if (categoria['tipo_categoria'] or 'OPERATIVO') != 'OPERATIVO':
-            raise Exception("Un sueldo siempre es un Gasto Operativo: elegí una categoría de ese tipo.")
+        categoria_sueldos_id = _id_categoria_sueldos(cursor)
 
         desde_str, hasta_str = liq.periodo_desde.isoformat(), liq.periodo_hasta.isoformat()
 
@@ -707,7 +726,7 @@ def liquidar_sueldo(liq: LiquidacionNueva):
         cursor.execute('''
             INSERT INTO gastos_operativos (fecha, categoria_id, descripcion_detalle, monto, metodo_pago, origen_fondos, usuario_id, turno_id)
             VALUES (?, ?, ?, ?, 'LIQUIDACION_SUELDO', 'RRHH', ?, NULL)
-        ''', (fecha_actual, liq.categoria_gasto_id,
+        ''', (fecha_actual, categoria_sueldos_id,
               f"Liquidación {empleado['nombre_completo']} ({desde_str} a {hasta_str})",
               monto_bruto, liq.liquidado_por))
         gasto_id = cursor.lastrowid
@@ -721,7 +740,7 @@ def liquidar_sueldo(liq: LiquidacionNueva):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAGADO')
         ''', (liq.usuario_id, desde_str, hasta_str, modalidad, cantidad_unidades, valor_unitario,
               monto_bruto, descuento_aplicado, monto_neto_pagado, saldo_arrastrado, tope_pct,
-              liq.categoria_gasto_id, gasto_id, fecha_actual, liq.liquidado_por))
+              categoria_sueldos_id, gasto_id, fecha_actual, liq.liquidado_por))
         liquidacion_id = cursor.lastrowid
 
         # 3. Cerramos los partes de trabajo consumidos (si aplica la modalidad)

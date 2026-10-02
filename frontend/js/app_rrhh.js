@@ -404,20 +404,27 @@ async function abrirModalAdelanto() {
         const res = await apiFetch(`${obtenerBaseUrl()}/caja/monitor_vivo`);
         const data = await res.json();
         turnos = data.turnos_vivos || [];
-    } catch (e) { /* seguimos igual, se avisa abajo */ }
+    } catch (e) { /* sin monitor igual se puede cargar un adelanto que no sale del cajón */ }
     Swal.close();
 
-    if (turnos.length === 0) {
-        return Swal.fire('Sin cajas abiertas', 'Necesitás una caja abierta para poder entregar el adelanto en efectivo.', 'warning');
-    }
-
-    let opcionesTurno = turnos.map(t => `<option value="${t.turno_id}">Caja #${t.caja_id} - ${t.cajero || 'Sin cajero'}</option>`).join('');
+    const hayCaja = turnos.length > 0;
+    const opcionesTurno = turnos.map(t => `<option value="${t.turno_id}">Caja #${t.caja_id} - ${t.cajero || 'Sin cajero'}</option>`).join('');
+    const bloqueCaja = hayCaja
+        ? `<select id="swal-origen" class="swal2-select">
+                <option value="CAJA">Sale del cajón</option>
+                <option value="EXTERNO">No sale del cajón</option>
+           </select>
+           <div id="swal-caja-wrap">
+                <select id="swal-turno" class="swal2-select">${opcionesTurno}</select>
+           </div>`
+        : `<p class="small text-muted mb-0">No hay caja abierta. Este adelanto no mueve el cajón.</p>
+           <input id="swal-origen" type="hidden" value="EXTERNO">`;
 
     const { value: formValues } = await Swal.fire({
         title: 'Dar Adelanto de Sueldo',
         html: `
             <input id="swal-monto" type="number" class="swal2-input" placeholder="Monto ($)">
-            <select id="swal-turno" class="swal2-select">${opcionesTurno}</select>
+            ${bloqueCaja}
             <input id="swal-detalle" type="text" class="swal2-input" placeholder="Detalle (Ej: Adelanto quincena)">
             <input id="swal-pin" type="password" class="swal2-input" placeholder="Tu PIN de Administrador">
         `,
@@ -426,6 +433,13 @@ async function abrirModalAdelanto() {
         confirmButtonText: 'Registrar Adelanto (Enter)',
         confirmButtonColor: '#f59e0b',
         didOpen: (popup) => {
+            const origen = document.getElementById('swal-origen');
+            const caja = document.getElementById('swal-caja-wrap');
+            if (origen && caja && origen.tagName === 'SELECT') {
+                const mostrar = () => { caja.style.display = origen.value === 'CAJA' ? 'block' : 'none'; };
+                origen.addEventListener('change', mostrar);
+                mostrar();
+            }
             atarEnterConfirmarSwal(popup);
             setTimeout(() => document.getElementById('swal-monto').focus(), 300);
         },
@@ -433,11 +447,13 @@ async function abrirModalAdelanto() {
             const monto = parseFloat(document.getElementById('swal-monto').value);
             const detalle = document.getElementById('swal-detalle').value;
             const pin = document.getElementById('swal-pin').value;
-            const turnoId = document.getElementById('swal-turno').value;
+            const origen = document.getElementById('swal-origen').value;
+            const turnoId = document.getElementById('swal-turno')?.value;
             if (!monto || monto <= 0) { Swal.showValidationMessage('Ingresá un monto válido'); return false; }
             if (!detalle) { Swal.showValidationMessage('Ingresá un detalle'); return false; }
             if (!pin) { Swal.showValidationMessage('Ingresá tu PIN'); return false; }
-            return { monto, detalle, pin, turnoId };
+            if (origen === 'CAJA' && !turnoId) { Swal.showValidationMessage('Elegí la caja'); return false; }
+            return { monto, detalle, pin, origen, turnoId };
         }
     });
 
@@ -445,12 +461,14 @@ async function abrirModalAdelanto() {
 
     try {
         Swal.fire({ title: 'Procesando...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+        const cuerpo = {
+            usuario_id: empleadoActivo.id, monto: formValues.monto, detalle: formValues.detalle,
+            origen: formValues.origen, usuario_registro: usuarioIdActual, pin_autorizante: formValues.pin
+        };
+        if (formValues.origen === 'CAJA') cuerpo.turno_id = parseInt(formValues.turnoId, 10);
         const res = await apiFetch(`${obtenerBaseUrl()}/rrhh/cuenta_empleado/adelanto`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                usuario_id: empleadoActivo.id, monto: formValues.monto, detalle: formValues.detalle,
-                turno_id: parseInt(formValues.turnoId), usuario_registro: usuarioIdActual, pin_autorizante: formValues.pin
-            })
+            body: JSON.stringify(cuerpo)
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -712,12 +730,9 @@ async function cargarCategoriasGasto() {
     try {
         const res = await apiFetch(`${obtenerBaseUrl()}/gastos/categorias`);
         const data = await res.json();
-        // Un sueldo (o un consumo que el local regala) SIEMPRE es un Gasto Operativo real:
-        // impacta la rentabilidad. Por eso acá solo mostramos categorías tipo OPERATIVO,
-        // nunca RETIRO_SOCIO (esas son retiros de plata del dueño, otra cosa totalmente distinta).
+        // Esta lista es solo para el consumo que paga el local. El sueldo no elige:
+        // el servidor lo anota en Sueldos. Retiro del dueño no entra acá.
         categoriasGastoCache = (data.categorias || []).filter(c => (c.tipo_categoria || 'OPERATIVO') === 'OPERATIVO');
-        const select = document.getElementById('liqCategoriaGasto');
-        select.innerHTML = categoriasGastoCache.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
     } catch (e) { console.error('No se pudieron cargar las categorías de gasto', e); }
 }
 
@@ -768,8 +783,6 @@ async function calcularPreviewLiquidacion() {
 
 async function confirmarLiquidacion() {
     if (!ultimoPreview) return;
-    const categoriaId = document.getElementById('liqCategoriaGasto').value;
-    if (!categoriaId) return Swal.fire('Atención', 'Elegí la categoría de gasto.', 'warning');
 
     const { value: formLiq } = await Swal.fire({
         title: `Confirmar pago de $${ultimoPreview.monto_neto_estimado}`,
@@ -818,7 +831,7 @@ async function confirmarLiquidacion() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 usuario_id: empleadoActivo.id, periodo_desde: desde, periodo_hasta: hasta,
-                categoria_gasto_id: parseInt(categoriaId), liquidado_por: usuarioIdActual, pin_autorizante: formLiq.pin
+                liquidado_por: usuarioIdActual, pin_autorizante: formLiq.pin
             })
         });
         const data = await res.json();
