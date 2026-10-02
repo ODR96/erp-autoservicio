@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta # <-- Agregamos zona horaria
 import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol # <-- EL PATOVICA
+from backend.mod_ventas.rutas_ventas import costo_y_descuento_linea
 
 # --- CORRECCIÓN HORARIA PARA ARGENTINA ---
 ZONA_AR = timezone(timedelta(hours=-3))
@@ -355,7 +356,6 @@ def cobrar_pedido_en_deposito(pedido_id: int, pago: CobroEnDeposito):
 # --- 4. ENTREGAR MERCADERÍA (Portón) ---
 @router.put("/entregar/{pedido_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def despachar_pedido_mayorista(pedido_id: int):
-    # (El código interno de esta función está perfecto, solo le agregamos el Depends arriba)
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -366,24 +366,35 @@ def despachar_pedido_mayorista(pedido_id: int):
         if not pedido or pedido['estado'] != 'PAGADO_PENDIENTE_ENTREGA':
             raise Exception("No se puede entregar. Verifique que el pedido exista y esté PAGADO.")
             
-        cursor.execute("SELECT producto_id, cantidad, descripcion_historica FROM ventas_detalle WHERE venta_id = ?", (pedido_id,))
+        cursor.execute(
+            "SELECT id, producto_id, cantidad FROM ventas_detalle WHERE venta_id = ?",
+            (pedido_id,),
+        )
         items_a_entregar = cursor.fetchall()
-        
+        fecha_entrega = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+
         for item in items_a_entregar:
-            cursor.execute("SELECT id, cantidad_disponible FROM lotes_stock WHERE producto_id = ? AND cantidad_disponible > 0 AND estado_lote = 'Activo' ORDER BY fecha_vencimiento ASC", (item['producto_id'],))
-            lotes = cursor.fetchall()
-            cantidad_por_descontar = item['cantidad']
-            
-            for lote in lotes:
-                if cantidad_por_descontar <= 0: break
-                descuento = min(lote['cantidad_disponible'], cantidad_por_descontar)
-                cursor.execute("UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible - ? WHERE id = ?", (descuento, lote['id']))
-                cursor.execute("INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo) VALUES (?, ?, ?, 'REMITO_DEPOSITO', ?)", (item['producto_id'], lote['id'], descuento, f"Pedido #{pedido_id}"))
-                cantidad_por_descontar -= descuento
-                
-            if cantidad_por_descontar > 0:
-                raise Exception(f"Falta stock físico en el sistema de '{item['descripcion_historica']}' para poder entregar.")
-                
+            cursor.execute(
+                "SELECT IFNULL(costo_sin_iva, 0) FROM productos WHERE id = ?",
+                (item["producto_id"],),
+            )
+            ficha = cursor.fetchone()
+            costo_unitario = costo_y_descuento_linea(
+                cursor,
+                item["producto_id"],
+                item["cantidad"],
+                pedido_id,
+                "Depósito",
+                fecha_entrega,
+                ficha[0] if ficha else 0,
+                tipo_movimiento="REMITO_DEPOSITO",
+                tipo_faltante="REMITO_FALTANTE_STOCK",
+                motivo=f"Pedido #{pedido_id}",
+            )
+            cursor.execute(
+                "UPDATE ventas_detalle SET costo_unitario_historico = ? WHERE id = ?",
+                (costo_unitario, item["id"]),
+            )
             _soltar(cursor, item["producto_id"], item["cantidad"])
                 
         cursor.execute("UPDATE ventas_cabecera SET estado = 'ENTREGADA' WHERE id = ?", (pedido_id,))

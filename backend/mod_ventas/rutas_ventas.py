@@ -87,10 +87,14 @@ def _costo_unitario_lote(costo_lote, costo_fallback) -> float:
     return float(costo_fallback or 0)
 
 
-def descontar_stock_fifo(cursor, producto_id, cantidad, venta_id, cajero_nombre, fecha_iso, costo_fallback) -> float:
+def descontar_stock_fifo(
+    cursor, producto_id, cantidad, venta_id, cajero_nombre, fecha_iso, costo_fallback,
+    tipo_movimiento="VENTA_AUTOMATICA", tipo_faltante="VENTA_FALTANTE_STOCK", motivo=None,
+) -> float:
     """Descuenta lotes por vencimiento. Devuelve el costo total de esa mercadería (no el precio de góndola)."""
     restante = float(cantidad)
     costo_total = 0.0
+    etiqueta = motivo or f"Ticket #{venta_id} ({cajero_nombre})"
     cursor.execute(
         """SELECT id, cantidad_disponible, IFNULL(costo_real_ingreso, 0) as costo
            FROM lotes_stock
@@ -108,8 +112,8 @@ def descontar_stock_fifo(cursor, producto_id, cantidad, venta_id, cajero_nombre,
         )
         cursor.execute(
             """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo)
-               VALUES (?, ?, ?, 'VENTA_AUTOMATICA', ?)""",
-            (producto_id, lote["id"], descuento, f"Ticket #{venta_id} ({cajero_nombre})"),
+               VALUES (?, ?, ?, ?, ?)""",
+            (producto_id, lote["id"], descuento, tipo_movimiento, etiqueta),
         )
         costo_total += descuento * _costo_unitario_lote(lote["costo"], costo_fallback)
         restante -= descuento
@@ -126,12 +130,43 @@ def descontar_stock_fifo(cursor, producto_id, cantidad, venta_id, cajero_nombre,
         nuevo_lote = cursor.lastrowid
         cursor.execute(
             """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo)
-               VALUES (?, ?, ?, 'VENTA_FALTANTE_STOCK', ?)""",
-            (producto_id, nuevo_lote, restante, f"Ticket #{venta_id} ({cajero_nombre})"),
+               VALUES (?, ?, ?, ?, ?)""",
+            (producto_id, nuevo_lote, restante, tipo_faltante, etiqueta),
         )
         costo_total += restante * costo_faltante
 
     return round(costo_total, 4)
+
+
+def costo_y_descuento_linea(
+    cursor, producto_id, cantidad, venta_id, cajero_nombre, fecha_iso, costo_fallback, **fifo
+) -> float:
+    """Descuenta el producto o, si es combo, cada componente. Devuelve el costo unitario de la línea."""
+    cantidad = float(cantidad or 0)
+    cursor.execute(
+        "SELECT producto_hijo_id, cantidad_hijo FROM productos_combos WHERE producto_padre_id = ?",
+        (producto_id,),
+    )
+    componentes = cursor.fetchall()
+    if componentes:
+        piezas = [
+            (comp["producto_hijo_id"], cantidad * float(comp["cantidad_hijo"] or 0))
+            for comp in componentes
+        ]
+    else:
+        piezas = [(producto_id, cantidad)]
+
+    costo_total = 0.0
+    for hijo_id, cant in piezas:
+        if cant <= 0:
+            continue
+        cursor.execute("SELECT IFNULL(costo_sin_iva, 0) FROM productos WHERE id = ?", (hijo_id,))
+        fila_hijo = cursor.fetchone()
+        costo_hijo = fila_hijo[0] if fila_hijo else costo_fallback
+        costo_total += descontar_stock_fifo(
+            cursor, hijo_id, cant, venta_id, cajero_nombre, fecha_iso, costo_hijo, **fifo
+        )
+    return round(costo_total / cantidad, 4) if cantidad else 0.0
 
 @router.get("/por_fecha", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def obtener_ventas_por_fecha(fecha: str = Query(..., description="Formato YYYY-MM-DD")):
@@ -363,34 +398,15 @@ def registrar_venta(venta: NuevaVenta, background_tasks: BackgroundTasks):
             subtotal_item = item.precio_unitario * item.cantidad
             total_venta += subtotal_item
             
-            cursor.execute("SELECT producto_hijo_id, cantidad_hijo FROM productos_combos WHERE producto_padre_id = ?", (item.producto_id,))
-            componentes = cursor.fetchall()
-            
-            items_a_descontar = []
-            if componentes:
-                for comp in componentes: items_a_descontar.append({"id": comp['producto_hijo_id'], "cant": item.cantidad * comp['cantidad_hijo']})
-            else:
-                items_a_descontar.append({"id": item.producto_id, "cant": item.cantidad})
-
-            costo_total_linea = 0.0
-            for desc in items_a_descontar:
-                cursor.execute(
-                    "SELECT IFNULL(costo_sin_iva, 0) FROM productos WHERE id = ?",
-                    (desc["id"],),
-                )
-                fila_hijo = cursor.fetchone()
-                costo_hijo = fila_hijo[0] if fila_hijo else costo_fallback
-                costo_total_linea += descontar_stock_fifo(
-                    cursor,
-                    desc["id"],
-                    desc["cant"],
-                    venta_id,
-                    venta.cajero_nombre,
-                    fecha_actual,
-                    costo_hijo,
-                )
-
-            costo_unitario = round(costo_total_linea / item.cantidad, 4) if item.cantidad else 0.0
+            costo_unitario = costo_y_descuento_linea(
+                cursor,
+                item.producto_id,
+                item.cantidad,
+                venta_id,
+                venta.cajero_nombre,
+                fecha_actual,
+                costo_fallback,
+            )
             cursor.execute('''
                 INSERT INTO ventas_detalle 
                 (venta_id, producto_id, descripcion_historica, cantidad, precio_unitario_historico, subtotal, costo_unitario_historico)
