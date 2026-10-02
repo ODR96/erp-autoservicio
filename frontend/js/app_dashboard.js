@@ -39,6 +39,7 @@ async function cargarMeticasFinancieras() {
         if (!data.error) {
             const rf = data.resumen_financiero;
             const ingresos = rf['1_ingresos_por_ventas'];
+            const ventasSinIva = rf['ventas_sin_iva'] != null ? rf['ventas_sin_iva'] : ingresos;
             const cmv = rf['2_costo_de_la_mercaderia'];
             const gastos = rf['3_gastos_del_local'];
             const gananciaNeta = rf['4_GANANCIA_NETA_PURA'];
@@ -59,7 +60,8 @@ async function cargarMeticasFinancieras() {
             document.getElementById('dash-rentabilidad').innerText = rf['5_rentabilidad_del_mes'];
 
             // 2. Piso del mes = gastos ya anotados + sueldos que todavía no se liquidaron
-            const gananciaBruta = ingresos - cmv - comisiones;
+            const comisionNoCubierta = rf['comision_no_cubierta'] != null ? rf['comision_no_cubierta'] : comisiones;
+            const gananciaBruta = ventasSinIva - cmv - comisionNoCubierta;
             let porcentajeEquilibrio = 0;
             
             if (pisoMes > 0) {
@@ -290,16 +292,21 @@ async function lanzarOfertaModal(id, nombre, motivo) {
         
         if (prod.error) throw new Error("No se pudo leer el costo");
 
-        let costoNeto = prod.costo_sin_iva || 0;
-        let precioActual = prod.precio_venta_final || 0;
-        let margenActual = costoNeto > 0 ? (((precioActual / costoNeto) - 1) * 100).toFixed(1) : 0;
+        const costoSinIva = Number(prod.costo_sin_iva) || 0;
+        let iva = Number(prod.porcentaje_iva);
+        if (!Number.isFinite(iva) || iva < 0) iva = 21;
+        const costoConIva = costoSinIva * (1 + iva / 100);
+        const precioActual = Number(prod.precio_venta_final) || 0;
+        const margenActual = costoConIva > 0 && precioActual > 0
+            ? (((precioActual / costoConIva) - 1) * 100).toFixed(1)
+            : '0.0';
 
         const { value: descuento } = await Swal.fire({
             title: 'Liquidar Producto',
             html: `
                 <h5 class="text-info fw-bold mb-3">${nombre}</h5>
                 <div class="d-flex justify-content-around mb-3 p-2 bg-dark rounded border border-secondary">
-                    <div><small class="d-block text-muted">Costo</small><b class="text-danger">$${costoNeto.toFixed(2)}</b></div>
+                    <div><small class="d-block text-muted">Costo c/IVA</small><b class="text-danger">$${costoConIva.toFixed(2)}</b></div>
                     <div><small class="d-block text-muted">P. Actual</small><b class="text-success">$${precioActual.toFixed(2)}</b></div>
                     <div><small class="d-block text-muted">Margen</small><b class="text-warning">${margenActual}%</b></div>
                 </div>
@@ -314,7 +321,7 @@ async function lanzarOfertaModal(id, nombre, motivo) {
             inputValidator: (value) => {
                 if (!value || value <= 0 || value > 99) return 'Ingresá un porcentaje válido';
                 let precioNuevo = precioActual * (1 - (value/100));
-                if (precioNuevo <= costoNeto) return `¡Peligro! El precio quedaría en $${precioNuevo.toFixed(2)}, por debajo de tu costo ($${costoNeto.toFixed(2)}).`;
+                if (precioNuevo <= costoConIva) return `¡Peligro! El precio quedaría en $${precioNuevo.toFixed(2)}, por debajo del costo con IVA ($${costoConIva.toFixed(2)}).`;
             }
         });
 

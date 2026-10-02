@@ -23,6 +23,41 @@ def _mes_ar(mes: str = None):
     return mes or _ahora_ar().strftime("%Y-%m")
 
 
+def _sumar_venta_sin_iva(cursor, where_sql, params) -> float:
+    """Venta del período sin el IVA. El descuento del ticket entra. El recargo de la tarjeta no."""
+    plantilla = '''
+        SELECT IFNULL(SUM(
+            d.subtotal * (
+                CASE
+                    WHEN IFNULL(base.lineas, 0) = 0 THEN 0
+                    ELSE ({precio}) / base.lineas
+                END
+            ) / (1.0 + IFNULL(p.porcentaje_iva, 21) / 100.0)
+        ), 0)
+        FROM ventas_detalle d
+        JOIN ventas_cabecera c ON c.id = d.venta_id
+        LEFT JOIN productos p ON p.id = d.producto_id
+        JOIN (
+            SELECT venta_id, SUM(IFNULL(subtotal, 0)) AS lineas
+            FROM ventas_detalle
+            GROUP BY venta_id
+        ) base ON base.venta_id = d.venta_id
+        WHERE ''' + where_sql
+    ultimo = None
+    for precio in (
+        "(IFNULL(c.total_venta, 0) - IFNULL(c.recargo_medio, 0))",
+        "IFNULL(c.total_venta, 0)",
+    ):
+        try:
+            cursor.execute(plantilla.format(precio=precio), params)
+            return float(cursor.fetchone()[0] or 0)
+        except sqlite3.OperationalError as e:
+            ultimo = e
+    if ultimo:
+        raise ultimo
+    return 0.0
+
+
 def _calcular_sueldos_comprometidos(cursor, mes: str) -> float:
     """Sueldos que este mes YA se van a deber y todavía NO se liquidaron.
 
@@ -252,11 +287,30 @@ def calcular_ganancia_neta(mes: str = None):
         except sqlite3.OperationalError:
             mermas = 0.0
 
+        # La venta del ticket incluye IVA. El CMV no. La ganancia usa las dos sin IVA.
+        # El recargo de tarjeta no es venta: si ya cubrió la comisión, esa comisión no se resta de nuevo.
+        ventas_sin_iva = _sumar_venta_sin_iva(
+            cursor,
+            """strftime('%Y-%m', c.fecha_hora) = ?
+               AND c.estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')""",
+            (mes,),
+        )
+        recargos = 0.0
+        try:
+            cursor.execute('''
+                SELECT IFNULL(SUM(recargo_medio), 0) FROM ventas_cabecera
+                WHERE strftime('%Y-%m', fecha_hora) = ?
+                AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
+            ''', (mes,))
+            recargos = cursor.fetchone()[0] or 0.0
+        except sqlite3.OperationalError:
+            recargos = 0.0
+        comision_no_cubierta = max(0.0, float(comisiones) - float(recargos))
+
         # 4. MATEMÁTICA PURA DE NEGOCIOS (hechos: no mezcla proyección)
-        ganancia_neta = ingresos - costos_mercaderia - comisiones - gastos - mermas
-        
-        # Sacamos el porcentaje de rentabilidad
-        margen_porcentaje = (ganancia_neta / ingresos * 100) if ingresos > 0 else 0
+        ganancia_neta = ventas_sin_iva - costos_mercaderia - comision_no_cubierta - gastos - mermas
+
+        margen_porcentaje = (ganancia_neta / ventas_sin_iva * 100) if ventas_sin_iva > 0 else 0
 
         conexion.close()
 
@@ -264,6 +318,7 @@ def calcular_ganancia_neta(mes: str = None):
             "mes_analizado": mes,
             "resumen_financiero": {
                 "1_ingresos_por_ventas": round(ingresos, 2),
+                "ventas_sin_iva": round(ventas_sin_iva, 2),
                 "2_costo_de_la_mercaderia": round(costos_mercaderia, 2),
                 "3_gastos_del_local": round(gastos, 2),
                 "4_GANANCIA_NETA_PURA": round(ganancia_neta, 2),
@@ -271,7 +326,8 @@ def calcular_ganancia_neta(mes: str = None):
                 "6_sueldos_comprometidos": sueldos_comprometidos,
                 "7_piso_operativo_mes": piso_operativo_mes,
                 "8_mermas_del_mes": round(mermas, 2),
-                "9_comisiones_medios": round(comisiones, 2)
+                "9_comisiones_medios": round(comisiones, 2),
+                "comision_no_cubierta": round(comision_no_cubierta, 2)
             }
         }
     except Exception as e:
@@ -578,10 +634,23 @@ def crear_oferta_urgente(oferta: LanzarOferta):
     
     try:
         # A. Buscamos el precio actual
-        cursor.execute("SELECT precio_venta_final, nombre FROM productos WHERE id = ?", (oferta.producto_id,))
+        cursor.execute(
+            "SELECT precio_venta_final, nombre, IFNULL(costo_sin_iva, 0), IFNULL(porcentaje_iva, 21) FROM productos WHERE id = ?",
+            (oferta.producto_id,),
+        )
         prod = cursor.fetchone()
-        
+        if not prod:
+            raise Exception("El producto no existe.")
+
         nuevo_precio = round(prod[0] * (1 - (oferta.porcentaje_descuento / 100)), 2)
+        iva = float(prod[3] if prod[3] is not None else 21)
+        if iva < 0:
+            iva = 21.0
+        costo_con_iva = round(float(prod[2] or 0) * (1 + iva / 100), 2)
+        if nuevo_precio <= costo_con_iva:
+            raise Exception(
+                f"El precio quedaría en ${nuevo_precio:.2f}, por debajo del costo con IVA (${costo_con_iva:.2f})."
+            )
         nuevo_nombre = f"OFERTA {prod[1]}"
         
         # B. Actualizamos el producto para que la caja lo cobre barato YA
@@ -670,7 +739,8 @@ def listar_cierres_mes(mes: str = None, incluir_oficina: bool = False):
                 SELECT turno_id,
                        COUNT(id) AS tickets,
                        IFNULL(SUM(total_venta), 0) AS ventas,
-                       IFNULL(SUM(IFNULL(comision_medio, 0)), 0) AS comision
+                       IFNULL(SUM(IFNULL(comision_medio, 0)), 0) AS comision,
+                       IFNULL(SUM(IFNULL(recargo_medio, 0)), 0) AS recargo
                 FROM ventas_cabecera
                 WHERE estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
                 GROUP BY turno_id
@@ -681,6 +751,27 @@ def listar_cierres_mes(mes: str = None, incluir_oficina: bool = False):
                 FROM ventas_detalle d
                 JOIN ventas_cabecera c ON d.venta_id = c.id
                 LEFT JOIN productos p ON d.producto_id = p.id
+                WHERE c.estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
+                GROUP BY c.turno_id
+            ),
+            venta_neta_turno AS (
+                SELECT c.turno_id,
+                       IFNULL(SUM(
+                           d.subtotal * (
+                               CASE
+                                   WHEN IFNULL(base.lineas, 0) = 0 THEN 0
+                                   ELSE (IFNULL(c.total_venta, 0) - IFNULL(c.recargo_medio, 0)) / base.lineas
+                               END
+                           ) / (1.0 + IFNULL(p.porcentaje_iva, 21) / 100.0)
+                       ), 0) AS neta
+                FROM ventas_detalle d
+                JOIN ventas_cabecera c ON c.id = d.venta_id
+                LEFT JOIN productos p ON p.id = d.producto_id
+                JOIN (
+                    SELECT venta_id, SUM(IFNULL(subtotal, 0)) AS lineas
+                    FROM ventas_detalle
+                    GROUP BY venta_id
+                ) base ON base.venta_id = d.venta_id
                 WHERE c.estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
                 GROUP BY c.turno_id
             )
@@ -694,12 +785,13 @@ def listar_cierres_mes(mes: str = None, incluir_oficina: bool = False):
                    IFNULL(vt.ventas, 0) as ventas,
                    IFNULL(vt.comision, 0) as comision,
                    IFNULL(ct.cmv, 0) as cmv,
-                   ROUND(IFNULL(vt.ventas, 0) - IFNULL(ct.cmv, 0) - IFNULL(vt.comision, 0), 2) as ganancia_bruta
+                   ROUND(IFNULL(vn.neta, 0) - IFNULL(ct.cmv, 0) - MAX(0, IFNULL(vt.comision, 0) - IFNULL(vt.recargo, 0)), 2) as ganancia_bruta
             FROM turnos_caja t
             LEFT JOIN usuarios u ON t.usuario_id = u.id
             LEFT JOIN cajas_fisicas cf ON t.caja_id = cf.id
             LEFT JOIN ventas_turno vt ON vt.turno_id = t.id
             LEFT JOIN cmv_turno ct ON ct.turno_id = t.id
+            LEFT JOIN venta_neta_turno vn ON vn.turno_id = t.id
             WHERE strftime('%Y-%m', t.fecha_hora_apertura) = ?
               AND (? = 1 OR IFNULL(cf.solo_admin, 0) = 0)
             ORDER BY t.fecha_hora_apertura DESC
