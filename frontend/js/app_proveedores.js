@@ -671,12 +671,23 @@ function cantidadStockItem(item) {
     return item.modo_cantidad === 'CAJA' ? n * uxbItem(item) : n;
 }
 
+function margenSobreCostoConIva(precio, costoSinIva, ivaPct) {
+    const costo = Number(costoSinIva) || 0;
+    const venta = Number(precio) || 0;
+    const tasa = Number.isFinite(Number(ivaPct)) ? Number(ivaPct) : 21;
+    const base = costo * (1 + tasa / 100);
+    if (base <= 0 || venta <= 0) return 0;
+    return ((venta / base) - 1) * 100;
+}
+
 function margenItem(item) {
-    if (Number.isFinite(Number(item.margen_pct))) return Number(item.margen_pct);
-    const costoBase = Number(item.costo_anterior) || 0;
+    const costoBase = Number(item.costo_anterior) || Number(item.costo_unitario) || 0;
     const precio = Number(item.precio_gondola_actual) || 0;
-    if (costoBase <= 0) return 0;
-    return ((precio / costoBase) - 1) * 100;
+    if (costoBase > 0 && precio > 0) {
+        return margenSobreCostoConIva(precio, costoBase, ivaItem(item));
+    }
+    if (Number.isFinite(Number(item.margen_pct))) return Number(item.margen_pct);
+    return 0;
 }
 
 function ivaItem(item) {
@@ -715,7 +726,10 @@ function normalizarItemFactura(it) {
         origen_linea: it.origen_linea || (it.producto_id ? 'MANUAL' : 'OCR'),
         huerfano: !it.producto_id
     };
-    if (!Number.isFinite(Number(item.margen_pct))) item.margen_pct = margenItem(item);
+    item.margen_pct = margenItem(item);
+    if (item.actualizar_gondola && !item.precio_editado_manual) {
+        item.nuevo_precio_venta = Math.round((Number(item.costo_unitario) || 0) * (1 + ivaItem(item) / 100) * (1 + item.margen_pct / 100) * 100) / 100;
+    }
     syncDerivadosItem(item);
     return item;
 }
@@ -928,7 +942,7 @@ function agregarProductoAFactura(producto) {
         precio_editado_manual: false,
         unidades_por_bulto: uxb,
         porcentaje_iva: (producto.porcentaje_iva !== undefined && producto.porcentaje_iva !== null) ? producto.porcentaje_iva : 21,
-        margen_pct: costo > 0 ? ((precio / costo) - 1) * 100 : 0,
+        margen_pct: margenSobreCostoConIva(precio, costo, (producto.porcentaje_iva !== undefined && producto.porcentaje_iva !== null) ? producto.porcentaje_iva : 21),
         numero_lote_proveedor: 'LOTE-' + Date.now().toString().slice(-4),
         origen_linea: 'MANUAL',
         huerfano: false
@@ -1165,7 +1179,8 @@ function aplicarProductoAFila(idx, producto) {
     item.porcentaje_iva = (producto.porcentaje_iva !== undefined && producto.porcentaje_iva !== null) ? producto.porcentaje_iva : 21;
     item.huerfano = false;
     item.origen_linea = 'MANUAL';
-    if (costo > 0) item.margen_pct = ((precio / costo) - 1) * 100;
+    const costoFicha = parseFloat(producto.costo_sin_iva) || costo;
+    item.margen_pct = margenSobreCostoConIva(precio, costoFicha, item.porcentaje_iva);
     syncDerivadosItem(item);
     reemplazarFilaFactura(idx);
     programarBorradorFactura();
