@@ -198,6 +198,10 @@ def alta_producto_desde_factura(alta: AltaDesdeFactura):
         costo = max(0.0, float(alta.costo_sin_iva or 0))
         stock_min = max(0.0, float(alta.stock_minimo_alerta or 0))
         dias_venc = max(0, int(alta.dias_alerta_vencimiento or 0))
+        # 0 es Exento. "or 21" lo pisaba porque 0 es falso.
+        iva = 21.0 if alta.porcentaje_iva is None else float(alta.porcentaje_iva)
+        if iva < 0:
+            iva = 21.0
 
         cursor.execute(
             '''
@@ -213,7 +217,7 @@ def alta_producto_desde_factura(alta: AltaDesdeFactura):
                 categoria_id,
                 int(alta.proveedor_habitual_id or 0),
                 costo,
-                float(alta.porcentaje_iva or 21),
+                iva,
                 float(precio),
                 stock_min,
                 dias_venc,
