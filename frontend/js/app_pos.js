@@ -2065,21 +2065,8 @@ async function registrarPagoFiado() {
             tituloSaldo: 'SALDO LUEGO DE ESTE COBRO',
             aplicaciones: data.aplicaciones || []
         };
-        ultimoReciboPagoCtaCte = datosRecibo;
         cargarHistorialTabla(clienteFiadoActual.id);
-        imprimirReciboPagoCtaCte(datosRecibo);
-        const ticketsImp = ticketsImputacionDe(data.aplicaciones);
-        const extraImp = ticketsImp.length
-            ? `<br><small>Imputado a ticket ${ticketsImp.map((t) => '#' + t).join(', ')}</small>`
-            : '';
-        const saldo = Number(datosRecibo.saldo) || 0;
-        await Swal.fire({
-            title: saldo <= 0 ? 'Cuenta al día' : 'Pago registrado',
-            html: (saldo <= 0 ? 'No debe nada.' : 'Pago registrado.') + extraImp,
-            icon: 'success',
-            timer: 2200,
-            showConfirmButton: false
-        });
+        await preguntarImprimirReciboPagoCtaCte(datosRecibo);
     } catch (e) {
         Swal.fire('Error', e.message, 'error');
     }
