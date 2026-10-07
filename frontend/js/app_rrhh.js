@@ -385,11 +385,12 @@ async function cargarCuentaEmpleado() {
         } else {
             estado = '<span class="badge bg-danger">Pendiente</span>';
         }
+        const origen = m.origen_fondos ? `<div class="text-muted">Salió de: ${TEXTO_ORIGEN_PAGO[m.origen_fondos] || m.origen_fondos}</div>` : '';
         tbody.innerHTML += `
             <tr>
                 <td class="small">${m.fecha_hora}</td>
                 <td>${m.tipo_movimiento}</td>
-                <td class="small">${m.detalle || ''}</td>
+                <td class="small">${escRrhh(m.detalle)}${origen}</td>
                 <td class="text-end fw-bold">$${m.monto}</td>
                 <td class="text-center">${estado}</td>
             </tr>
@@ -397,34 +398,80 @@ async function cargarCuentaEmpleado() {
     });
 }
 
-async function abrirModalAdelanto() {
+// De dónde estaban los billetes al pagar (adelanto o sueldo). La caja fuerte resta su saldo;
+// Mercado Pago y banco quedan anotados hasta que esas cuentas lleven saldo.
+async function buscarTurnosAbiertos() {
     Swal.fire({ title: 'Buscando cajas abiertas...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
     let turnos = [];
     try {
         const res = await apiFetch(`${obtenerBaseUrl()}/caja/monitor_vivo`);
         const data = await res.json();
         turnos = data.turnos_vivos || [];
-    } catch (e) { /* sin monitor igual se puede cargar un adelanto que no sale del cajón */ }
+    } catch (e) { /* sin monitor igual se puede pagar desde otro origen */ }
     Swal.close();
+    return turnos;
+}
 
-    const hayCaja = turnos.length > 0;
+function htmlOrigenPago(turnos) {
     const opcionesTurno = turnos.map(t => `<option value="${t.turno_id}">Caja #${t.caja_id} - ${t.cajero || 'Sin cajero'}</option>`).join('');
-    const bloqueCaja = hayCaja
-        ? `<select id="swal-origen" class="swal2-select">
-                <option value="CAJA">Sale del cajón</option>
-                <option value="EXTERNO">No sale del cajón</option>
-           </select>
-           <div id="swal-caja-wrap">
-                <select id="swal-turno" class="swal2-select">${opcionesTurno}</select>
-           </div>`
-        : `<p class="small text-muted mb-0">No hay caja abierta. Este adelanto no mueve el cajón.</p>
-           <input id="swal-origen" type="hidden" value="EXTERNO">`;
+    return `
+        <select id="swal-origen" class="swal2-select">
+            <option value="">¿De dónde sale la plata?</option>
+            <option value="CAJA_FUERTE">Caja fuerte</option>
+            ${turnos.length ? '<option value="CAJA">Cajón de un turno abierto</option>' : ''}
+            <option value="MERCADOPAGO">Mercado Pago (transferencia)</option>
+            <option value="BANCO">Banco (transferencia)</option>
+            <option value="BOLSILLO">Bolsillo del dueño</option>
+        </select>
+        <div id="swal-caja-wrap" style="display:none">
+            <select id="swal-turno" class="swal2-select">${opcionesTurno}</select>
+        </div>
+        <p id="swal-origen-ayuda" class="small text-muted mt-2 mb-0"></p>`;
+}
+
+const TEXTO_ORIGEN_PAGO = {
+    CAJA: 'Cajón del turno',
+    CAJA_FUERTE: 'Caja fuerte',
+    MERCADOPAGO: 'Mercado Pago',
+    BANCO: 'Banco',
+    BOLSILLO: 'Bolsillo del dueño',
+    EXTERNO: 'Sin especificar'
+};
+
+function escRrhh(texto) {
+    const div = document.createElement('div');
+    div.textContent = texto == null ? '' : String(texto);
+    return div.innerHTML;
+}
+
+const AYUDA_ORIGEN_PAGO = {
+    CAJA_FUERTE: 'Resta del saldo de la caja fuerte. Si el cajero lo sacó del cajón con una Sangría, elegí esta.',
+    CAJA: 'Sale del cajón del turno: entra al Z como retiro y avisa por WhatsApp.',
+    MERCADOPAGO: 'Queda anotado. Mercado Pago todavía no lleva saldo en el sistema.',
+    BANCO: 'Queda anotado. El banco todavía no lleva saldo en el sistema.',
+    BOLSILLO: 'No toca ninguna caja del negocio.'
+};
+
+function atarOrigenPago() {
+    const origen = document.getElementById('swal-origen');
+    const caja = document.getElementById('swal-caja-wrap');
+    const ayuda = document.getElementById('swal-origen-ayuda');
+    const mostrar = () => {
+        caja.style.display = origen.value === 'CAJA' ? 'block' : 'none';
+        ayuda.textContent = AYUDA_ORIGEN_PAGO[origen.value] || '';
+    };
+    origen.addEventListener('change', mostrar);
+    mostrar();
+}
+
+async function abrirModalAdelanto() {
+    const turnos = await buscarTurnosAbiertos();
 
     const { value: formValues } = await Swal.fire({
         title: 'Dar Adelanto de Sueldo',
         html: `
             <input id="swal-monto" type="number" class="swal2-input" placeholder="Monto ($)">
-            ${bloqueCaja}
+            ${htmlOrigenPago(turnos)}
             <input id="swal-detalle" type="text" class="swal2-input" placeholder="Detalle (Ej: Adelanto quincena)">
             <input id="swal-pin" type="password" class="swal2-input" placeholder="Tu PIN de Administrador">
         `,
@@ -433,13 +480,7 @@ async function abrirModalAdelanto() {
         confirmButtonText: 'Registrar Adelanto (Enter)',
         confirmButtonColor: '#f59e0b',
         didOpen: (popup) => {
-            const origen = document.getElementById('swal-origen');
-            const caja = document.getElementById('swal-caja-wrap');
-            if (origen && caja && origen.tagName === 'SELECT') {
-                const mostrar = () => { caja.style.display = origen.value === 'CAJA' ? 'block' : 'none'; };
-                origen.addEventListener('change', mostrar);
-                mostrar();
-            }
+            atarOrigenPago();
             atarEnterConfirmarSwal(popup);
             setTimeout(() => document.getElementById('swal-monto').focus(), 300);
         },
@@ -450,6 +491,7 @@ async function abrirModalAdelanto() {
             const origen = document.getElementById('swal-origen').value;
             const turnoId = document.getElementById('swal-turno')?.value;
             if (!monto || monto <= 0) { Swal.showValidationMessage('Ingresá un monto válido'); return false; }
+            if (!origen) { Swal.showValidationMessage('Elegí de dónde sale la plata'); return false; }
             if (!detalle) { Swal.showValidationMessage('Ingresá un detalle'); return false; }
             if (!pin) { Swal.showValidationMessage('Ingresá tu PIN'); return false; }
             if (origen === 'CAJA' && !turnoId) { Swal.showValidationMessage('Elegí la caja'); return false; }
@@ -784,9 +826,13 @@ async function calcularPreviewLiquidacion() {
 async function confirmarLiquidacion() {
     if (!ultimoPreview) return;
 
+    const hayNeto = ultimoPreview.monto_neto_estimado > 0;
+    const turnos = hayNeto ? await buscarTurnosAbiertos() : [];
+
     const { value: formLiq } = await Swal.fire({
         title: `Confirmar pago de $${ultimoPreview.monto_neto_estimado}`,
         html: `<p>Empleado: <b>${ultimoPreview.empleado}</b><br>Esta acción impacta la rentabilidad del mes por el monto BRUTO ($${ultimoPreview.monto_bruto}).</p>
+            ${hayNeto ? htmlOrigenPago(turnos) : '<p class="small text-muted mb-0">Neto $0: los descuentos cubren todo, no sale plata.</p>'}
             <input id="swal-pin" type="password" class="swal2-input" placeholder="Tu PIN de Administrador">
             <div class="form-check text-start mt-3 ms-3">
                 <input class="form-check-input" type="checkbox" id="swal-wa">
@@ -804,6 +850,7 @@ async function confirmarLiquidacion() {
                 tel.style.display = chk.checked ? 'block' : 'none';
                 if (chk.checked && !tel.value) tel.focus();
             });
+            if (hayNeto) atarOrigenPago();
             atarEnterConfirmarSwal(popup);
             setTimeout(() => document.getElementById('swal-pin').focus(), 300);
         },
@@ -811,12 +858,16 @@ async function confirmarLiquidacion() {
             const pin = document.getElementById('swal-pin').value;
             const mandarWa = document.getElementById('swal-wa').checked;
             const telefono = (document.getElementById('swal-tel').value || '').trim();
+            const origen = hayNeto ? document.getElementById('swal-origen').value : null;
+            const turnoId = document.getElementById('swal-turno')?.value;
+            if (hayNeto && !origen) { Swal.showValidationMessage('Elegí de dónde sale el pago'); return false; }
+            if (origen === 'CAJA' && !turnoId) { Swal.showValidationMessage('Elegí la caja'); return false; }
             if (!pin) { Swal.showValidationMessage('Ingresá tu PIN'); return false; }
             if (mandarWa && telefono.replace(/\D/g, '').length < 8) {
                 Swal.showValidationMessage('Si mandás WhatsApp, cargá el número (549 + área sin 0 + número sin 15).');
                 return false;
             }
-            return { pin, mandarWa, telefono };
+            return { pin, mandarWa, telefono, origen, turnoId };
         }
     });
 
@@ -831,7 +882,9 @@ async function confirmarLiquidacion() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 usuario_id: empleadoActivo.id, periodo_desde: desde, periodo_hasta: hasta,
-                liquidado_por: usuarioIdActual, pin_autorizante: formLiq.pin
+                liquidado_por: usuarioIdActual, pin_autorizante: formLiq.pin,
+                pago_origen: formLiq.origen,
+                turno_id: formLiq.origen === 'CAJA' ? parseInt(formLiq.turnoId, 10) : null
             })
         });
         const data = await res.json();
@@ -869,7 +922,7 @@ async function cargarLiquidaciones() {
             <tr class="${esAnulada ? 'table-secondary text-decoration-line-through' : ''}">
                 <td class="small">${formatoFechaAR(l.periodo_desde)} a ${formatoFechaAR(l.periodo_hasta)}</td>
                 <td class="text-end">$${l.monto_bruto}</td>
-                <td class="text-end fw-bold">$${l.monto_neto_pagado}</td>
+                <td class="text-end fw-bold">$${l.monto_neto_pagado}${l.pago_origen ? `<div class="small text-muted fw-normal">${TEXTO_ORIGEN_PAGO[l.pago_origen] || l.pago_origen}</div>` : ''}</td>
                 <td class="text-center"><span class="badge ${esAnulada ? 'bg-secondary' : 'bg-success'}">${l.estado}</span></td>
                 <td class="text-center">
                     ${esAnulada ? '' : `

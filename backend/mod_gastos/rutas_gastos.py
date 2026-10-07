@@ -132,6 +132,11 @@ def _es_categoria_pago_proveedor(nombre: str) -> bool:
     return "proveedor" in n
 
 
+def _es_categoria_sueldos(nombre: str) -> bool:
+    """Sueldos lo carga solo la liquidación de RRHH; a mano duplica el costo del empleado."""
+    return (nombre or "").strip().lower() == "sueldos"
+
+
 @router.get("/categorias", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def listar_categorias(incluir_inactivas: bool = False, db: sqlite3.Connection = Depends(get_db)):
     try:
@@ -141,7 +146,7 @@ def listar_categorias(incluir_inactivas: bool = False, db: sqlite3.Connection = 
             return {"categorias": [dict(c) for c in cursor.fetchall()]}
 
         # Selectores de gasto NUEVO (POS F10, Cheques y Gastos, RRHH):
-        # ocultas no, ni "pago a proveedor" (eso es tesorería, no gasto del local).
+        # ocultas no, ni "pago a proveedor" (eso es tesorería, no gasto del local), ni Sueldos (RRHH).
         cursor = db.execute("SELECT * FROM categorias_gasto WHERE IFNULL(activo, 1) = 1 ORDER BY nombre ASC")
         categorias = []
         for c in cursor.fetchall():
@@ -150,6 +155,8 @@ def listar_categorias(incluir_inactivas: bool = False, db: sqlite3.Connection = 
             if tipo != "OPERATIVO":
                 continue
             if _es_categoria_pago_proveedor(fila.get("nombre") or ""):
+                continue
+            if _es_categoria_sueldos(fila.get("nombre") or ""):
                 continue
             categorias.append(fila)
         return {"categorias": categorias}
@@ -237,6 +244,11 @@ def registrar_gasto_operativo(
             raise HTTPException(
                 status_code=400,
                 detail="Los pagos a proveedor no van en Gastos. En el POS: Retiro → Pago a proveedor. En admin: Proveedores → Pago."
+            )
+        if _es_categoria_sueldos(cat["nombre"] or ""):
+            raise HTTPException(
+                status_code=400,
+                detail="Los sueldos y adelantos van por RRHH. Si sacás plata del cajón para un empleado, hacé una Sangría con su nombre; el dueño lo carga en RRHH.",
             )
         if (cat["tipo_categoria"] or "OPERATIVO").upper() != "OPERATIVO":
             raise HTTPException(status_code=400, detail="Esa categoría no es un gasto del local.")

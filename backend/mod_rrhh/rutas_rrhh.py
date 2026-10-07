@@ -6,6 +6,7 @@ import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol, verificar_pin
 from backend.mod_lotes.rutas_lotes import ejecutar_descuento_fifo
+from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria
 
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
@@ -16,7 +17,19 @@ ZONA_AR = timezone(timedelta(hours=-3))
 ModalidadPago = Literal["MENSUAL", "JORNAL", "POR_HORA"]
 PeriodicidadPago = Literal["SEMANAL", "QUINCENAL", "MENSUAL"]
 ResolucionConsumo = Literal["DESCUENTA_SUELDO", "GASTO_LOCAL"]
-OrigenAdelanto = Literal["CAJA", "EXTERNO"]
+# De dónde estaban los billetes al pagar. CAJA = cajón del turno; CAJA_FUERTE resta su saldo;
+# MERCADOPAGO y BANCO quedan anotados hasta que esas cuentas existan en tesorería.
+# EXTERNO = pantallas viejas (origen desconocido).
+OrigenAdelanto = Literal["CAJA", "CAJA_FUERTE", "MERCADOPAGO", "BANCO", "BOLSILLO", "EXTERNO"]
+OrigenPagoSueldo = Literal["CAJA", "CAJA_FUERTE", "MERCADOPAGO", "BANCO", "BOLSILLO"]
+TEXTO_ORIGEN = {
+    "CAJA": "cajón del turno",
+    "CAJA_FUERTE": "caja fuerte",
+    "MERCADOPAGO": "Mercado Pago",
+    "BANCO": "banco",
+    "BOLSILLO": "bolsillo del dueño",
+    "EXTERNO": "sin especificar",
+}
 
 
 # =================================================================
@@ -109,6 +122,14 @@ def asegurar_tablas_rrhh():
     cols_cuenta = [c[1] for c in cursor.fetchall()]
     if 'monto_saldado' not in cols_cuenta:
         cursor.execute("ALTER TABLE movimientos_cuenta_empleado ADD COLUMN monto_saldado REAL NOT NULL DEFAULT 0")
+    if 'origen_fondos' not in cols_cuenta:
+        cursor.execute("ALTER TABLE movimientos_cuenta_empleado ADD COLUMN origen_fondos TEXT")
+
+    cursor.execute("PRAGMA table_info(liquidaciones_sueldos)")
+    cols_liq = [c[1] for c in cursor.fetchall()]
+    for col, tipo in (("pago_origen", "TEXT"), ("pago_turno_id", "INTEGER"), ("pago_movimiento_caja_id", "INTEGER")):
+        if col not in cols_liq:
+            cursor.execute(f"ALTER TABLE liquidaciones_sueldos ADD COLUMN {col} {tipo}")
 
     # La liquidación siempre usa esta fila. Insumos y el resto son gastos reales,
     # no un sueldo. (Si la tabla de categorías todavía no existe, no rompemos el arranque.)
@@ -173,6 +194,9 @@ class LiquidacionNueva(BaseModel):
     categoria_gasto_id: Optional[int] = None
     liquidado_por: int
     pin_autorizante: str
+    # De dónde sale el neto. None = pantalla vieja: no mueve ninguna caja.
+    pago_origen: Optional[OrigenPagoSueldo] = None
+    turno_id: Optional[int] = None
 
 class AnulacionLiquidacion(BaseModel):
     pin_autorizante: str
@@ -511,9 +535,16 @@ def registrar_adelanto(adelanto: AdelantoNuevo, background_tasks: BackgroundTask
                   f"[ADELANTO DE SUELDO] {adelanto.detalle}", adelanto.turno_id))
 
         cursor.execute('''
-            INSERT INTO movimientos_cuenta_empleado (usuario_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_registro)
-            VALUES (?, ?, 'ADELANTO', ?, ?, ?)
-        ''', (adelanto.usuario_id, fecha_actual, adelanto.monto, adelanto.detalle, adelanto.usuario_registro))
+            INSERT INTO movimientos_cuenta_empleado (usuario_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_registro, origen_fondos)
+            VALUES (?, ?, 'ADELANTO', ?, ?, ?, ?)
+        ''', (adelanto.usuario_id, fecha_actual, adelanto.monto, adelanto.detalle, adelanto.usuario_registro, adelanto.origen))
+        movimiento_id = cursor.lastrowid
+
+        if adelanto.origen == "CAJA_FUERTE":
+            cursor.execute("SELECT nombre_completo FROM usuarios WHERE id = ?", (adelanto.usuario_id,))
+            nombre = (cursor.fetchone() or ["empleado"])[0]
+            mover_tesoreria(cursor, "CAJA_FUERTE", -adelanto.monto, f"Adelanto a {nombre}: {adelanto.detalle}",
+                            "ADELANTO", movimiento_id, adelanto.usuario_registro)
 
         conexion.commit()
         if sale_de_caja:
@@ -526,7 +557,7 @@ def registrar_adelanto(adelanto: AdelantoNuevo, background_tasks: BackgroundTask
                 adelanto.turno_id,
             )
             return {"mensaje": f"Adelanto de ${adelanto.monto} registrado. Salió de la caja y se descuenta en la próxima liquidación."}
-        return {"mensaje": f"Adelanto de ${adelanto.monto} registrado. No salió de una caja. Se descuenta en la próxima liquidación."}
+        return {"mensaje": f"Adelanto de ${adelanto.monto} registrado (salió de: {TEXTO_ORIGEN[adelanto.origen]}). Se descuenta en la próxima liquidación."}
     except Exception as e:
         conexion.rollback()
         return {"error": str(e)}
@@ -692,7 +723,7 @@ def _id_categoria_sueldos(cursor):
 
 
 @router.post("/liquidar", dependencies=[Depends(VerificarRol(["ADMIN"]))])
-def liquidar_sueldo(liq: LiquidacionNueva):
+def liquidar_sueldo(liq: LiquidacionNueva, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -702,6 +733,13 @@ def liquidar_sueldo(liq: LiquidacionNueva):
 
         if liq.periodo_hasta < liq.periodo_desde:
             raise Exception("El período de liquidación es inválido (la fecha 'hasta' es anterior a 'desde').")
+
+        if liq.pago_origen == "CAJA":
+            if not liq.turno_id:
+                raise Exception("Elegí la caja de la que sale el efectivo.")
+            cursor.execute("SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (liq.turno_id,))
+            if not cursor.fetchone():
+                raise Exception("El turno de caja indicado no está abierto.")
 
         cursor.execute("SELECT id, nombre_completo FROM usuarios WHERE id = ?", (liq.usuario_id,))
         empleado = cursor.fetchone()
@@ -775,7 +813,43 @@ def liquidar_sueldo(liq: LiquidacionNueva):
                     WHERE id = ?
                 ''', (item['monto_aplicado'], item['movimiento_id']))
 
+        # 5. El neto sale de algún lado. El gasto ya está arriba por el bruto: esto solo mueve la plata.
+        concepto_pago = f"[SUELDO] {empleado['nombre_completo']} ({desde_str} a {hasta_str})"
+        pago_movimiento_caja_id = None
+        if liq.pago_origen and monto_neto_pagado > 0:
+            if liq.pago_origen == "CAJA":
+                cursor.execute('''
+                    INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+                    VALUES (?, ?, 'RETIRO', ?, ?, ?)
+                ''', (fecha_actual, liq.liquidado_por, monto_neto_pagado, concepto_pago, liq.turno_id))
+                pago_movimiento_caja_id = cursor.lastrowid
+            elif liq.pago_origen == "CAJA_FUERTE":
+                mover_tesoreria(cursor, "CAJA_FUERTE", -monto_neto_pagado, concepto_pago,
+                                "SUELDO", liquidacion_id, liq.liquidado_por)
+        if liq.pago_origen:
+            cursor.execute('''
+                UPDATE liquidaciones_sueldos SET pago_origen = ?, pago_turno_id = ?, pago_movimiento_caja_id = ?
+                WHERE id = ?
+            ''', (liq.pago_origen, liq.turno_id if liq.pago_origen == "CAJA" else None,
+                  pago_movimiento_caja_id, liquidacion_id))
+
         conexion.commit()
+
+        if pago_movimiento_caja_id:
+            from backend.whatsapp_puente import avisar_retiro, nombre_usuario
+            background_tasks.add_task(
+                avisar_retiro, monto_neto_pagado, concepto_pago, nombre_usuario(liq.liquidado_por), liq.turno_id,
+            )
+
+        if monto_neto_pagado <= 0:
+            nota = "El neto es $0: los descuentos cubrieron todo, no sale plata."
+        elif not liq.pago_origen:
+            nota = "No se indicó de dónde salió el pago: no se movió ninguna caja."
+        else:
+            nota = f"Pago de ${monto_neto_pagado} registrado desde: {TEXTO_ORIGEN[liq.pago_origen]}."
+            if liq.pago_origen in ("MERCADOPAGO", "BANCO"):
+                nota += " Queda anotado; esa cuenta todavía no lleva saldo en el sistema."
+
         return {
             "mensaje": f"Liquidación #{liquidacion_id} generada con éxito.",
             "liquidacion_id": liquidacion_id,
@@ -789,7 +863,7 @@ def liquidar_sueldo(liq: LiquidacionNueva):
                 "monto_neto_a_pagar": monto_neto_pagado,
                 "saldo_pendiente_arrastrado": saldo_arrastrado,
                 "detalle_descuentos": detalle_aplicaciones,
-                "nota": "Si le pagás en efectivo del cajón, recordá registrar una Sangría de Caja por el monto neto."
+                "nota": nota
             }
         }
     except Exception as e:
@@ -901,10 +975,35 @@ def anular_liquidacion(liquidacion_id: int, anulacion: AnulacionLiquidacion):
         if liq['gasto_operativo_id']:
             cursor.execute("UPDATE gastos_operativos SET estado = 'ANULADO' WHERE id = ?", (liq['gasto_operativo_id'],))
 
+        # La plata del neto vuelve a donde salió. Si el turno ya cerró, ese Z ya se contó:
+        # no se toca y se avisa.
+        aviso_pago = ""
+        neto = liq['monto_neto_pagado'] or 0
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        if liq['pago_movimiento_caja_id']:
+            cursor.execute("SELECT estado_turno FROM turnos_caja WHERE id = ?", (liq['pago_turno_id'],))
+            turno = cursor.fetchone()
+            if turno and turno['estado_turno'] == 'ABIERTO':
+                cursor.execute('''
+                    INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+                    VALUES (?, ?, 'INGRESO', ?, ?, ?)
+                ''', (fecha_actual, liq['liquidado_por'], neto,
+                      f"[ANULA SUELDO] Liquidación #{liquidacion_id}", liq['pago_turno_id']))
+                aviso_pago = f" Los ${neto} vuelven al cajón del turno #{liq['pago_turno_id']}."
+            else:
+                aviso_pago = (f" El sueldo salió del turno #{liq['pago_turno_id']}, que ya cerró: el cajón no se toca."
+                              " Si el empleado devolvió la plata, guardala en la caja fuerte y hacé un arqueo.")
+        elif liq['pago_origen'] == "CAJA_FUERTE" and neto > 0:
+            mover_tesoreria(cursor, "CAJA_FUERTE", neto, f"Anulación liquidación #{liquidacion_id}",
+                            "ANULACION", liquidacion_id, liq['liquidado_por'])
+            aviso_pago = f" Los ${neto} vuelven al saldo de la caja fuerte."
+        elif liq['pago_origen'] in ("MERCADOPAGO", "BANCO", "BOLSILLO") and neto > 0:
+            aviso_pago = f" El pago había salido de: {TEXTO_ORIGEN[liq['pago_origen']]}. Eso no se mueve solo."
+
         cursor.execute("UPDATE liquidaciones_sueldos SET estado = 'ANULADO' WHERE id = ?", (liquidacion_id,))
 
         conexion.commit()
-        return {"mensaje": "Liquidación anulada. Los días/adelantos vuelven a estar disponibles para una nueva liquidación."}
+        return {"mensaje": "Liquidación anulada. Los días/adelantos vuelven a estar disponibles para una nueva liquidación." + aviso_pago}
     except Exception as e:
         conexion.rollback()
         return {"error": str(e)}

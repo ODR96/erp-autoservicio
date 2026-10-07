@@ -214,12 +214,12 @@ async function cargarResumenMensual() {
 }
 
 // --- Etiqueta de origen del dinero: solo los orígenes que SÍ implican plata física
-// saliendo de algún lado se muestran como tal. Los movimientos de RRHH (liquidaciones de
-// sueldo y consumos regalados) son costos contables, no salidas de caja. ---
+// saliendo de algún lado se muestran como tal. La liquidación de RRHH es el costo bruto;
+// el pago del neto se registra aparte en RRHH. El consumo regalado no mueve plata. ---
 function mapearOrigenFondos(origen) {
     if (origen === 'CAJA_MAYOR') return { texto: 'Caja Fuerte', color: 'bg-success' };
     if (origen && origen.includes('CAJA_DIARIA')) return { texto: 'Cajón (POS)', color: 'bg-secondary' };
-    if (origen === 'RRHH') return { texto: 'Sin salida de caja (Sueldo)', color: 'bg-info text-dark' };
+    if (origen === 'RRHH') return { texto: 'Sueldo bruto (pago en RRHH)', color: 'bg-info text-dark' };
     if (origen === 'CONSUMO_PERSONAL') return { texto: 'Sin salida de caja (Beneficio)', color: 'bg-info text-dark' };
     return { texto: 'Sin salida de caja', color: 'bg-info text-dark' };
 }
@@ -572,6 +572,8 @@ const ORIGENES_MOV_TESORERIA = {
     PAGO_PROVEEDOR: 'Pago a proveedor',
     RETIRO_DUENO: 'Retiro del dueño',
     VENTA_DEPOSITO: 'Venta depósito',
+    ADELANTO: 'Adelanto de sueldo',
+    SUELDO: 'Sueldo',
     ARQUEO: 'Arqueo',
     ANULACION: 'Anulación'
 };

@@ -2578,9 +2578,9 @@ async function registrarMovimientoCaja(tipo) {
 
     if (tipo === 'retiro' && !esSangria) {
         inputsHtml += opcionesCategoria;
-        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (Ej: Luz, limpia, vale Juan)">`;
+        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (Ej: Luz, limpieza, flete)">`;
     } else if (tipo === 'retiro' && esSangria) {
-        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Motivo (Ej: A caja fuerte, cambio para Caja 2)">`;
+        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Motivo">`;
     } else {
         inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" placeholder="Motivo (Ej: Cambio inicial)">`;
     }
