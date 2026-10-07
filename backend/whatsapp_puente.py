@@ -238,6 +238,10 @@ def avisar_cierre_z(datos: dict):
         f"Declarado: {_plata(datos.get('declarado'))}",
         f"Diferencia: {_plata(datos.get('diferencia'))}",
     ])
+    if datos.get("queda_de_cambio") is not None:
+        lineas.append(f"Queda de cambio: {_plata(datos.get('queda_de_cambio'))}")
+        destino = {"POR_RECIBIR": " (por recibir: contalo)", "CAJA_FUERTE": " (a caja fuerte)"}.get(datos.get("destino_guardado"), "")
+        lineas.append(f"A guardar: {_plata(datos.get('a_guardar'))}{destino}")
     return enviar_whatsapp("\n".join(lineas))
 
 

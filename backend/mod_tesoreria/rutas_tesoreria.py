@@ -44,6 +44,29 @@ def asegurar_tablas_tesoreria_cuentas():
                 usuario_id INTEGER
             )
         ''')
+        # Plata declarada por alguien que no es el dueño (sobre de cierre, sangría del cajero).
+        # No suma a la cuenta hasta que el dueño la cuenta: entra lo contado, no lo declarado.
+        conexion.execute('''
+            CREATE TABLE IF NOT EXISTS tesoreria_pendientes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_hora TEXT NOT NULL,
+                cuenta TEXT NOT NULL,
+                monto_declarado REAL NOT NULL,
+                concepto TEXT NOT NULL,
+                origen_tipo TEXT NOT NULL,
+                origen_id INTEGER,
+                turno_id INTEGER,
+                usuario_id INTEGER,
+                estado TEXT NOT NULL DEFAULT 'PENDIENTE',
+                recibido_en TEXT,
+                recibido_por INTEGER,
+                monto_contado REAL,
+                diferencia REAL,
+                nota TEXT,
+                movimiento_id INTEGER
+            )
+        ''')
+        conexion.execute("CREATE INDEX IF NOT EXISTS idx_tes_pend_estado ON tesoreria_pendientes (estado, fecha_hora)")
         conexion.commit()
     finally:
         conexion.close()
@@ -93,6 +116,22 @@ def mover_tesoreria(cursor, cuenta: str, monto: float, concepto: str, origen_tip
     return cursor.lastrowid
 
 
+def crear_pendiente(cursor, cuenta: str, monto: float, concepto: str, origen_tipo: str,
+                    origen_id=None, turno_id=None, usuario_id=None):
+    """Misma transacción que el llamador. No toca el saldo: queda por recibir."""
+    if cuenta not in CUENTAS:
+        raise ErrorTesoreria("Cuenta de tesorería inválida.")
+    monto = round(float(monto or 0), 2)
+    if monto < 0.01:
+        return None
+    cursor.execute('''
+        INSERT INTO tesoreria_pendientes (fecha_hora, cuenta, monto_declarado, concepto, origen_tipo, origen_id, turno_id, usuario_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S"), cuenta, monto, (concepto or "")[:200],
+          origen_tipo, origen_id, turno_id, usuario_id))
+    return cursor.lastrowid
+
+
 def _usuario_de(sesion):
     try:
         return int((sesion or {}).get("sub"))
@@ -119,10 +158,15 @@ def estado_cuenta(cuenta: str, limite: int = 50):
             FROM tesoreria_movimientos WHERE cuenta = ?
             ORDER BY fecha_hora DESC, id DESC LIMIT ?
         ''', (cuenta, limite)).fetchall()
+        por_recibir = cursor.execute(
+            "SELECT COUNT(*), IFNULL(SUM(monto_declarado), 0) FROM tesoreria_pendientes WHERE cuenta = ? AND estado = 'PENDIENTE'",
+            (cuenta,),
+        ).fetchone()
         return {
             "cuenta": cuenta,
             "nombre": CUENTAS[cuenta],
             "saldo": saldo_cuenta(cursor, cuenta),
+            "por_recibir": {"cantidad": por_recibir[0], "total": round(float(por_recibir[1] or 0), 2)},
             "inicializada": ultimo is not None,
             "ultimo_arqueo": dict(ultimo) if ultimo else None,
             "movimientos": [dict(m) for m in movimientos],
@@ -183,5 +227,86 @@ def registrar_arqueo(body: Arqueo, sesion: dict = Depends(VerificarRol(["ADMIN"]
     except Exception:
         conexion.rollback()
         raise HTTPException(status_code=500, detail="No se pudo registrar el arqueo.")
+    finally:
+        conexion.close()
+
+
+@router.get("/pendientes", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def listar_pendientes(cuenta: str = "CAJA_FUERTE", recibidos: int = 10):
+    """Por recibir (todos) + los últimos recibidos, para ver diferencias de cada sobre."""
+    cuenta = (cuenta or "").upper()
+    if cuenta not in CUENTAS:
+        raise HTTPException(status_code=404, detail="Cuenta de tesorería inválida.")
+    recibidos = max(0, min(int(recibidos or 0), 50))
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    try:
+        consulta = '''
+            SELECT p.id, p.fecha_hora, p.monto_declarado, p.concepto, p.origen_tipo, p.turno_id, p.estado,
+                   p.recibido_en, p.monto_contado, p.diferencia, p.nota,
+                   IFNULL(u.nombre_completo, '') AS declarado_por
+            FROM tesoreria_pendientes p
+            LEFT JOIN usuarios u ON u.id = p.usuario_id
+            WHERE p.cuenta = ? AND p.estado = ?
+        '''
+        pendientes = conexion.execute(consulta + " ORDER BY p.fecha_hora ASC, p.id ASC", (cuenta, "PENDIENTE")).fetchall()
+        ultimos = conexion.execute(consulta + " ORDER BY p.recibido_en DESC, p.id DESC LIMIT ?", (cuenta, "RECIBIDO", recibidos)).fetchall()
+        return {
+            "pendientes": [dict(p) for p in pendientes],
+            "total_pendiente": round(sum(float(p["monto_declarado"] or 0) for p in pendientes), 2),
+            "recibidos": [dict(p) for p in ultimos],
+        }
+    finally:
+        conexion.close()
+
+
+class RecepcionPendiente(BaseModel):
+    monto_contado: float
+    nota: Optional[str] = ""
+
+
+@router.post("/pendientes/{pendiente_id}/recibir")
+def recibir_pendiente(pendiente_id: int, body: RecepcionPendiente, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    contado = round(float(body.monto_contado or 0), 2)
+    if contado < 0:
+        raise HTTPException(status_code=400, detail="Lo contado no puede ser negativo.")
+    nota = " ".join((body.nota or "").split())[:200]
+    usuario_id = _usuario_de(sesion)
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        p = cursor.execute("SELECT * FROM tesoreria_pendientes WHERE id = ?", (pendiente_id,)).fetchone()
+        if not p:
+            raise HTTPException(status_code=404, detail="Ese pendiente no existe.")
+        if p["estado"] != "PENDIENTE":
+            raise HTTPException(status_code=400, detail="Ese pendiente ya se recibió.")
+        diferencia = round(contado - float(p["monto_declarado"] or 0), 2)
+        movimiento_id = mover_tesoreria(
+            cursor, p["cuenta"], contado,
+            f"{p['concepto']} (contado por el dueño)", p["origen_tipo"], p["id"], usuario_id,
+        )
+        ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute('''
+            UPDATE tesoreria_pendientes
+            SET estado = 'RECIBIDO', recibido_en = ?, recibido_por = ?, monto_contado = ?, diferencia = ?, nota = ?, movimiento_id = ?
+            WHERE id = ?
+        ''', (ahora, usuario_id, contado, diferencia, nota or None, movimiento_id, pendiente_id))
+        conexion.commit()
+        if abs(diferencia) < 0.01:
+            mensaje = f"Recibido: ${contado:,.2f}. Coincide con lo declarado."
+        else:
+            mensaje = (f"Recibido: ${contado:,.2f}. {'Faltaron' if diferencia < 0 else 'Sobraron'} ${abs(diferencia):,.2f} "
+                       f"contra lo declarado; queda anotado en ese sobre.")
+        return {"mensaje": mensaje, "diferencia": diferencia}
+    except HTTPException:
+        conexion.rollback()
+        raise
+    except ErrorTesoreria as e:
+        conexion.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo registrar la recepción.")
     finally:
         conexion.close()

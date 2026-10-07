@@ -7,7 +7,7 @@ from fastapi import BackgroundTasks
 import requests
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
-from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria
+from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria, crear_pendiente
 
 def asegurar_tabla_cajas_fisicas():
     conexion = obtener_conexion()
@@ -29,6 +29,24 @@ def asegurar_tabla_cajas_fisicas():
     conexion.close()
 
 asegurar_tabla_cajas_fisicas()
+
+
+def asegurar_columnas_fondo_turno():
+    """fondo_dejado: cambio que el cierre deja en el cajón. fondo_esperado/motivo_apertura:
+    lo que el siguiente turno debía encontrar y por qué abrió con otro monto."""
+    conexion = obtener_conexion()
+    try:
+        for col, tipo in (("fondo_dejado", "REAL"), ("fondo_esperado", "REAL"), ("motivo_apertura", "TEXT")):
+            try:
+                conexion.execute(f"ALTER TABLE turnos_caja ADD COLUMN {col} {tipo}")
+            except sqlite3.OperationalError:
+                pass
+        conexion.commit()
+    finally:
+        conexion.close()
+
+
+asegurar_columnas_fondo_turno()
 
 
 def asegurar_tabla_retiros_dueno():
@@ -157,6 +175,7 @@ class AperturaCaja(BaseModel):
     caja_id: int = 1
     usuario_id: int = 1 
     monto_inicial: float
+    motivo_diferencia: Optional[str] = None
 
 class MovimientoCaja(BaseModel):
     usuario_id: int = 1
@@ -169,6 +188,8 @@ class MovimientoCaja(BaseModel):
 class CierreCaja(BaseModel):
     turno_id: int
     monto_final_declarado: float 
+    # Cambio que queda en el cajón. None = pantalla vieja o cierre forzado: no arma sobre.
+    fondo_dejado: Optional[float] = None
     
 @router.get("/cajas_fisicas")
 def listar_cajas_fisicas(payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))):
@@ -189,7 +210,7 @@ def listar_cajas_fisicas(payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGA
     return {"cajas": cajas}
 
 @router.post("/abrir", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def abrir_turno(apertura: AperturaCaja):
+def abrir_turno(apertura: AperturaCaja, background_tasks: BackgroundTasks):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
@@ -204,15 +225,49 @@ def abrir_turno(apertura: AperturaCaja):
 
         cursor.execute("SELECT id FROM turnos_caja WHERE caja_id = ? AND estado_turno = 'ABIERTO'", (apertura.caja_id,))
         if cursor.fetchone(): raise Exception("Ya hay un turno abierto en esta caja.")
-            
+
+        if apertura.monto_inicial is None or apertura.monto_inicial < 0:
+            raise Exception("El monto inicial no puede ser negativo.")
+
+        # Conteo a ciegas: el cajero no ve lo que dejó el cierre anterior. Si no coincide,
+        # recuenta o explica; el dueño recibe los dos números.
+        cursor.execute('''
+            SELECT id, fondo_dejado FROM turnos_caja
+            WHERE caja_id = ? AND estado_turno = 'CERRADO' ORDER BY id DESC LIMIT 1
+        ''', (apertura.caja_id,))
+        anterior = cursor.fetchone()
+        fondo_esperado = None
+        motivo = " ".join((apertura.motivo_diferencia or "").split())[:200]
+        if anterior and anterior[1] is not None:
+            fondo_esperado = round(float(anterior[1]), 2)
+            if abs(round(apertura.monto_inicial, 2) - fondo_esperado) >= 0.01:
+                if len(motivo) < 3:
+                    return {
+                        "error": "Lo que contaste no coincide con el cambio que dejó el turno anterior. "
+                                 "Volvé a contar; si está bien, escribí el motivo.",
+                        "requiere_motivo": True,
+                    }
+            else:
+                motivo = ""
+
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute('''
-            INSERT INTO turnos_caja (caja_id, usuario_id, fecha_hora_apertura, monto_inicial, estado_turno)
-            VALUES (?, ?, ?, ?, 'ABIERTO')
-        ''', (apertura.caja_id, apertura.usuario_id, fecha_actual, apertura.monto_inicial))
+            INSERT INTO turnos_caja (caja_id, usuario_id, fecha_hora_apertura, monto_inicial, estado_turno, fondo_esperado, motivo_apertura)
+            VALUES (?, ?, ?, ?, 'ABIERTO', ?, ?)
+        ''', (apertura.caja_id, apertura.usuario_id, fecha_actual, apertura.monto_inicial, fondo_esperado, motivo or None))
         
         turno_id = cursor.lastrowid
         conexion.commit()
+        if motivo and not caja_fisica[2]:
+            from backend.whatsapp_puente import enviar_whatsapp, nombre_usuario
+            background_tasks.add_task(
+                enviar_whatsapp,
+                f"Apertura con diferencia\n{caja_fisica[0]} - turno #{turno_id}\n"
+                f"Quién: {nombre_usuario(apertura.usuario_id)}\n"
+                f"El turno anterior (#{anterior[0]}) dejó: ${fondo_esperado:,.2f}\n"
+                f"Contó: ${apertura.monto_inicial:,.2f}\n"
+                f"Motivo: {motivo}",
+            )
         return {"mensaje": f"¡Turno de caja #{turno_id} abierto con éxito!", "turno_id": turno_id}
     except Exception as e:
         if conexion: conexion.close()
@@ -248,8 +303,13 @@ def registrar_movimiento(mov: MovimientoCaja, background_tasks: BackgroundTasks,
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (fecha_actual, mov.usuario_id, tipo_mayuscula, mov.monto, observacion_final, mov.turno_id))
         if tipo_mayuscula == 'RETIRO' and mov.es_sangria:
-            mover_tesoreria(cursor, "CAJA_FUERTE", mov.monto, f"Sangría turno #{mov.turno_id}: {mov.observaciones or ''}".strip(),
-                            "SANGRIA", cursor.lastrowid, mov.usuario_id)
+            concepto = f"Sangría turno #{mov.turno_id}: {mov.observaciones or ''}".strip()
+            # Solo el dueño suma directo: lo de otro queda por recibir hasta que él lo cuente.
+            if _rol_de(sesion) == "ADMIN":
+                mover_tesoreria(cursor, "CAJA_FUERTE", mov.monto, concepto, "SANGRIA", cursor.lastrowid, mov.usuario_id)
+            else:
+                crear_pendiente(cursor, "CAJA_FUERTE", mov.monto, concepto, "SANGRIA", cursor.lastrowid,
+                                mov.turno_id, mov.usuario_id)
 
         conexion.commit()
         if tipo_mayuscula == 'RETIRO':
@@ -281,6 +341,10 @@ def _usuario_de(sesion):
         return int((sesion or {}).get("sub"))
     except (TypeError, ValueError):
         return None
+
+
+def _rol_de(sesion):
+    return ((sesion or {}).get("rol") or "").upper()
 
 
 @router.post("/retiro_dueno")
@@ -401,8 +465,9 @@ def anular_retiro_dueno(retiro_id: int, sesion: dict = Depends(VerificarRol(["AD
         conexion.close()
 
 
-@router.put("/cerrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
+@router.put("/cerrar")
+def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks,
+                 sesion: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -410,6 +475,16 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         cursor.execute("SELECT * FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (cierre.turno_id,))
         turno = cursor.fetchone()
         if not turno: raise Exception("Ese turno no existe o ya fue cerrado.")
+
+        fondo_dejado = None
+        a_guardar = 0.0
+        if cierre.fondo_dejado is not None:
+            fondo_dejado = round(float(cierre.fondo_dejado), 2)
+            if fondo_dejado < 0:
+                raise Exception("El cambio que queda no puede ser negativo.")
+            if fondo_dejado - cierre.monto_final_declarado > 0.009:
+                raise Exception("El cambio que queda no puede ser más de lo que contaste.")
+            a_guardar = round(cierre.monto_final_declarado - fondo_dejado, 2)
             
         fecha_cierre = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
@@ -438,9 +513,23 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
         
         cursor.execute('''
             UPDATE turnos_caja 
-            SET fecha_hora_cierre = ?, monto_final_sistema = ?, monto_final_declarado = ?, diferencia = ?, estado_turno = 'CERRADO'
+            SET fecha_hora_cierre = ?, monto_final_sistema = ?, monto_final_declarado = ?, diferencia = ?, estado_turno = 'CERRADO',
+                fondo_dejado = ?
             WHERE id = ?
-        ''', (fecha_cierre, monto_esperado_sistema, cierre.monto_final_declarado, diferencia, cierre.turno_id))
+        ''', (fecha_cierre, monto_esperado_sistema, cierre.monto_final_declarado, diferencia, fondo_dejado, cierre.turno_id))
+
+        # Lo que no queda de cambio sale del cajón. Si cierra el dueño, él lo contó: entra a la
+        # caja fuerte. Si cierra otro, es un sobre por recibir hasta que el dueño lo cuente.
+        destino_guardado = None
+        if a_guardar >= 0.01:
+            concepto = f"Cierre turno #{cierre.turno_id}"
+            if _rol_de(sesion) == "ADMIN":
+                mover_tesoreria(cursor, "CAJA_FUERTE", a_guardar, concepto, "CIERRE_TURNO", cierre.turno_id, _usuario_de(sesion))
+                destino_guardado = "CAJA_FUERTE"
+            else:
+                crear_pendiente(cursor, "CAJA_FUERTE", a_guardar, concepto, "CIERRE_TURNO", cierre.turno_id,
+                                cierre.turno_id, _usuario_de(sesion) or turno['usuario_id'])
+                destino_guardado = "POR_RECIBIR"
 
         cursor.execute("SELECT nombre_completo FROM usuarios WHERE id = ?", (turno['usuario_id'],))
         fila_cajero = cursor.fetchone()
@@ -472,6 +561,9 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
             "esperado": monto_esperado_sistema,
             "declarado": cierre.monto_final_declarado,
             "diferencia": diferencia,
+            "queda_de_cambio": fondo_dejado,
+            "a_guardar": a_guardar,
+            "destino_guardado": destino_guardado,
         }
         background_tasks.add_task(
             disparar_avisos_cierre,
@@ -500,7 +592,10 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
                 "retiros_y_gastos": total_retiros,
                 "sistema_esperaba": monto_esperado_sistema,
                 "vos_declaraste": cierre.monto_final_declarado,
-                "diferencia": diferencia
+                "diferencia": diferencia,
+                "queda_de_cambio": fondo_dejado,
+                "a_guardar": a_guardar if fondo_dejado is not None else None,
+                "destino_guardado": destino_guardado,
             }
         }
     except Exception as e:

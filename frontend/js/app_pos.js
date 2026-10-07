@@ -616,22 +616,48 @@ function filtrarHistorialVentas() {
     });
 }
 
-async function iniciarTurno() {
+async function iniciarTurno(motivoDiferencia = null) {
     const monto = parseFloat(document.getElementById("montoApertura").value);
     if (isNaN(monto) || monto < 0) return Swal.fire('Atención', 'Ingrese un monto inicial.', 'warning');
     Swal.fire({ title: 'Abriendo...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     try {
         const payload = { caja_id: terminal_id, usuario_id: empleadoLogueado.id, monto_inicial: monto };
+        if (motivoDiferencia) payload.motivo_diferencia = motivoDiferencia;
         const response = await apiFetch(`${obtenerBaseUrl()}/caja/abrir`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await response.json();
+        if (data.requiere_motivo) {
+            // No se muestra cuánto dejó el turno anterior: el conteo es a ciegas.
+            // El modal de Bootstrap le roba el foco al input de Swal: se oculta mientras.
+            modalApertura.hide();
+            const { value: motivo, dismiss } = await Swal.fire({
+                title: 'No coincide',
+                text: data.error,
+                input: 'text',
+                inputPlaceholder: 'Motivo (Ej: faltaban monedas)',
+                showCancelButton: true,
+                confirmButtonText: 'Abrir igual',
+                cancelButtonText: 'Volver a contar',
+                inputValidator: (v) => (!v || v.trim().length < 3) ? 'Escribí el motivo' : undefined
+            });
+            if (dismiss || !motivo) {
+                modalApertura.show();
+                const input = document.getElementById("montoApertura");
+                setTimeout(() => { input.focus(); input.select(); }, 500);
+                return;
+            }
+            return iniciarTurno(motivo.trim());
+        }
         if (data.error) throw new Error(data.error);
 
         cajaAbierta = true; turnoActualId = data.turno_id;
         modalApertura.hide(); actualizarInfoCabecera(data.turno_id);
         Swal.fire({ title: '¡Caja Abierta!', icon: 'success', timer: 1500, showConfirmButton: false });
         setTimeout(() => inputScan.focus(), 1500);
-    } catch (error) { Swal.fire('Error', error.message, 'error'); }
+    } catch (error) {
+        await Swal.fire('Error', error.message, 'error');
+        if (!cajaAbierta) modalApertura.show();
+    }
 }
 
 function pressNumpad(n) { inputScan.value += n; inputScan.focus(); }
@@ -2944,6 +2970,10 @@ function imprimirTicketCaja(tipo, payload, montoDeclaradoManual = 0) {
         <span>${diferencia < 0 ? 'FALTANTE:' : 'SOBRANTE:'}</span> 
         <span>$${Math.abs(diferencia).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
     </div>
+    ${d.queda_de_cambio != null ? `
+    <div class="divisor"></div>
+    <div class="fila"><span>Queda de cambio:</span> <span>$${Number(d.queda_de_cambio).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>
+    <div class="fila bold"><span>A guardar:</span> <span>$${Number(d.a_guardar || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></div>` : ''}
 `;
     } else {
         html += `<div class="center mt-2 small">Datos de fondo de caja ocultos por seguridad.</div>`;
@@ -2994,27 +3024,55 @@ async function cierreZ() {
     if (carrito.length > 0) return Swal.fire('Error', 'Anule la venta en curso antes de cerrar la caja.', 'error');
     modalGestion.hide();
 
-    const { value: montoDeclarado } = await Swal.fire({
+    const { value: conteoZ } = await Swal.fire({
         title: 'CIERRE Z (Finalizar Turno)',
-        text: 'Ingrese el dinero físico (billetes) que hay en el cajón ahora mismo:',
-        input: 'number',
-        inputPlaceholder: 'Ej: 56000',
+        html: `
+            <label class="form-label small fw-bold d-block text-start mt-2">Billetes que hay en el cajón ahora</label>
+            <input id="swal-z-total" type="number" inputmode="decimal" min="0" class="swal2-input mt-0" placeholder="Ej: 110000">
+            <label class="form-label small fw-bold d-block text-start mt-3">De eso, queda de cambio para el próximo turno</label>
+            <input id="swal-z-cambio" type="number" inputmode="decimal" min="0" class="swal2-input mt-0" placeholder="Ej: 10000">
+            <div id="swal-z-guardar" class="fw-bold mt-3"></div>`,
+        focusConfirm: false,
         showCancelButton: true,
         confirmButtonColor: '#d33',
         confirmButtonText: 'Cerrar Turno',
-        preConfirm: (val) => {
-            if (!val || val < 0) Swal.showValidationMessage('Ingrese un monto válido');
-            return parseFloat(val);
+        didOpen: (popup) => {
+            const total = document.getElementById('swal-z-total');
+            const cambio = document.getElementById('swal-z-cambio');
+            const guardar = document.getElementById('swal-z-guardar');
+            const recalcular = () => {
+                const t = parseFloat(total.value), c = parseFloat(cambio.value);
+                guardar.textContent = (Number.isFinite(t) && Number.isFinite(c) && c <= t)
+                    ? `A guardar: $${(t - c).toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : '';
+            };
+            total.addEventListener('input', recalcular);
+            cambio.addEventListener('input', recalcular);
+            popup.querySelectorAll('input').forEach(el => el.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                if (el === total) cambio.focus(); else Swal.clickConfirm();
+            }));
+            setTimeout(() => total.focus(), 200);
+        },
+        preConfirm: () => {
+            const totalTxt = document.getElementById('swal-z-total').value;
+            const cambioTxt = document.getElementById('swal-z-cambio').value;
+            const total = parseFloat(totalTxt), cambio = parseFloat(cambioTxt);
+            if (totalTxt === '' || !Number.isFinite(total) || total < 0) { Swal.showValidationMessage('Cargá los billetes del cajón'); return false; }
+            if (cambioTxt === '' || !Number.isFinite(cambio) || cambio < 0) { Swal.showValidationMessage('Cargá cuánto queda de cambio (0 si no queda nada)'); return false; }
+            if (cambio > total) { Swal.showValidationMessage('El cambio no puede ser más de lo que hay en el cajón'); return false; }
+            return { total, cambio };
         }
     });
 
-    if (montoDeclarado !== undefined) {
+    if (conteoZ !== undefined) {
+        const montoDeclarado = conteoZ.total;
         Swal.fire({ title: 'Cerrando caja...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
         try {
             const res = await apiFetch(`${obtenerBaseUrl()}/caja/cerrar`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ turno_id: turnoActualId, monto_final_declarado: montoDeclarado })
+                body: JSON.stringify({ turno_id: turnoActualId, monto_final_declarado: montoDeclarado, fondo_dejado: conteoZ.cambio })
             });
 
             const data = await res.json();
@@ -3031,9 +3089,17 @@ async function cierreZ() {
             cajaAbierta = false;
             turnoActualId = null;
 
+            const resZ = data.resumen || {};
+            const plata = (n) => `$${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
+            let textoGuardar = '';
+            if (resZ.destino_guardado === 'POR_RECIBIR') {
+                textoGuardar = `Guardá ${plata(resZ.a_guardar)} en la caja y dejá ${plata(resZ.queda_de_cambio)} de cambio. El dueño lo cuenta y confirma. `;
+            } else if (resZ.destino_guardado === 'CAJA_FUERTE') {
+                textoGuardar = `${plata(resZ.a_guardar)} entraron a la caja fuerte. Quedan ${plata(resZ.queda_de_cambio)} de cambio. `;
+            }
             await Swal.fire({
                 title: '¡Caja Cerrada!',
-                text: 'El turno se cerró correctamente. Esperá que termine de imprimir el comprobante antes de salir.',
+                text: textoGuardar + 'Esperá que termine de imprimir el comprobante antes de salir.',
                 icon: 'success',
                 confirmButtonText: '<i class="bi bi-box-arrow-right"></i> Salir del POS',
                 allowOutsideClick: false

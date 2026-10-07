@@ -572,6 +572,7 @@ const ORIGENES_MOV_TESORERIA = {
     PAGO_PROVEEDOR: 'Pago a proveedor',
     RETIRO_DUENO: 'Retiro del dueño',
     VENTA_DEPOSITO: 'Venta depósito',
+    CIERRE_TURNO: 'Cierre de turno',
     ADELANTO: 'Adelanto de sueldo',
     SUELDO: 'Sueldo',
     ARQUEO: 'Arqueo',
@@ -593,6 +594,13 @@ async function cargarCajaFuerte() {
             const dif = Number(a.diferencia) || 0;
             const textoDif = Math.abs(dif) < 0.01 ? 'coincidió' : (dif > 0 ? `sobraban ${formatoPesos(dif)}` : `faltaban ${formatoPesos(-dif)}`);
             estadoEl.innerText = `Último arqueo: ${String(a.fecha_hora || '').slice(0, 16)} (${textoDif}).`;
+        }
+        const btnPend = document.getElementById('btnPorRecibir');
+        const pend = data.por_recibir || { cantidad: 0, total: 0 };
+        if (btnPend) {
+            btnPend.style.display = pend.cantidad > 0 ? 'inline-block' : 'none';
+            document.getElementById('txtPorRecibir').innerText =
+                `Por recibir: ${formatoPesos(pend.total)} (${pend.cantidad} ${pend.cantidad === 1 ? 'sobre' : 'sobres'}) — no suma hasta que lo cuentes`;
         }
         return data;
     } catch (e) {
@@ -659,6 +667,114 @@ async function hacerArqueoCajaFuerte() {
     }
 }
 
+// Sobres de cierre y sangrías del cajero: no suman hasta que el dueño los cuenta.
+let pendientesCajaFuerte = [];
+
+function difPendienteHtml(dif) {
+    const d = Number(dif) || 0;
+    if (Math.abs(d) < 0.01) return '<span class="text-success">coincidió</span>';
+    return `<span class="text-danger fw-bold">${d < 0 ? 'faltaron' : 'sobraron'} ${formatoPesos(Math.abs(d))}</span>`;
+}
+
+async function verPorRecibir() {
+    let data;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/pendientes?cuenta=CAJA_FUERTE&recibidos=10');
+        data = await leerRespuestaGasto(res);
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+        return;
+    }
+    pendientesCajaFuerte = data.pendientes || [];
+    const filasPend = pendientesCajaFuerte.length === 0
+        ? '<tr><td colspan="3" class="py-3 text-muted">No hay nada por recibir.</td></tr>'
+        : pendientesCajaFuerte.map(p => `
+            <tr>
+                <td class="text-start">
+                    <div class="fw-bold">${escGasto(ORIGENES_MOV_TESORERIA[p.origen_tipo] || p.origen_tipo)} · ${escGasto(p.declarado_por || 'Sin nombre')}</div>
+                    <div class="small text-muted">${escGasto(String(p.fecha_hora || '').slice(0, 16))} · ${escGasto(p.concepto)}</div>
+                </td>
+                <td class="text-end fw-bold text-nowrap">${formatoPesos(p.monto_declarado)}</td>
+                <td class="text-end"><button type="button" class="btn btn-sm btn-warning fw-bold" onclick="recibirPendiente(${Number(p.id)})">Contar</button></td>
+            </tr>`).join('');
+    const filasRec = (data.recibidos || []).map(p => `
+            <tr>
+                <td class="text-start small">
+                    <div>${escGasto(ORIGENES_MOV_TESORERIA[p.origen_tipo] || p.origen_tipo)} · ${escGasto(p.declarado_por || 'Sin nombre')}</div>
+                    <div class="text-muted">${escGasto(String(p.fecha_hora || '').slice(5, 16))} → contado ${escGasto(String(p.recibido_en || '').slice(5, 16))}${p.nota ? ' · ' + escGasto(p.nota) : ''}</div>
+                </td>
+                <td class="text-end small text-nowrap">${formatoPesos(p.monto_declarado)} → ${formatoPesos(p.monto_contado)}</td>
+                <td class="text-end small text-nowrap">${difPendienteHtml(p.diferencia)}</td>
+            </tr>`).join('');
+    Swal.fire({
+        title: 'Por recibir en la caja fuerte',
+        width: 680,
+        html: `
+            <p class="small text-muted mb-2">Lo declaró el cajero. Entra a la caja fuerte lo que cuentes vos, no lo declarado.</p>
+            <div class="table-responsive" style="max-height:300px; overflow-y:auto;">
+                <table class="table table-dark table-sm align-middle mb-0"><tbody>${filasPend}</tbody></table>
+            </div>
+            ${filasRec ? `<h6 class="text-start text-muted mt-4 mb-2">Últimos recibidos</h6>
+            <div class="table-responsive" style="max-height:220px; overflow-y:auto;">
+                <table class="table table-dark table-sm align-middle mb-0"><tbody>${filasRec}</tbody></table>
+            </div>` : ''}`,
+        background: '#111C2A', color: '#fff',
+        showConfirmButton: false,
+        showCloseButton: true
+    });
+}
+
+async function recibirPendiente(id) {
+    const p = pendientesCajaFuerte.find(x => Number(x.id) === Number(id));
+    if (!p) return;
+    const { value: form } = await Swal.fire({
+        title: 'Contar sobre',
+        html: `
+            <p class="small text-muted mb-2">${escGasto(ORIGENES_MOV_TESORERIA[p.origen_tipo] || p.origen_tipo)} · ${escGasto(p.declarado_por || 'Sin nombre')} · ${escGasto(String(p.fecha_hora || '').slice(0, 16))}<br>
+            Declaró <b>${formatoPesos(p.monto_declarado)}</b>. Contá y cargá lo que hay de verdad.</p>
+            <input id="swal-pend-monto" type="number" inputmode="decimal" step="0.01" min="0" class="swal2-input form-control-dark w-75 mx-auto" placeholder="Lo que contaste ($)">
+            <div id="swal-pend-dif" class="small fw-bold mt-2"></div>
+            <input id="swal-pend-nota" type="text" maxlength="200" autocomplete="off" class="swal2-input form-control-dark w-75 mx-auto" placeholder="Nota (opcional)">`,
+        background: '#111C2A', color: '#fff',
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Guardar en caja fuerte',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#7c3aed',
+        didOpen: (popup) => {
+            const monto = document.getElementById('swal-pend-monto');
+            const dif = document.getElementById('swal-pend-dif');
+            monto.addEventListener('input', () => {
+                if (monto.value === '') { dif.innerText = ''; return; }
+                const d = (parseFloat(monto.value) || 0) - Number(p.monto_declarado);
+                dif.className = `small fw-bold mt-2 ${Math.abs(d) < 0.01 ? 'text-success' : 'text-danger'}`;
+                dif.innerText = Math.abs(d) < 0.01 ? 'Coincide con lo declarado.' : (d < 0 ? `Faltan ${formatoPesos(-d)}` : `Sobran ${formatoPesos(d)}`);
+            });
+            popup.querySelectorAll('input').forEach(el => {
+                el.addEventListener('keypress', (e) => { if (e.key === 'Enter') Swal.clickConfirm(); });
+            });
+            setTimeout(() => monto.focus(), 300);
+        },
+        preConfirm: () => {
+            const valor = document.getElementById('swal-pend-monto').value;
+            const contado = parseFloat(valor);
+            if (valor === '' || !Number.isFinite(contado) || contado < 0) { Swal.showValidationMessage('Cargá lo que contaste'); return false; }
+            return { monto_contado: contado, nota: document.getElementById('swal-pend-nota').value.trim() };
+        }
+    });
+    if (!form) return verPorRecibir();
+    try {
+        Swal.fire({ title: 'Guardando...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        const res = await apiFetchSeguro(`/tesoreria/pendientes/${Number(id)}/recibir`, { method: 'POST', body: JSON.stringify(form) });
+        const r = await leerRespuestaGasto(res);
+        await Swal.fire({ icon: Math.abs(Number(r.diferencia) || 0) < 0.01 ? 'success' : 'warning', title: 'Recibido', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        await cargarCajaFuerte();
+        verPorRecibir();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
 async function verMovimientosCajaFuerte() {
     const data = await cargarCajaFuerte();
     if (!data) {
@@ -704,6 +820,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnArqueo) btnArqueo.addEventListener('click', hacerArqueoCajaFuerte);
     const btnMovs = document.getElementById('btnMovsCajaFuerte');
     if (btnMovs) btnMovs.addEventListener('click', verMovimientosCajaFuerte);
+    const btnPend = document.getElementById('btnPorRecibir');
+    if (btnPend) btnPend.addEventListener('click', verPorRecibir);
     const btnGestion = document.getElementById('btnGestionCategorias');
     if (btnGestion) btnGestion.addEventListener('click', abrirGestionCategorias);
     const btnRetiro = document.getElementById('btnRetiroDueno');
