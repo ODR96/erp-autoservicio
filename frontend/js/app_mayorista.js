@@ -37,6 +37,12 @@ window.fetch = async function() {
 let pedidoActual = [];
 let clientesMayGlobales = [];
 
+function escMay(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     cargarClientesMay();
 
@@ -58,7 +64,8 @@ async function cargarClientesMay() {
         
         const select = document.getElementById('selectClienteMay');
         clientesMayGlobales.forEach(c => {
-            select.innerHTML += `<option value="${c.id}">${c.nombre_completo} (CUIT: ${c.cuit || 'S/D'})</option>`;
+            const bloqueada = Number(c.bloqueado) ? ' [BLOQUEADA]' : '';
+            select.innerHTML += `<option value="${c.id}">${escMay(c.nombre_completo)} (CUIT: ${escMay(c.cuit || 'S/D')})${bloqueada}</option>`;
         });
 
         // Evento para mostrar la deuda si elegimos un cliente con cuenta
@@ -70,7 +77,8 @@ async function cargarClientesMay() {
                 const cli = clientesMayGlobales.find(x => x.id == this.value);
                 document.getElementById('cuitClienteMay').innerText = cli.cuit || '-';
                 const divSaldo = infoDiv.querySelector('.text-danger');
-                divSaldo.innerText = `$ ${cli.saldo_actual_deudor.toFixed(2)}`;
+                divSaldo.innerText = `$ ${(Number(cli.saldo_actual_deudor) || 0).toFixed(2)}`
+                    + (Number(cli.bloqueado) ? ' · CUENTA BLOQUEADA: no se le fía' : '');
                 infoDiv.classList.remove('d-none');
             }
         });
@@ -463,8 +471,8 @@ async function imprimirRemitoA5(docId) {
                 </div>
                 
                 <div class="info-box">
-                    <div><b>Cliente:</b> ${cab.nombre_completo || 'Consumidor Final'}</div>
-                    <div><b>CUIT/DNI:</b> ${cab.cuit || 'S/D'}</div>
+                    <div><b>Cliente:</b> ${escMay(cab.nombre_completo || 'Consumidor Final')}</div>
+                    <div><b>CUIT/DNI:</b> ${escMay(cab.cuit || 'S/D')}</div>
                 </div>
 
                 <table>
@@ -690,7 +698,7 @@ async function verDetallePedido(docId) {
         let htmlTabla = `
             <div class="text-start mb-3 border-bottom pb-2">
                 <span class="badge bg-secondary mb-1">${cab.estado.replace(/_/g, ' ')}</span><br>
-                <b>Cliente:</b> ${cab.nombre_completo || 'Consumidor Final'} <br>
+                <b>Cliente:</b> ${escMay(cab.nombre_completo || 'Consumidor Final')} <br>
                 <small class="text-muted">Fecha: ${cab.fecha_hora}</small>
             </div>
             <table class="table table-sm table-hover text-start small border">
@@ -786,7 +794,7 @@ async function imprimirPicking(docId) {
                 </div>
                 
                 <div class="info">
-                    <strong>Cliente Destino:</strong> ${cab.nombre_completo || 'Consumidor Final'} <br>
+                    <strong>Cliente Destino:</strong> ${escMay(cab.nombre_completo || 'Consumidor Final')} <br>
                     <strong>Fecha de Emisión:</strong> ${cab.fecha_hora} <br>
                     <strong>Estado Logístico:</strong> AUTORIZADO PARA ENTREGA
                 </div>
@@ -859,7 +867,7 @@ async function cobrarPedidoDeposito(docId) {
             body: JSON.stringify({ metodo_pago: metodo })
         });
         const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        if (data.error) throw new Error(String(data.error).replace(/^CUENTA_BLOQUEADA:\s*/, ''));
         await Swal.fire('Cobrado', data.mensaje || 'Queda listo para entregar.', 'success');
         cargarMonitorPedidos();
         imprimirRemitoA5(docId);

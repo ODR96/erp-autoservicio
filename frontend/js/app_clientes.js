@@ -72,6 +72,12 @@ document.addEventListener('DOMContentLoaded', () => {
     iniciarNavegacionTeclado();
 });
 
+function escCli(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
 function plataCli(n) {
     return `$ ${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
 }
@@ -100,6 +106,9 @@ async function cargarClientes() {
             if (!d) return { ...c, vencido: 0, abierto: 0 };
             return { ...c, ...d };
         });
+        clientesGlobales.forEach((c) => {
+            if (Number(c.bloqueado) && !mapaDeu[c.id]) deudoresGlobales.push(c);
+        });
         filtrarClientesUI();
     } catch (e) {
         console.error("Error al cargar clientes", e);
@@ -120,7 +129,7 @@ function dibujarTablaDirectorio(lista) {
     tbody.innerHTML = lista.map((c) => {
         const badgeIva = c.condicion_iva === 'Responsable Inscripto'
             ? '<span class="badge bg-primary">Resp. Inscripto</span>'
-            : `<span class="badge bg-secondary">${c.condicion_iva || 'Consumidor Final'}</span>`;
+            : `<span class="badge bg-secondary">${escCli(c.condicion_iva || 'Consumidor Final')}</span>`;
         const limite = parseFloat(c.limite_credito) || 0;
         const saldo = parseFloat(c.saldo_actual_deudor) || 0;
         const vencido = parseFloat(c.vencido) || 0;
@@ -131,10 +140,10 @@ function dibujarTablaDirectorio(lista) {
             ? `<td class="text-end fw-bold text-danger">${plataCli(vencido)}</td>`
             : `<td class="text-end text-muted">—</td>`;
         return `<tr>
-                <td class="fw-bold text-dark">${c.nombre_completo}</td>
-                <td class="text-muted">${c.cuit || '---'}</td>
+                <td class="fw-bold text-dark">${escCli(c.nombre_completo)}${Number(c.bloqueado) ? ' <span class="badge bg-dark">BLOQUEADA</span>' : ''}</td>
+                <td class="text-muted">${escCli(c.cuit || '---')}</td>
                 <td>${badgeIva}</td>
-                <td>${c.telefono_whatsapp || '---'}</td>
+                <td>${escCli(c.telefono_whatsapp || '---')}</td>
                 <td class="text-end text-muted">$ ${limite.toFixed(2)}</td>
                 ${tdSaldo}
                 ${tdMora}
@@ -142,6 +151,9 @@ function dibujarTablaDirectorio(lista) {
                 <td class="text-center text-nowrap">
                     <button class="btn btn-sm btn-outline-danger shadow-sm me-1" onclick="cargarDeudaManual(${c.id})" title="Anotar deuda">
                         <i class="bi bi-plus-lg"></i> Deuda
+                    </button>
+                    <button class="btn btn-sm btn-outline-dark shadow-sm me-1" onclick="cambiarBloqueoCliente(${c.id}, ${Number(c.bloqueado) ? 'true' : 'false'})" title="${Number(c.bloqueado) ? 'Desbloquear cuenta' : 'Bloquear cuenta'}">
+                        <i class="bi ${Number(c.bloqueado) ? 'bi-unlock' : 'bi-lock'}"></i>
                     </button>
                     <button class="btn btn-sm btn-outline-primary shadow-sm" onclick="abrirEditarCliente(${c.id})" title="Editar Ficha">
                         <i class="bi bi-pencil-square"></i> Editar
@@ -179,8 +191,8 @@ function dibujarListaSaldos(lista) {
         return `<button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-3 item-cliente-lista${claseMora}"
                 onclick="seleccionarCliente(${c.id})" tabindex="0" data-id="${c.id}">
                 <div class="text-start">
-                    <div class="fw-bold text-primary">${c.nombre_completo}</div>
-                    <small class="text-muted">${c.cuit || '---'}</small>
+                    <div class="fw-bold text-primary">${escCli(c.nombre_completo)}${Number(c.bloqueado) ? ' <span class="badge bg-dark">BLOQUEADA</span>' : ''}</div>
+                    <small class="text-muted">${escCli(c.cuit || '---')}</small>
                     ${mora}
                 </div>
                 <div class="text-end fs-5 ${colorClase}">${textoSaldo}</div>
@@ -228,7 +240,7 @@ function setFiltroDeuda(cual) {
 }
 
 function listaDeudoresFiltrada() {
-    const base = (deudoresGlobales || []).filter((c) => (parseFloat(c.saldo_actual_deudor) || 0) !== 0);
+    const base = (deudoresGlobales || []).filter((c) => (parseFloat(c.saldo_actual_deudor) || 0) !== 0 || Number(c.bloqueado));
     if (filtroDeudaActual === 'mora') return base.filter((c) => (parseFloat(c.vencido) || 0) > 0.05);
     if (filtroDeudaActual === 'periodo') return base.filter((c) => (parseFloat(c.abierto) || 0) > 0.05 && (parseFloat(c.vencido) || 0) <= 0.05);
     if (filtroDeudaActual === 'favor') return base.filter((c) => (parseFloat(c.saldo_actual_deudor) || 0) < 0);
@@ -331,6 +343,7 @@ async function seleccionarCliente(id) {
             cajaSaldo.className = "fw-bold text-success mb-0 opacity-75";
             cajaSaldo.innerText = plataCli(0);
         }
+        pintarBloqueoCliente(est);
         if (cajaVencido) cajaVencido.innerText = `Vencido ${plataCli(vencido)}`;
         if (cajaAbierto) cajaAbierto.innerText = `Período ${plataCli(abierto)}`;
         const btnV = document.getElementById('btnCobrarVencidoAdmin');
@@ -346,6 +359,71 @@ async function seleccionarCliente(id) {
     cargarHistorialCliente(id);
 }
 
+function pintarBloqueoCliente(est) {
+    const caja = document.getElementById('bloqueoClienteDetalle');
+    const btn = document.getElementById('btnBloqueoCliente');
+    const bloqueada = !!(est && est.bloqueado);
+    if (caja) {
+        caja.classList.toggle('d-none', !bloqueada);
+        caja.innerHTML = bloqueada
+            ? `<span class="badge bg-dark">BLOQUEADA</span> ${escCli(est.bloqueo_motivo || '')}`
+                + (est.bloqueo_fecha ? ` <span class="text-muted">· ${escCli(String(est.bloqueo_fecha).split(' ')[0])}</span>` : '')
+            : '';
+    }
+    if (btn) {
+        btn.dataset.bloqueada = bloqueada ? '1' : '0';
+        btn.innerHTML = bloqueada
+            ? '<i class="bi bi-unlock"></i> Desbloquear cuenta'
+            : '<i class="bi bi-lock"></i> Bloquear cuenta';
+    }
+}
+
+async function cambiarBloqueoCliente(idDirectorio, bloqueadaDirectorio) {
+    const id = idDirectorio ? parseInt(idDirectorio, 10) : clienteSeleccionadoId;
+    if (!id) return;
+    const btn = document.getElementById('btnBloqueoCliente');
+    const bloquear = idDirectorio ? !bloqueadaDirectorio : !(btn && btn.dataset.bloqueada === '1');
+    let motivo = '';
+    if (bloquear) {
+        const r = await Swal.fire({
+            title: 'Bloquear cuenta',
+            html: '<div class="small text-start">No se le fía en la caja ni en Venta Depósito, ni con PIN. Los pagos se siguen aceptando. Solo el Admin la desbloquea.</div>',
+            input: 'text',
+            inputPlaceholder: 'Motivo (ej: no paga hace 3 meses)',
+            inputAttributes: { maxlength: 200 },
+            showCancelButton: true,
+            confirmButtonText: 'Bloquear',
+            confirmButtonColor: '#212529',
+            inputValidator: (v) => ((v || '').trim().length < 5 ? 'Escribí el motivo (mínimo 5 caracteres).' : undefined)
+        });
+        if (!r.isConfirmed) return;
+        motivo = r.value.trim();
+    } else {
+        const r = await Swal.fire({
+            title: 'Desbloquear cuenta',
+            text: 'Vuelve a poder fiar dentro de su límite.',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Desbloquear'
+        });
+        if (!r.isConfirmed) return;
+    }
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/bloqueo/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bloquear, motivo })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error || data.detail) throw new Error(data.error || data.detail || 'No se pudo cambiar el bloqueo.');
+        await cargarClientes();
+        if (clienteSeleccionadoId === id) await seleccionarCliente(id);
+        Swal.fire('Listo', data.mensaje, 'success');
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
 function sugerirPagoCliente(cual) {
     const cliente = clientesGlobales.find(c => c.id === clienteSeleccionadoId) || deudoresGlobales.find(c => c.id === clienteSeleccionadoId);
     const est = (cliente && cliente.estado_cuenta) || cliente || {};
@@ -358,7 +436,9 @@ function sincronizarAfectaCaja() {
     const metodo = document.getElementById('metodoPagoCliente');
     const check = document.getElementById('checkAfectaCaja');
     if (!metodo || !check) return;
-    check.checked = metodo.value === 'EFECTIVO';
+    // Apagado por defecto: un cobro en la oficina no es plata del cajón del mostrador.
+    check.checked = false;
+    check.disabled = metodo.value !== 'EFECTIVO';
 }
 
 async function cargarHistorialCliente(id) {
@@ -395,9 +475,9 @@ async function cargarHistorialCliente(id) {
                              </button>`;
             }
             return `<tr>
-                    <td class="text-muted align-middle text-start">${String(m.fecha_hora || '').split(' ')[0]}</td>
-                    <td class="align-middle"><span class="badge ${esPago ? 'bg-success' : 'bg-danger'}">${m.tipo_movimiento}</span></td>
-                    <td class="small align-middle text-start">${m.detalle || ''}${htmlLineaImputacionFiado(m.aplicaciones)}</td>
+                    <td class="text-muted align-middle text-start">${escCli(String(m.fecha_hora || '').split(' ')[0])}</td>
+                    <td class="align-middle"><span class="badge ${esPago ? 'bg-success' : 'bg-danger'}">${escCli(m.tipo_movimiento)}</span></td>
+                    <td class="small align-middle text-start">${escCli(m.detalle)}${htmlLineaImputacionFiado(m.aplicaciones)}</td>
                     <td class="text-end fw-bold ${colorMonto} align-middle">${signo} $${montoValido.toFixed(2)}</td>
                     <td class="text-center align-middle">${btnAccion}</td>
                 </tr>`;
@@ -422,7 +502,7 @@ async function verDetalleTicketAdmin(ventaId) {
         data.detalle_compra.forEach(d => {
             html += `<tr>
             <td class="fw-bold">${d.cantidad}</td>
-            <td class="small">${d.nombre}</td>
+            <td class="small">${escCli(d.nombre)}</td>
             <td class="text-end fw-bold text-success">$${d.subtotal.toFixed(2)}</td>
         </tr>`;
         });
@@ -431,7 +511,7 @@ async function verDetalleTicketAdmin(ventaId) {
              <div class="text-end fw-bold fs-5 mt-2 text-danger border-top pt-2">Total Llevado: $${data.totales.total_a_pagar.toFixed(2)}</div>
              <div class="text-start mt-3 small text-muted bg-light p-2 rounded border">
                 <i class="bi bi-clock"></i> Fecha: ${data.encabezado.fecha}<br>
-                <i class="bi bi-person-badge"></i> Cajero: ${data.encabezado.cajero || '—'}
+                <i class="bi bi-person-badge"></i> Cajero: ${escCli(data.encabezado.cajero || '—')}
              </div>`;
 
         const r = await Swal.fire({
@@ -666,11 +746,11 @@ async function imprimirResumenCuenta() {
             .text-end { text-align: right; }
         </style></head><body>
             <div class="header">
-                <h2 style="margin:0; color:#1b365d;">Autoservicio 20 de Junio</h2>
+                <h2 style="margin:0; color:#1b365d;">${escCli(nombreNegocio())}</h2>
                 <p style="margin:5px 0 0 0; color:#666;">Resumen de Cuenta Corriente</p>
             </div>
             <div style="display:flex; justify-content: space-between; margin-bottom: 20px;">
-                <div><strong>Cliente:</strong> ${cliente.nombre_completo}<br><strong>DNI/CUIT:</strong> ${cliente.cuit || 'S/N'}<br><strong>Vencimiento:</strong> ${textoDiaCobro(cliente.dia_vencimiento)}</div>
+                <div><strong>Cliente:</strong> ${escCli(cliente.nombre_completo)}<br><strong>DNI/CUIT:</strong> ${escCli(cliente.cuit || 'S/N')}<br><strong>Vencimiento:</strong> ${textoDiaCobro(cliente.dia_vencimiento)}</div>
                 <div class="text-end"><strong>Fecha Emisión:</strong> ${new Date().toLocaleDateString('es-AR')}<br>
                 <strong>Saldo Final:</strong> ${cliente.saldo_actual_deudor > 0 ? '$'+cliente.saldo_actual_deudor.toFixed(2) : 'A Favor $'+Math.abs(cliente.saldo_actual_deudor).toFixed(2)}</div>
             </div>
@@ -683,15 +763,15 @@ async function imprimirResumenCuenta() {
         if(historial.length === 0) { html += `<tr><td colspan="5" style="text-align:center;">Sin movimientos</td></tr>`; }
 
         historial.forEach(m => {
-            const esPago = m.tipo_movimiento === 'PAGO';
+            const esPago = m.tipo_movimiento === 'PAGO' || m.tipo_movimiento === 'PAGO_ANULACION';
             const monto = parseFloat(m.monto) || 0;
             
             // Si es un pago, resta a la deuda. Si es otra cosa (ticket), suma a la deuda.
             if(esPago) saldoAcumulado -= monto; else saldoAcumulado += monto;
             
             html += `<tr>
-                <td style="font-size:12px; color:#555;">${m.fecha_hora}</td>
-                <td>${m.detalle}</td>
+                <td style="font-size:12px; color:#555;">${escCli(m.fecha_hora)}</td>
+                <td>${escCli(m.detalle)}</td>
                 <td class="text-end ${!esPago ? 'debe' : ''}">${!esPago ? '$'+monto.toFixed(2) : ''}</td>
                 <td class="text-end ${esPago ? 'haber' : ''}">${esPago ? '$'+monto.toFixed(2) : ''}</td>
                 <td class="text-end font-weight-bold" style="background:#fafafa;">$${saldoAcumulado.toFixed(2)}</td>
@@ -791,13 +871,15 @@ async function aplicarRecargoManual() {
     if (formValues) {
         Swal.fire({ title: 'Aplicando...', didOpen: () => Swal.showLoading() });
         try {
-            await fetch(`${obtenerBaseUrl()}/clientes/aplicar_recargo/${clienteSeleccionadoId}`, {
+            const res = await fetch(`${obtenerBaseUrl()}/clientes/aplicar_recargo/${clienteSeleccionadoId}`, {
                 method: 'PUT', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ monto: formValues.monto, motivo: formValues.motivo, usuario_id: 1 })
+                body: JSON.stringify({ monto: formValues.monto, motivo: formValues.motivo })
             });
+            const data = await res.json();
+            if (!res.ok || data.error || data.detail) throw new Error(data.error || data.detail || 'No se pudo aplicar el recargo.');
             await cargarClientes(); seleccionarCliente(clienteSeleccionadoId);
             Swal.fire('¡Aplicado!', 'La deuda se incrementó correctamente.', 'success');
-        } catch(e) { Swal.fire('Error', 'No se pudo aplicar el recargo', 'error'); }
+        } catch(e) { Swal.fire('Error', e.message || 'No se pudo aplicar el recargo', 'error'); }
     }
 }
 
@@ -826,14 +908,16 @@ async function recalcularDeudaInflacion() {
 
         if (confirm.isConfirmed) {
             Swal.fire({ title: 'Actualizando...', didOpen: () => Swal.showLoading() });
-            await fetch(`${obtenerBaseUrl()}/clientes/aplicar_recargo/${clienteSeleccionadoId}`, {
+            const resAj = await fetch(`${obtenerBaseUrl()}/clientes/aplicar_recargo/${clienteSeleccionadoId}`, {
                 method: 'PUT', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ monto: data.diferencia, motivo: "Ajuste por Inflación (Actualización a precio de góndola)", usuario_id: 1 })
+                body: JSON.stringify({ monto: data.diferencia, motivo: "Ajuste por Inflación (Actualización a precio de góndola)" })
             });
+            const aj = await resAj.json();
+            if (!resAj.ok || aj.error || aj.detail) throw new Error(aj.error || aj.detail || 'No se pudo aplicar el ajuste.');
             await cargarClientes(); seleccionarCliente(clienteSeleccionadoId);
             Swal.fire('¡Actualizado!', 'La cuenta corriente ahora refleja los precios de hoy.', 'success');
         }
-    } catch(e) { Swal.fire('Error', 'No se pudo calcular la inflación', 'error'); }
+    } catch(e) { Swal.fire('Error', e.message || 'No se pudo calcular la inflación', 'error'); }
 }
 
 // ==========================================

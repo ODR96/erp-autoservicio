@@ -6,6 +6,7 @@ import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol # <-- EL PATOVICA
 from backend.mod_ventas.rutas_ventas import costo_y_descuento_linea
+from backend.mod_clientes.rutas_clientes import exigir_cuenta_habilitada
 
 # --- CORRECCIÓN HORARIA PARA ARGENTINA ---
 ZONA_AR = timezone(timedelta(hours=-3))
@@ -155,12 +156,13 @@ def liquidar_pedido_mayorista(cursor, pedido_id, pagos, origen, turno_id=None):
         if not pedido["cliente_id"]:
             raise Exception("Para fiar el pedido tiene que tener un cliente.")
         cursor.execute(
-            "SELECT nombre_completo, saldo_actual_deudor, limite_credito FROM clientes WHERE id = ?",
+            "SELECT nombre_completo, saldo_actual_deudor, limite_credito, bloqueado, bloqueo_motivo FROM clientes WHERE id = ?",
             (pedido["cliente_id"],),
         )
         cliente = cursor.fetchone()
         if not cliente:
             raise Exception("El cliente del pedido no existe.")
+        exigir_cuenta_habilitada(cliente)
         saldo = float(cliente["saldo_actual_deudor"] or 0)
         limite = float(cliente["limite_credito"] or 0)
         if saldo + fiado > limite + 0.05:

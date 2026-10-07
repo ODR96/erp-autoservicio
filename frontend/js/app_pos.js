@@ -1091,7 +1091,7 @@ async function verResumenDetalladoFiado() {
                 </div>`;
 
         const result = await Swal.fire({
-            title: `<div class="d-flex align-items-center justify-content-center gap-2"><i class="bi bi-list-check text-primary"></i> Resumen de Cuenta</div><span class="fs-6 text-muted">${clienteFiadoActual.nombre_completo}</span>`,
+            title: `<div class="d-flex align-items-center justify-content-center gap-2"><i class="bi bi-list-check text-primary"></i> Resumen de Cuenta</div><span class="fs-6 text-muted">${escHtmlPos(clienteFiadoActual.nombre_completo)}</span>`,
             html: html,
             width: '600px',
             showCancelButton: true,
@@ -1287,7 +1287,7 @@ async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos
         if (String(error.message || '').indexOf('MORA_VENCIDA') === 0) {
             return { mora_bloqueada: true, detalle: error.message };
         }
-        Swal.fire('Venta Rechazada', error.message, 'error');
+        Swal.fire('Venta Rechazada', String(error.message || '').replace(/^CUENTA_BLOQUEADA:\s*/, ''), 'error');
         return null;
     }
 }
@@ -1880,7 +1880,7 @@ function dibujarFilasHistorial() {
         return `<tr>
             <td class="text-muted small align-middle">${String(m.fecha_hora || '').split(' ')[0]}</td>
             <td class="align-middle"><span class="badge ${esPago ? 'bg-success' : 'bg-danger'}">${m.tipo_movimiento}</span></td>
-            <td class="text-start small align-middle">${m.detalle || ''}${htmlLineaImputacionFiado(m.aplicaciones)}</td>
+            <td class="text-start small align-middle">${escHtmlPos(m.detalle)}${htmlLineaImputacionFiado(m.aplicaciones)}</td>
             <td class="fw-bold ${esPago ? 'text-success' : 'text-danger'} align-middle">${esPago ? '-' : ''}$${Number(m.monto || 0).toFixed(2)}</td>
             <td class="text-end align-middle">${acciones}</td>
         </tr>`;
@@ -1960,7 +1960,7 @@ function buscarClienteFiado() {
                     ? `<span class="badge bg-warning text-dark">$${deuda.toFixed(0)}</span>`
                     : (deuda < 0 ? `<span class="badge bg-success">A favor</span>` : `<span class="badge bg-secondary">$0</span>`));
             return `<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="seleccionarClienteDeuda(${c.id})">
-                <span class="fw-bold span-nombre text-primary">${c.nombre_completo}<br><small class="text-muted">${textoDiaCobro(c.dia_vencimiento)}</small></span>
+                <span class="fw-bold span-nombre text-primary">${escHtmlPos(c.nombre_completo)}<br><small class="text-muted">${textoDiaCobro(c.dia_vencimiento)}</small></span>
                 ${badge}
             </button>`;
         }).join('');
@@ -2116,6 +2116,7 @@ function filtrarClientesAsignacion() {
         if (vencido > 0.05) badgeDeuda = `<span class="badge bg-danger rounded-pill">Venc. $${vencido.toFixed(0)}</span>`;
         else if (deuda > 0) badgeDeuda = `<span class="badge bg-warning text-dark rounded-pill">Debe: $${deuda.toFixed(0)}</span>`;
         else if (deuda < 0) badgeDeuda = `<span class="badge bg-success rounded-pill">A Favor: $${Math.abs(deuda).toFixed(0)}</span>`;
+        if (Number(c.bloqueado)) badgeDeuda = `<span class="badge bg-dark rounded-pill me-1">BLOQUEADA</span>${badgeDeuda}`;
         return `<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" data-id="${c.id}" data-nombre="${escHtmlPos(c.nombre_completo)}" data-limite="${limite}" data-deuda="${deuda}" data-vencido="${vencido}" onclick="asignarClienteAlTicket(this)">
             <span><i class="bi bi-person-check"></i> ${escHtmlPos(c.nombre_completo)}<br><small class="text-muted">${textoDiaCobro(c.dia_vencimiento)}</small></span>
             ${badgeDeuda}
@@ -2192,6 +2193,15 @@ async function mandarACtaCte() {
         const resEst = await apiFetch(`${obtenerBaseUrl()}/clientes/estado_cuenta/${clienteSeleccionadoId}`);
         const est = await resEst.json();
         if (!resEst.ok || est.error || est.detail) throw new Error(est.error || est.detail || 'No se pudo leer la cuenta.');
+        if (est.bloqueado) {
+            return Swal.fire({
+                title: 'Cuenta bloqueada',
+                html: `${escHtmlPos(est.nombre || 'Este cliente')} no puede fiar.`
+                    + (est.bloqueo_motivo ? `<br><small class="text-muted">Motivo: ${escHtmlPos(est.bloqueo_motivo)}</small>` : '')
+                    + '<br><small>Puede pagar o llevar con otro medio. Solo el Admin la desbloquea.</small>',
+                icon: 'error'
+            });
+        }
         const vencido = Number(est.vencido) || 0;
         if (vencido > 0.05) {
             const ov = await pedirOverrideMoraFiado(est.nombre || 'Este cliente', vencido);
@@ -2275,7 +2285,10 @@ async function guardarNuevoCliente() {
     try {
         const res = await apiFetch(`${obtenerBaseUrl()}/clientes/registrar`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nombre_completo: nombre, cuit: dni, telefono_whatsapp: telefono, limite_credito: limite, dia_vencimiento: diaVencimiento })
+            body: JSON.stringify({
+                nombre_completo: nombre, cuit: dni, telefono_whatsapp: telefono, limite_credito: limite,
+                dia_vencimiento: diaVencimiento, pin_autorizacion: sesionEsJefe() ? null : pin
+            })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);

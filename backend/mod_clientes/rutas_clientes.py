@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, date, timezone, timedelta
@@ -6,7 +6,7 @@ import calendar
 import re
 import sqlite3
 from backend.database import obtener_conexion
-from backend.mod_usuarios.rutas_usuarios import VerificarRol
+from backend.mod_usuarios.rutas_usuarios import VerificarRol, _quien_autoriza, limiter
 
 ZONA_AR = timezone(timedelta(hours=-3))
 
@@ -21,6 +21,7 @@ class ClienteNuevo(BaseModel):
     direccion: Optional[str] = ""
     limite_credito: float = 50000.0
     dia_vencimiento: Optional[int] = None
+    pin_autorizacion: Optional[str] = None
 
 
 def _normalizar_dia_vencimiento(valor):
@@ -66,6 +67,25 @@ def _parse_convenio(valor):
         return datetime.strptime(s, "%Y-%m-%d").date()
     except ValueError:
         return None
+
+
+def _usuario_sesion(sesion, fallback=None):
+    try:
+        return int(sesion.get("sub"))
+    except (TypeError, ValueError, AttributeError):
+        return fallback
+
+
+def exigir_cuenta_habilitada(cliente):
+    """Una cuenta bloqueada no suma deuda nueva. A diferencia del límite y la mora, no hay PIN que lo pase."""
+    if int(_campo_fila(cliente, "bloqueado", 0) or 0):
+        motivo = (_campo_fila(cliente, "bloqueo_motivo", "") or "").strip()
+        nombre = _campo_fila(cliente, "nombre_completo", "") or "El cliente"
+        raise Exception(
+            f"CUENTA_BLOQUEADA: {nombre} tiene la cuenta bloqueada"
+            + (f" ({motivo})" if motivo else "")
+            + ". No se le fía; los pagos sí se aceptan."
+        )
 
 
 def _ultimo_cierre(dia, hoy):
@@ -284,6 +304,9 @@ def _estado_cuenta_de(cursor, cliente, hasta_id=None, al=None):
         "vencido": 0.0,
         "abierto": 0.0,
         "a_favor": a_favor,
+        "bloqueado": bool(int(_campo_fila(cliente, "bloqueado", 0) or 0)),
+        "bloqueo_motivo": _campo_fila(cliente, "bloqueo_motivo"),
+        "bloqueo_fecha": _campo_fila(cliente, "bloqueo_fecha"),
     }
     if saldo <= 0:
         return base
@@ -367,6 +390,16 @@ def inicializar_tabla_movimientos():
         cursor.execute("ALTER TABLE clientes ADD COLUMN convenio_desde TEXT")
     except sqlite3.OperationalError:
         pass
+    for columna in (
+        "bloqueado INTEGER DEFAULT 0",
+        "bloqueo_motivo TEXT",
+        "bloqueo_fecha TEXT",
+        "bloqueo_usuario_id INTEGER",
+    ):
+        try:
+            cursor.execute(f"ALTER TABLE clientes ADD COLUMN {columna}")
+        except sqlite3.OperationalError:
+            pass
 
     _backfill_saldado_clientes(cursor)
 
@@ -376,11 +409,17 @@ def inicializar_tabla_movimientos():
 inicializar_tabla_movimientos()
 
 # --- 2. GESTIÓN DE CLIENTES (Crear, Editar y Listar) ---
-@router.post("/registrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def registrar_cliente(cli: ClienteNuevo):
+@router.post("/registrar")
+@limiter.limit("10/minute")
+def registrar_cliente(request: Request, cli: ClienteNuevo, sesion: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))):
     conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
+        # El alta abre límite de fiado: un cajero necesita PIN de Admin o Encargado.
+        if sesion.get("rol") == "CAJERO":
+            if not (cli.pin_autorizacion or "").strip() or not _quien_autoriza(cursor, cli.pin_autorizacion):
+                raise Exception("PIN de Encargado incorrecto o sin privilegios.")
         dia_cobro = _normalizar_dia_vencimiento(cli.dia_vencimiento)
         convenio = _hoy_ar().isoformat() if dia_cobro else None
         cursor.execute('''
@@ -471,6 +510,52 @@ def estado_cuenta_cliente(cliente_id: int):
         conexion.close()
 
 
+class BloqueoCuenta(BaseModel):
+    bloquear: bool
+    motivo: Optional[str] = ""
+
+
+@router.put("/bloqueo/{cliente_id}")
+def cambiar_bloqueo_cuenta(cliente_id: int, body: BloqueoCuenta, sesion: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        cursor.execute("SELECT nombre_completo FROM clientes WHERE id = ?", (cliente_id,))
+        fila = cursor.fetchone()
+        if not fila:
+            raise Exception("Ese cliente no existe.")
+        usuario_id = _usuario_sesion(sesion)
+        ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        if body.bloquear:
+            motivo = " ".join((body.motivo or "").split())[:200]
+            if len(motivo) < 5:
+                raise Exception("Escribí el motivo del bloqueo (mínimo 5 caracteres).")
+            cursor.execute(
+                "UPDATE clientes SET bloqueado = 1, bloqueo_motivo = ?, bloqueo_fecha = ?, bloqueo_usuario_id = ? WHERE id = ?",
+                (motivo, ahora, usuario_id, cliente_id),
+            )
+            mensaje = f"Cuenta de {fila[0]} bloqueada. No se le fía hasta que el Admin la desbloquee."
+        else:
+            if sesion.get("rol") != "ADMIN":
+                raise Exception("Solo el Admin desbloquea una cuenta.")
+            cursor.execute(
+                "UPDATE clientes SET bloqueado = 0, bloqueo_fecha = ?, bloqueo_usuario_id = ? WHERE id = ?",
+                (ahora, usuario_id, cliente_id),
+            )
+            mensaje = f"Cuenta de {fila[0]} desbloqueada."
+        conexion.commit()
+        return {"mensaje": mensaje}
+    except Exception as e:
+        conexion.rollback()
+        mensaje_error = str(e)
+        if "sqlite3" in str(type(e)).lower() or "syntax" in mensaje_error.lower():
+            print(f"🚨 ERROR CRÍTICO SQL: {mensaje_error}")
+            return {"error": "Ocurrió un error interno al procesar la solicitud."}
+        return {"error": mensaje_error}
+    finally:
+        conexion.close()
+
+
 @router.get("/recibo_pago/{movimiento_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def recibo_pago_historico(movimiento_id: int):
     conexion = obtener_conexion()
@@ -534,18 +619,60 @@ def listar_deudores():
         conexion.close()
 
 # --- 3. COBRO DE DEUDA (Multiuso: Admin o POS) ---
-@router.put("/pagar_deuda/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
+@router.put("/pagar_deuda/{cliente_id}")
+def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda, sesion: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
-        
+        pago.usuario_id = _usuario_sesion(sesion, pago.usuario_id)
+        monto = round(float(pago.monto_pago or 0), 2)
+        if monto <= 0.009:
+            raise Exception("El monto del pago tiene que ser mayor a 0.")
+        pago.monto_pago = monto
+        cursor.execute("SELECT 1 FROM clientes WHERE id = ?", (cliente_id,))
+        if not cursor.fetchone():
+            raise Exception("Ese cliente no existe.")
+
+        es_efectivo = (pago.metodo_pago or "").upper() == "EFECTIVO"
+        # El cajero no cobra "en Administración": su efectivo siempre entra al turno abierto.
+        if sesion.get("rol") == "CAJERO":
+            pago.afecta_caja = es_efectivo
+            if es_efectivo and not pago.turno_id:
+                raise Exception("Abrí un turno de caja para cobrar en efectivo.")
+
+        turno_id = None
+        if pago.afecta_caja and es_efectivo:
+            if pago.turno_id:
+                cursor.execute(
+                    "SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'",
+                    (pago.turno_id,),
+                )
+                fila_turno = cursor.fetchone()
+                if not fila_turno:
+                    raise Exception("El turno de caja está cerrado. Abrí uno para cobrar en efectivo.")
+                turno_id = fila_turno[0]
+            else:
+                # Sin turno explícito (Administración): solo si hay una única caja del mostrador abierta.
+                cursor.execute(
+                    """
+                    SELECT t.id FROM turnos_caja t
+                    LEFT JOIN cajas_fisicas cf ON cf.id = t.caja_id
+                    WHERE t.estado_turno = 'ABIERTO' AND IFNULL(cf.solo_admin, 0) = 0
+                    """
+                )
+                abiertos = cursor.fetchall()
+                if not abiertos:
+                    raise Exception("No hay caja del mostrador abierta. Destildá \"Ingresar billetes a la Caja\" o abrí un turno.")
+                if len(abiertos) > 1:
+                    raise Exception("Hay más de una caja del mostrador abierta. Cobralo desde la caja que recibe la plata.")
+                turno_id = abiertos[0][0]
+
         # 1. Le descontamos la deuda al cliente
         cursor.execute("UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor - ? WHERE id = ?", (pago.monto_pago, cliente_id))
 
         # 2. Dejamos el registro en su historial
-        origen = "Caja/Mostrador" if pago.afecta_caja else "Administración"
+        origen = "Caja/Mostrador" if (turno_id or pago.turno_id) else "Administración"
         cursor.execute('''
             INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
             VALUES (?, ?, 'PAGO', ?, ?, ?)
@@ -554,19 +681,11 @@ def registrar_pago_deuda(cliente_id: int, pago: PagoDeuda):
         aplicaciones = persistir_imputacion_fifo(cursor, cliente_id, pago_id, pago.monto_pago)
         
         # 3. EL SWITCH: Si afecta caja y es en efectivo, recién ahí inflamos el cajón del turno
-        if pago.afecta_caja and pago.metodo_pago.upper() == "EFECTIVO":
-            turno_id = pago.turno_id
-            if not turno_id:
-                cursor.execute(
-                    "SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO' ORDER BY id DESC LIMIT 1"
-                )
-                turno = cursor.fetchone()
-                turno_id = turno[0] if turno else None
-            if turno_id:
-                cursor.execute('''
-                    INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
-                    VALUES (?, ?, 'INGRESO', ?, ?, ?)
-                ''', (fecha_actual, pago.usuario_id, pago.monto_pago, f"Cobro Deuda Cliente ID: {cliente_id}", turno_id))
+        if turno_id:
+            cursor.execute('''
+                INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+                VALUES (?, ?, 'INGRESO', ?, ?, ?)
+            ''', (fecha_actual, pago.usuario_id, pago.monto_pago, f"Cobro Deuda Cliente ID: {cliente_id}", turno_id))
 
         conexion.commit()
         return {"mensaje": "Pago procesado correctamente.", "aplicaciones": aplicaciones}
@@ -630,21 +749,31 @@ class AjusteDeuda(BaseModel):
     motivo: str
     usuario_id: int = 1
 
-@router.put("/aplicar_recargo/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
-def aplicar_recargo(cliente_id: int, ajuste: AjusteDeuda):
+@router.put("/aplicar_recargo/{cliente_id}")
+def aplicar_recargo(cliente_id: int, ajuste: AjusteDeuda, sesion: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
-        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        monto = round(float(ajuste.monto or 0), 2)
+        if monto <= 0.009:
+            raise Exception("El recargo tiene que ser mayor a 0.")
+        motivo = (ajuste.motivo or "").strip()[:180]
+        if len(motivo) < 3:
+            raise Exception("Escribí el concepto del recargo.")
+        cursor.execute("SELECT 1 FROM clientes WHERE id = ?", (cliente_id,))
+        if not cursor.fetchone():
+            raise Exception("Ese cliente no existe.")
+        usuario_id = _usuario_sesion(sesion, ajuste.usuario_id)
+
         # 1. Sumamos la deuda
-        cursor.execute("UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor + ? WHERE id = ?", (ajuste.monto, cliente_id))
+        cursor.execute("UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor + ? WHERE id = ?", (monto, cliente_id))
         
         # 2. Registramos el movimiento
         cursor.execute('''
             INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
             VALUES (?, ?, 'RECARGO', ?, ?, ?)
-        ''', (cliente_id, fecha_actual, ajuste.monto, ajuste.motivo, ajuste.usuario_id))
+        ''', (cliente_id, fecha_actual, monto, motivo, usuario_id))
         
         conexion.commit()
         return {"mensaje": "Recargo aplicado correctamente."}
@@ -671,8 +800,8 @@ class CargoManual(BaseModel):
     fecha: Optional[str] = None
 
 
-@router.post("/cargar_deuda/{cliente_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
-def cargar_deuda_manual(cliente_id: int, cargo: CargoManual):
+@router.post("/cargar_deuda/{cliente_id}")
+def cargar_deuda_manual(cliente_id: int, cargo: CargoManual, sesion: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
@@ -706,7 +835,7 @@ def cargar_deuda_manual(cliente_id: int, cargo: CargoManual):
             INSERT INTO movimientos_clientes (cliente_id, fecha_hora, tipo_movimiento, monto, detalle, usuario_id)
             VALUES (?, ?, 'CARGO', ?, ?, ?)
             ''',
-            (cliente_id, fecha_hora, monto, f"Ajuste Admin: {motivo[:180]}", cargo.usuario_id),
+            (cliente_id, fecha_hora, monto, f"Ajuste Admin: {motivo[:180]}", _usuario_sesion(sesion, cargo.usuario_id)),
         )
         conexion.commit()
         return {"mensaje": "Deuda anotada en la cuenta."}

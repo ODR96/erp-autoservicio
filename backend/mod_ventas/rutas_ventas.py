@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
-from backend.mod_clientes.rutas_clientes import persistir_imputacion_fifo, _estado_cuenta_de
+from backend.mod_clientes.rutas_clientes import persistir_imputacion_fifo, _estado_cuenta_de, exigir_cuenta_habilitada
 from backend.mod_config.rutas_config import liquidar_comision, plata
 
 router = APIRouter()
@@ -345,6 +345,7 @@ def registrar_venta(venta: NuevaVenta, background_tasks: BackgroundTasks):
             cliente_fiado = cursor.fetchone()
             if not cliente_fiado:
                 raise Exception("El cliente no existe.")
+            exigir_cuenta_habilitada(cliente_fiado)
             est = _estado_cuenta_de(cursor, cliente_fiado)
             vencido = float(est.get("vencido") or 0)
             if vencido > 0.05:
