@@ -59,6 +59,16 @@ async function cargarMeticasFinancieras() {
             document.getElementById('dash-ganancia').innerText = formatiarDinero(gananciaNeta);
             document.getElementById('dash-rentabilidad').innerText = rf['5_rentabilidad_del_mes'];
 
+            const retiros = Number(rf['retiros_dueno']) || 0;
+            const quedo = rf['quedo_en_el_negocio'] != null ? Number(rf['quedo_en_el_negocio']) : (gananciaNeta - retiros);
+            const cajaRetiros = document.getElementById('dash-retiros');
+            if (cajaRetiros) cajaRetiros.innerText = formatiarDinero(retiros);
+            const cajaQuedo = document.getElementById('dash-quedo');
+            if (cajaQuedo) {
+                cajaQuedo.innerText = formatiarDinero(quedo);
+                cajaQuedo.className = `fw-bold mb-0 mt-1 ${quedo < 0 ? 'text-danger' : 'text-success'}`;
+            }
+
             // 2. Piso del mes = gastos ya anotados + sueldos que todavía no se liquidaron
             const comisionNoCubierta = rf['comision_no_cubierta'] != null ? rf['comision_no_cubierta'] : comisiones;
             const gananciaBruta = ventasSinIva - cmv - comisionNoCubierta;

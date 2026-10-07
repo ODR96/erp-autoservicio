@@ -45,6 +45,8 @@ async function cargarCategorias() {
         
         if (data.categorias) {
             data.categorias.forEach(cat => {
+                // Los retiros del dueño van por su propio formulario, no como gasto.
+                if ((cat.tipo_categoria || 'OPERATIVO').toUpperCase() === 'RETIRO_SOCIO') return;
                 selector.innerHTML += `<option value="${cat.id}">${escGasto(cat.nombre)}</option>`;
             });
         }
@@ -61,9 +63,9 @@ async function crearCategoria() {
             <input id="swal-nombre" class="swal2-input form-control-dark w-75 mx-auto" placeholder="Ej: Sueldo, Luz, Limpieza">
             <select id="swal-tipo" class="swal2-select form-select-dark w-75 mx-auto mt-3">
                 <option value="OPERATIVO">Gasto del Local (Costos)</option>
-                <option value="RETIRO_SOCIO">Retiro Personal / Socio</option>
                 <option value="MOVIMIENTO_INTERNO">Movimiento Interno (Sangría a Caja Fuerte)</option>
             </select>
+            <p class="small text-muted mt-2 mb-0">Tus retiros personales no son una categoría: usá el botón "Retiro del dueño".</p>
         `,
         background: '#111C2A', color: '#fff',
         focusConfirm: false,
@@ -194,7 +196,12 @@ async function cargarResumenMensual() {
             });
 
             document.getElementById('kpiGastos').innerText = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(totalGastosOperativos);
-            document.getElementById('kpiRetiros').innerText = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(totalRetirosSocio);
+            const nota = document.getElementById('kpiRetirosNota');
+            if (nota) {
+                nota.innerText = totalRetirosSocio > 0
+                    ? `Aparte, ${formatoPesos(totalRetirosSocio)} cargados como gasto con categoría de retiro.`
+                    : '';
+            }
             const kpiCajon = document.getElementById('kpiSalidasCajon');
             if (kpiCajon) {
                 kpiCajon.innerText = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(data.salidas_cajon || 0);
@@ -410,11 +417,159 @@ async function eliminarCategoriaConfirmar(cat) {
     }
 }
 
+// =================================================================
+// 6. RETIROS DEL DUEÑO (no son gasto: no tocan la ganancia)
+// =================================================================
+const ORIGENES_RETIRO = {
+    CAJA_FUERTE: 'Caja fuerte',
+    MERCADOPAGO: 'Mercado Pago del negocio',
+    BANCO: 'Banco del negocio',
+    CAJON: 'Cajón del mostrador'
+};
+
+function formatoPesos(n) {
+    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(Number(n) || 0);
+}
+
+async function cargarRetirosDueno() {
+    const kpi = document.getElementById('kpiRetiros');
+    try {
+        const res = await apiFetchSeguro('/caja/retiros_dueno');
+        const data = await leerRespuestaGasto(res);
+        if (kpi) kpi.innerText = formatoPesos(data.total);
+        return data;
+    } catch (e) {
+        console.error('Error al cargar retiros del dueño', e);
+        if (kpi) kpi.innerText = '—';
+        return null;
+    }
+}
+
+async function registrarRetiroDueno() {
+    const { value: form } = await Swal.fire({
+        title: 'Retiro del dueño',
+        html: `
+            <p class="small text-muted mb-2">Plata del negocio que te llevás vos. No es gasto: no baja la ganancia, se compara contra ella.</p>
+            <input id="swal-ret-monto" type="number" inputmode="decimal" step="0.01" min="0.01" class="swal2-input form-control-dark w-75 mx-auto" placeholder="Monto ($)">
+            <select id="swal-ret-origen" class="swal2-select form-select-dark w-75 mx-auto mt-3">
+                <option value="CAJA_FUERTE">De la caja fuerte</option>
+                <option value="MERCADOPAGO">Del Mercado Pago del negocio</option>
+                <option value="BANCO">Del banco del negocio</option>
+            </select>
+            <input id="swal-ret-motivo" type="text" maxlength="200" autocomplete="off" class="swal2-input form-control-dark w-75 mx-auto" placeholder="Para qué (opcional)">
+            <p class="small text-muted mt-2 mb-0">¿Salió del cajón? El cajero hace una sangría y acá lo cargás como caja fuerte por lo que te llevaste.</p>
+        `,
+        background: '#111C2A', color: '#fff',
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Registrar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#f59e0b',
+        didOpen: (popup) => {
+            popup.querySelectorAll('input, select').forEach(el => {
+                el.addEventListener('keypress', (e) => { if (e.key === 'Enter') Swal.clickConfirm(); });
+            });
+            setTimeout(() => document.getElementById('swal-ret-monto').focus(), 300);
+        },
+        preConfirm: () => {
+            const monto = parseFloat(document.getElementById('swal-ret-monto').value);
+            if (!monto || monto <= 0) { Swal.showValidationMessage('Ingresá un monto mayor a 0'); return false; }
+            return {
+                monto,
+                origen: document.getElementById('swal-ret-origen').value,
+                motivo: document.getElementById('swal-ret-motivo').value.trim()
+            };
+        }
+    });
+    if (!form) return;
+
+    try {
+        Swal.fire({ title: 'Registrando...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        const res = await apiFetchSeguro('/caja/retiro_dueno', { method: 'POST', body: JSON.stringify(form) });
+        const data = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: '¡Registrado!', text: data.mensaje, background: '#111C2A', color: '#fff', timer: 2000, showConfirmButton: false });
+        cargarRetirosDueno();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
+async function verRetirosDueno() {
+    const data = await cargarRetirosDueno();
+    if (!data) {
+        Swal.fire({ icon: 'error', title: 'Error', text: 'No se pudieron cargar los retiros.', background: '#111C2A', color: '#fff' });
+        return;
+    }
+    const filas = (data.retiros || []).length === 0
+        ? '<tr><td colspan="4" class="py-4 text-muted">Sin retiros este mes.</td></tr>'
+        : data.retiros.map(r => {
+            const anulado = r.estado !== 'ACTIVO';
+            return `
+                <tr class="${anulado ? 'text-decoration-line-through opacity-50' : ''}">
+                    <td class="small">${escGasto(String(r.fecha_hora || '').slice(0, 16))}</td>
+                    <td class="text-start">
+                        <div class="fw-bold">${escGasto(ORIGENES_RETIRO[r.origen] || r.origen)}</div>
+                        <div class="small text-muted text-break">${escGasto(r.motivo)}</div>
+                    </td>
+                    <td class="text-end fw-bold text-warning">${formatoPesos(r.monto)}</td>
+                    <td class="text-end">${anulado
+                        ? '<span class="badge bg-danger">ANULADO</span>'
+                        : `<button class="btn btn-sm btn-outline-danger btn-anular-retiro" data-id="${r.id}" title="Anular"><i class="bi bi-x-lg"></i></button>`}</td>
+                </tr>`;
+        }).join('');
+
+    Swal.fire({
+        title: `Retiros de ${escGasto(data.mes)}`,
+        width: 600,
+        html: `
+            <div class="fw-bold text-warning mb-2">Total: ${formatoPesos(data.total)}</div>
+            <div class="table-responsive text-start" style="max-height:400px; overflow-y:auto;">
+                <table class="table table-dark table-sm align-middle mb-0">
+                    <tbody>${filas}</tbody>
+                </table>
+            </div>`,
+        background: '#111C2A', color: '#fff',
+        showConfirmButton: false,
+        showCloseButton: true,
+        didOpen: (popup) => {
+            popup.querySelectorAll('.btn-anular-retiro').forEach(btn => {
+                btn.addEventListener('click', () => anularRetiroDueno(parseInt(btn.dataset.id)));
+            });
+        }
+    });
+}
+
+async function anularRetiroDueno(id) {
+    const ok = await Swal.fire({
+        title: '¿Anular este retiro?',
+        text: 'Queda en el historial como anulado y deja de contar en el mes.',
+        icon: 'warning',
+        background: '#111C2A', color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, anular',
+        cancelButtonText: 'Volver',
+        confirmButtonColor: '#dc3545'
+    });
+    if (!ok.isConfirmed) return verRetirosDueno();
+    try {
+        const res = await apiFetchSeguro(`/caja/retiro_dueno/${id}/anular`, { method: 'PUT' });
+        await leerRespuestaGasto(res);
+        await verRetirosDueno();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
 // Asegurate de que tu DOMContentLoaded final quede así:
 document.addEventListener('DOMContentLoaded', () => {
     cargarCategorias();
     cargarResumenMensual();
     cargarHistorial();
+    cargarRetirosDueno();
     const btnGestion = document.getElementById('btnGestionCategorias');
     if (btnGestion) btnGestion.addEventListener('click', abrirGestionCategorias);
+    const btnRetiro = document.getElementById('btnRetiroDueno');
+    if (btnRetiro) btnRetiro.addEventListener('click', registrarRetiroDueno);
+    const btnVer = document.getElementById('btnVerRetiros');
+    if (btnVer) btnVer.addEventListener('click', verRetirosDueno);
 });

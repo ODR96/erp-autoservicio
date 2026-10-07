@@ -312,6 +312,17 @@ def calcular_ganancia_neta(mes: str = None):
 
         margen_porcentaje = (ganancia_neta / ventas_sin_iva * 100) if ventas_sin_iva > 0 else 0
 
+        # Retiros del dueño: no restan ganancia; se comparan contra ella.
+        retiros_dueno = 0.0
+        try:
+            cursor.execute('''
+                SELECT IFNULL(SUM(monto), 0) FROM retiros_dueno
+                WHERE strftime('%Y-%m', fecha_hora) = ? AND estado = 'ACTIVO'
+            ''', (mes,))
+            retiros_dueno = cursor.fetchone()[0] or 0.0
+        except sqlite3.OperationalError:
+            retiros_dueno = 0.0
+
         conexion.close()
 
         return {
@@ -327,7 +338,9 @@ def calcular_ganancia_neta(mes: str = None):
                 "7_piso_operativo_mes": piso_operativo_mes,
                 "8_mermas_del_mes": round(mermas, 2),
                 "9_comisiones_medios": round(comisiones, 2),
-                "comision_no_cubierta": round(comision_no_cubierta, 2)
+                "comision_no_cubierta": round(comision_no_cubierta, 2),
+                "retiros_dueno": round(retiros_dueno, 2),
+                "quedo_en_el_negocio": round(ganancia_neta - retiros_dueno, 2)
             }
         }
     except Exception as e:

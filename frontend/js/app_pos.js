@@ -2468,6 +2468,19 @@ async function registrarPagoProveedorDesdePOS() {
 }
 
 // --- MÓDULO INGRESO Y RETIRO DE CAJA (F10) (SIN HARDCODEO) ---
+// Los módulos viejos devuelven {"error"} con 200; FastAPI devuelve {detail} con 4xx.
+async function exigirRespuestaOk(response, porDefecto) {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.error) {
+        const detalle = data.detail;
+        const texto = typeof detalle === 'string' ? detalle
+            : (Array.isArray(detalle) && detalle[0]?.msg) ? detalle[0].msg
+            : (data.error || porDefecto);
+        throw new Error(texto);
+    }
+    return data;
+}
+
 // --- MÓDULO INGRESO Y RETIRO DE CAJA (F10) (DISEÑO OSCURO UNIFICADO) ---
 async function registrarMovimientoCaja(tipo) {
     modalGestion.hide();
@@ -2488,7 +2501,7 @@ async function registrarMovimientoCaja(tipo) {
                      </button>
                      <button type="button" class="btn btn-lg fw-bold" id="ret-sangria"
                         style="background:#1e3a5f; color:#fff; border:1px solid #22c55e; padding:14px 16px;">
-                        Sangría / tesorería
+                        Sangría (a caja fuerte)
                      </button>
                    </div>`,
             background: '#111C2A',
@@ -2567,7 +2580,7 @@ async function registrarMovimientoCaja(tipo) {
         inputsHtml += opcionesCategoria;
         inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (Ej: Luz, limpia, vale Juan)">`;
     } else if (tipo === 'retiro' && esSangria) {
-        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Motivo (Ej: Cambio para Caja 2, Retiro dueño)">`;
+        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Motivo (Ej: A caja fuerte, cambio para Caja 2)">`;
     } else {
         inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" placeholder="Motivo (Ej: Cambio inicial)">`;
     }
@@ -2641,7 +2654,7 @@ async function registrarMovimientoCaja(tipo) {
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify(payloadMovimiento)
                 });
-                if (!response.ok) throw new Error("Fallo en el servidor al registrar ingreso");
+                await exigirRespuestaOk(response, "Fallo en el servidor al registrar ingreso");
 
             } else if (tipo === 'retiro' && esSangria) {
                 // --- SANGRÍA / RETIRO FÍSICO: pega directo a Caja, NUNCA pasa por Gastos ---
@@ -2660,7 +2673,7 @@ async function registrarMovimientoCaja(tipo) {
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify(payloadMovimiento)
                 });
-                if (!response.ok) throw new Error("Fallo en el servidor al registrar la sangría");
+                await exigirRespuestaOk(response, "Fallo en el servidor al registrar la sangría");
 
             } else if (tipo === 'retiro') {
                 // --- GASTO DEL LOCAL: flujo original, impacta gastos_operativos ---
@@ -2680,7 +2693,7 @@ async function registrarMovimientoCaja(tipo) {
                     body: JSON.stringify(payloadGasto)
                 });
 
-                if (!response.ok) throw new Error("Fallo al asentar el gasto en Tesorería");
+                await exigirRespuestaOk(response, "Fallo al asentar el gasto en Tesorería");
             }
 
             const etiquetaExito = tipo === 'ingreso' ? 'ingreso' : (esSangria ? 'sangría' : 'retiro/gasto');

@@ -29,8 +29,44 @@ def asegurar_tabla_cajas_fisicas():
 
 asegurar_tabla_cajas_fisicas()
 
+
+def asegurar_tabla_retiros_dueno():
+    conexion = obtener_conexion()
+    try:
+        conexion.execute('''
+            CREATE TABLE IF NOT EXISTS retiros_dueno (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_hora TEXT NOT NULL,
+                monto REAL NOT NULL,
+                origen TEXT NOT NULL,
+                motivo TEXT,
+                usuario_id INTEGER,
+                autorizado_por TEXT,
+                turno_id INTEGER,
+                movimiento_caja_id INTEGER,
+                estado TEXT NOT NULL DEFAULT 'ACTIVO',
+                anulado_en TEXT,
+                anulado_por INTEGER
+            )
+        ''')
+        conexion.execute("CREATE INDEX IF NOT EXISTS idx_retiros_dueno_fecha ON retiros_dueno (fecha_hora)")
+        conexion.commit()
+    finally:
+        conexion.close()
+
+
+asegurar_tabla_retiros_dueno()
+
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
+
+# Retiro del dueño: plata que sale del negocio. No es gasto (no toca la ganancia) ni sangría (la sangría queda en el negocio).
+ORIGENES_RETIRO_DUENO = {
+    "CAJON": "Cajón del mostrador",
+    "CAJA_FUERTE": "Caja fuerte",
+    "MERCADOPAGO": "Mercado Pago del negocio",
+    "BANCO": "Banco del negocio",
+}
 
 def _sumar_medio(cursor, turno_id, patron):
     """Cobrado y comisión: ventas de un solo medio más cada pata de un mixto. No toca el efectivo del cajón."""
@@ -223,6 +259,135 @@ def registrar_movimiento(mov: MovimientoCaja, background_tasks: BackgroundTasks)
         return {"error": str(e)}
     finally:
         if conexion: conexion.close()
+
+class RetiroDueno(BaseModel):
+    monto: float
+    origen: str
+    motivo: Optional[str] = ""
+    turno_id: Optional[int] = None
+    autorizado_por: Optional[str] = None
+
+
+def _usuario_de(sesion):
+    try:
+        return int((sesion or {}).get("sub"))
+    except (TypeError, ValueError):
+        return None
+
+
+@router.post("/retiro_dueno")
+def registrar_retiro_dueno(body: RetiroDueno, background_tasks: BackgroundTasks,
+                           sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        monto = round(float(body.monto or 0), 2)
+        if monto <= 0.009:
+            raise Exception("El monto del retiro tiene que ser mayor a 0.")
+        origen = (body.origen or "").strip().upper()
+        if origen not in ORIGENES_RETIRO_DUENO:
+            raise Exception("Origen de retiro inválido.")
+        motivo = " ".join((body.motivo or "").split())[:200] or "Retiro del dueño"
+        usuario_id = _usuario_de(sesion)
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+
+        turno_id = None
+        movimiento_id = None
+        if origen == "CAJON":
+            if not body.turno_id:
+                raise Exception("Abrí un turno de caja para retirar del cajón.")
+            cursor.execute("SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (body.turno_id,))
+            if not cursor.fetchone():
+                raise Exception("El turno de caja está cerrado.")
+            turno_id = body.turno_id
+            cursor.execute('''
+                INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+                VALUES (?, ?, 'RETIRO', ?, ?, ?)
+            ''', (fecha_actual, usuario_id, monto, f"[RETIRO DUEÑO] {motivo}", turno_id))
+            movimiento_id = cursor.lastrowid
+
+        cursor.execute('''
+            INSERT INTO retiros_dueno (fecha_hora, monto, origen, motivo, usuario_id, autorizado_por, turno_id, movimiento_caja_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (fecha_actual, monto, origen, motivo, usuario_id, (body.autorizado_por or "")[:100] or None, turno_id, movimiento_id))
+        retiro_id = cursor.lastrowid
+        conexion.commit()
+
+        if origen == "CAJON":
+            from backend.whatsapp_puente import avisar_retiro, nombre_usuario
+            background_tasks.add_task(
+                avisar_retiro, monto, f"[RETIRO DUEÑO] {motivo}", nombre_usuario(usuario_id), turno_id,
+            )
+        return {"mensaje": f"Retiro del dueño de ${monto:,.2f} registrado.", "id": retiro_id}
+    except Exception as e:
+        conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        conexion.close()
+
+
+@router.get("/retiros_dueno", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def listar_retiros_dueno(mes: Optional[str] = None):
+    mes = (mes or datetime.now(ZONA_AR).strftime("%Y-%m"))[:7]
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    try:
+        filas = conexion.execute('''
+            SELECT id, fecha_hora, monto, origen, motivo, autorizado_por, turno_id, estado
+            FROM retiros_dueno
+            WHERE strftime('%Y-%m', fecha_hora) = ?
+            ORDER BY fecha_hora DESC, id DESC
+        ''', (mes,)).fetchall()
+        retiros = []
+        total = 0.0
+        por_origen = {}
+        for f in filas:
+            r = dict(f)
+            r["origen_texto"] = ORIGENES_RETIRO_DUENO.get(r["origen"], r["origen"])
+            if r["estado"] == "ACTIVO":
+                total += float(r["monto"] or 0)
+                por_origen[r["origen"]] = round(por_origen.get(r["origen"], 0) + float(r["monto"] or 0), 2)
+            retiros.append(r)
+        return {"mes": mes, "total": round(total, 2), "por_origen": por_origen, "retiros": retiros}
+    finally:
+        conexion.close()
+
+
+@router.put("/retiro_dueno/{retiro_id}/anular")
+def anular_retiro_dueno(retiro_id: int, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        r = cursor.execute("SELECT * FROM retiros_dueno WHERE id = ?", (retiro_id,)).fetchone()
+        if not r:
+            raise Exception("Ese retiro no existe.")
+        if r["estado"] != "ACTIVO":
+            raise Exception("Ese retiro ya está anulado.")
+        usuario_id = _usuario_de(sesion)
+        ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        if r["origen"] == "CAJON":
+            turno = cursor.execute(
+                "SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (r["turno_id"],)
+            ).fetchone()
+            if not turno:
+                raise Exception("El turno de ese retiro ya cerró: el cierre Z ya lo contó. Corregilo con un ingreso en la caja.")
+            cursor.execute('''
+                INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+                VALUES (?, ?, 'INGRESO', ?, ?, ?)
+            ''', (ahora, usuario_id, r["monto"], f"[ANULA RETIRO DUEÑO #{retiro_id}]", r["turno_id"]))
+        cursor.execute(
+            "UPDATE retiros_dueno SET estado = 'ANULADO', anulado_en = ?, anulado_por = ? WHERE id = ?",
+            (ahora, usuario_id, retiro_id),
+        )
+        conexion.commit()
+        return {"mensaje": "Retiro anulado."}
+    except Exception as e:
+        conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        conexion.close()
+
 
 @router.put("/cerrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks):
