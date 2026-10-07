@@ -7,6 +7,7 @@ from fastapi import BackgroundTasks
 import requests
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
+from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria
 
 def asegurar_tabla_cajas_fisicas():
     conexion = obtener_conexion()
@@ -219,11 +220,15 @@ def abrir_turno(apertura: AperturaCaja):
     finally:
         if conexion: conexion.close()
 
-@router.post("/movimiento", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def registrar_movimiento(mov: MovimientoCaja, background_tasks: BackgroundTasks):
+@router.post("/movimiento")
+def registrar_movimiento(mov: MovimientoCaja, background_tasks: BackgroundTasks,
+                         sesion: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))):
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
+        mov.usuario_id = _usuario_de(sesion) or mov.usuario_id
+        if not mov.monto or mov.monto <= 0:
+            raise Exception("El monto tiene que ser mayor a 0.")
         cursor.execute("SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'", (mov.turno_id,))
         if not cursor.fetchone(): raise Exception("El turno especificado no está abierto.")
             
@@ -242,7 +247,10 @@ def registrar_movimiento(mov: MovimientoCaja, background_tasks: BackgroundTasks)
             INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (fecha_actual, mov.usuario_id, tipo_mayuscula, mov.monto, observacion_final, mov.turno_id))
-        
+        if tipo_mayuscula == 'RETIRO' and mov.es_sangria:
+            mover_tesoreria(cursor, "CAJA_FUERTE", mov.monto, f"Sangría turno #{mov.turno_id}: {mov.observaciones or ''}".strip(),
+                            "SANGRIA", cursor.lastrowid, mov.usuario_id)
+
         conexion.commit()
         if tipo_mayuscula == 'RETIRO':
             from backend.whatsapp_puente import avisar_retiro, nombre_usuario
@@ -311,6 +319,8 @@ def registrar_retiro_dueno(body: RetiroDueno, background_tasks: BackgroundTasks,
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (fecha_actual, monto, origen, motivo, usuario_id, (body.autorizado_por or "")[:100] or None, turno_id, movimiento_id))
         retiro_id = cursor.lastrowid
+        if origen == "CAJA_FUERTE":
+            mover_tesoreria(cursor, "CAJA_FUERTE", -monto, f"Retiro del dueño: {motivo}", "RETIRO_DUENO", retiro_id, usuario_id)
         conexion.commit()
 
         if origen == "CAJON":
@@ -376,6 +386,8 @@ def anular_retiro_dueno(retiro_id: int, sesion: dict = Depends(VerificarRol(["AD
                 INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
                 VALUES (?, ?, 'INGRESO', ?, ?, ?)
             ''', (ahora, usuario_id, r["monto"], f"[ANULA RETIRO DUEÑO #{retiro_id}]", r["turno_id"]))
+        elif r["origen"] == "CAJA_FUERTE":
+            mover_tesoreria(cursor, "CAJA_FUERTE", r["monto"], f"Anula retiro del dueño #{retiro_id}", "ANULACION", retiro_id, usuario_id)
         cursor.execute(
             "UPDATE retiros_dueno SET estado = 'ANULADO', anulado_en = ?, anulado_por = ? WHERE id = ?",
             (ahora, usuario_id, retiro_id),

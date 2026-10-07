@@ -6,6 +6,7 @@ import sqlite3
 import logging
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
+from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria, ErrorTesoreria
 
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -18,7 +19,12 @@ def asegurar_tablas_tesoreria():
     cursor = conexion.cursor()
     
     cursor.execute('''CREATE TABLE IF NOT EXISTS gastos_operativos (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha DATETIME NOT NULL, categoria_id INTEGER NOT NULL, descripcion_detalle TEXT, monto REAL NOT NULL, metodo_pago TEXT NOT NULL, usuario_id INTEGER NOT NULL DEFAULT 1)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS movimientos_caja_mayor (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha_hora DATETIME NOT NULL, tipo_movimiento TEXT NOT NULL, monto REAL NOT NULL, concepto TEXT NOT NULL, usuario_id INTEGER NOT NULL, referencia_gasto_id INTEGER)''')
+    # movimientos_caja_mayor nunca se usó; la caja fuerte vive en tesoreria_movimientos.
+    try:
+        if cursor.execute("SELECT COUNT(*) FROM movimientos_caja_mayor").fetchone()[0] == 0:
+            cursor.execute("DROP TABLE movimientos_caja_mayor")
+    except sqlite3.OperationalError:
+        pass
     cursor.execute('''CREATE TABLE IF NOT EXISTS categorias_gasto (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL)''')
 
     # 1. Escaneo inteligente (Categorías)
@@ -244,6 +250,12 @@ def registrar_gasto_operativo(
             INSERT INTO gastos_operativos (fecha, categoria_id, descripcion_detalle, monto, metodo_pago, origen_fondos, usuario_id, turno_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (fecha_actual, gasto.categoria_id, gasto.descripcion_detalle, gasto.monto, gasto.metodo_pago, gasto.origen_fondos, gasto.usuario_id, turno_gasto))
+        if not turno and gasto.origen_fondos.upper() == "CAJA_MAYOR":
+            try:
+                mover_tesoreria(db.cursor(), "CAJA_FUERTE", -gasto.monto, f"Gasto: {gasto.descripcion_detalle}",
+                                "GASTO", db.execute("SELECT last_insert_rowid()").fetchone()[0], gasto.usuario_id)
+            except ErrorTesoreria as e:
+                raise HTTPException(status_code=400, detail=str(e))
         
         # EL ARREGLO DEL RETIRO DEL POS
         retiro_de_caja = False

@@ -7,6 +7,7 @@ from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol # <-- EL PATOVICA
 from backend.mod_ventas.rutas_ventas import costo_y_descuento_linea
 from backend.mod_clientes.rutas_clientes import exigir_cuenta_habilitada
+from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria
 
 # --- CORRECCIÓN HORARIA PARA ARGENTINA ---
 ZONA_AR = timezone(timedelta(hours=-3))
@@ -236,6 +237,11 @@ def liquidar_pedido_mayorista(cursor, pedido_id, pagos, origen, turno_id=None):
                 """,
                 (fecha_actual, pata["monto"], f"Efectivo de pedido mayorista #{pedido_id}", turno_guardar),
             )
+
+    efectivo_oficina = round(sum(p["monto"] for p in patas if p["metodo"] == "EFECTIVO OFICINA"), 2)
+    if efectivo_oficina > 0:
+        mover_tesoreria(cursor, "CAJA_FUERTE", efectivo_oficina, f"Efectivo de pedido depósito #{pedido_id}",
+                        "VENTA_DEPOSITO", pedido_id, None)
 
     return {
         "mensaje": "Pedido cobrado. Queda listo para entregar.",

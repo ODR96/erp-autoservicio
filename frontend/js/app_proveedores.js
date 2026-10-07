@@ -1542,11 +1542,13 @@ async function preguntarPagoInmediato(total, condicion) {
             ? {
                 despues: 'Queda deuda (pago después)',
                 caja: 'Pago efectivo de esta caja',
-                bolsillo: 'Pago bolsillo / transferencia'
+                fuerte: 'Pago efectivo de la caja fuerte',
+                bolsillo: 'Pago bolsillo del dueño / transferencia'
             }
             : {
                 caja: 'Efectivo de esta caja (todo o parte)',
-                bolsillo: 'Bolsillo / ya no está en el cajón',
+                fuerte: 'Efectivo de la caja fuerte',
+                bolsillo: 'Bolsillo del dueño / transferencia',
                 papel: 'Solo anotar, sin pago'
             },
         inputValue: esCC ? 'despues' : 'caja',
@@ -1585,11 +1587,11 @@ async function preguntarPagoInmediato(total, condicion) {
 
     return {
         pago: {
-            metodo_pago: modo === 'caja' ? 'EFECTIVO CAJA' : 'EFECTIVO BOLSILLO',
+            metodo_pago: modo === 'caja' ? 'EFECTIVO CAJA' : (modo === 'fuerte' ? 'EFECTIVO CAJA FUERTE' : 'EFECTIVO BOLSILLO'),
             monto: montoDlg.value,
             observaciones: modo === 'caja'
                 ? 'Pago al cargar (efectivo caja)'
-                : 'Pago al cargar (bolsillo / transferencia)'
+                : (modo === 'fuerte' ? 'Pago al cargar (caja fuerte)' : 'Pago al cargar (bolsillo / transferencia)')
         }
     };
 }
@@ -1649,7 +1651,9 @@ async function confirmarDeudaRapida() {
         const extraPago = pagoAhora.pago
             ? (pagoAhora.pago.metodo_pago === 'EFECTIVO CAJA'
                 ? ' Se registró el pago de caja (no es gasto).'
-                : ' Se registró el pago (bolsillo / transferencia).')
+                : (pagoAhora.pago.metodo_pago === 'EFECTIVO CAJA FUERTE'
+                    ? ' Se registró el pago y salió de la caja fuerte.'
+                    : ' Se registró el pago (bolsillo / transferencia).'))
             : '';
         Swal.fire('Deuda registrada', (data.mensaje || 'Listo. El stock no se tocó.') + extraPago, 'success');
     } catch (e) {
@@ -1738,7 +1742,9 @@ async function confirmarIngresoMercaderia() {
         const extraPago = pagoAhora.pago
             ? (pagoAhora.pago.metodo_pago === 'EFECTIVO CAJA'
                 ? ' Pago de caja registrado (no es gasto).'
-                : ' Pago bolsillo / transferencia registrado.')
+                : (pagoAhora.pago.metodo_pago === 'EFECTIVO CAJA FUERTE'
+                    ? ' Pago registrado; salió de la caja fuerte.'
+                    : ' Pago bolsillo / transferencia registrado.'))
             : '';
         Swal.fire('¡Mercadería Ingresada!', 'El stock y los costos se actualizaron. La góndola solo si la tildaste.' + extraPago, 'success');
         await marcarBorradorConfirmado(data.id);

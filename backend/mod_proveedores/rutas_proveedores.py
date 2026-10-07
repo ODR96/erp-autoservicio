@@ -14,6 +14,7 @@ import urllib.error
 from backend.database import obtener_conexion, RAIZ_PROYECTO
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
 from backend.mod_productos.rutas_productos import compensar_deuda_stock
+from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria, ErrorTesoreria
 
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3)) # <-- LA HORA ARGENTINA
@@ -447,6 +448,11 @@ def _es_pago_efectivo_caja(metodo: str) -> bool:
     return m == "EFECTIVO CAJA"
 
 
+def _es_pago_caja_fuerte(metodo: str) -> bool:
+    m = (metodo or "").strip().upper().replace("_", " ")
+    return m == "EFECTIVO CAJA FUERTE"
+
+
 def _asegurar_ctacte(cursor, proveedor_id: int):
     cursor.execute("SELECT id FROM proveedores_ctacte WHERE proveedor_id = ?", (proveedor_id,))
     if not cursor.fetchone():
@@ -493,6 +499,14 @@ def _registrar_pago_en_cursor(cursor, proveedor_id: int, monto: float, metodo: s
         INSERT INTO pagos_proveedores (proveedor_id, fecha_pago, monto_total_pagado, metodo_pago, observaciones, usuario_id)
         VALUES (?, ?, ?, ?, ?, ?)
     ''', (proveedor_id, fecha_actual, monto, metodo, observaciones or "", usuario_id))
+    pago_id = cursor.lastrowid
+
+    if _es_pago_caja_fuerte(metodo):
+        try:
+            mover_tesoreria(cursor, "CAJA_FUERTE", -monto, f"Pago a proveedor #{proveedor_id}: {observaciones or ''}".strip(),
+                            "PAGO_PROVEEDOR", pago_id, usuario_id)
+        except ErrorTesoreria as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     cursor.execute(
         "UPDATE proveedores_ctacte SET saldo_deudor = saldo_deudor - ? WHERE proveedor_id = ?",
@@ -508,16 +522,20 @@ def _registrar_pago_en_cursor(cursor, proveedor_id: int, monto: float, metodo: s
                 (turno_id,)
             )
             turno = cursor.fetchone()
-        if not turno:
-            cursor.execute(
-                "SELECT id FROM turnos_caja WHERE estado_turno = 'ABIERTO' ORDER BY id DESC LIMIT 1"
-            )
-            turno = cursor.fetchone()
-        if not turno:
-            raise HTTPException(
-                status_code=400,
-                detail="No hay caja abierta. Abrí un turno para pagar en efectivo de la registradora."
-            )
+            if not turno:
+                raise HTTPException(status_code=400, detail="El turno de caja está cerrado. Abrí uno para pagar con efectivo de la registradora.")
+        else:
+            cursor.execute('''
+                SELECT t.id FROM turnos_caja t
+                LEFT JOIN cajas_fisicas cf ON cf.id = t.caja_id
+                WHERE t.estado_turno = 'ABIERTO' AND IFNULL(cf.solo_admin, 0) = 0
+            ''')
+            abiertos = cursor.fetchall()
+            if not abiertos:
+                raise HTTPException(status_code=400, detail="No hay caja del mostrador abierta. Abrí un turno para pagar con efectivo de la registradora.")
+            if len(abiertos) > 1:
+                raise HTTPException(status_code=400, detail="Hay más de una caja del mostrador abierta. Pagá desde la caja que pone la plata (F10).")
+            turno = abiertos[0]
         tid = turno[0] if not isinstance(turno, sqlite3.Row) else turno["id"]
         cursor.execute('''
             INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)

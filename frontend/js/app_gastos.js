@@ -164,6 +164,7 @@ async function registrarGastoNuevo() {
         
         cargarResumenMensual();
         cargarHistorial();
+        cargarCajaFuerte();
 
     } catch (e) {
         Swal.fire({
@@ -489,6 +490,7 @@ async function registrarRetiroDueno() {
         const data = await leerRespuestaGasto(res);
         Swal.fire({ icon: 'success', title: '¡Registrado!', text: data.mensaje, background: '#111C2A', color: '#fff', timer: 2000, showConfirmButton: false });
         cargarRetirosDueno();
+        cargarCajaFuerte();
     } catch (e) {
         Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
     }
@@ -554,10 +556,139 @@ async function anularRetiroDueno(id) {
     try {
         const res = await apiFetchSeguro(`/caja/retiro_dueno/${id}/anular`, { method: 'PUT' });
         await leerRespuestaGasto(res);
+        cargarCajaFuerte();
         await verRetirosDueno();
     } catch (e) {
         Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
     }
+}
+
+// =================================================================
+// 7. CAJA FUERTE (tesorería): saldo = suma del libro; el arqueo lo ajusta
+// =================================================================
+const ORIGENES_MOV_TESORERIA = {
+    SANGRIA: 'Sangría',
+    GASTO: 'Gasto',
+    PAGO_PROVEEDOR: 'Pago a proveedor',
+    RETIRO_DUENO: 'Retiro del dueño',
+    VENTA_DEPOSITO: 'Venta depósito',
+    ARQUEO: 'Arqueo',
+    ANULACION: 'Anulación'
+};
+
+async function cargarCajaFuerte() {
+    const saldoEl = document.getElementById('saldoCajaFuerte');
+    const estadoEl = document.getElementById('estadoCajaFuerte');
+    if (!saldoEl) return null;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/cuenta/CAJA_FUERTE?limite=100');
+        const data = await leerRespuestaGasto(res);
+        saldoEl.innerText = formatoPesos(data.saldo);
+        if (!data.inicializada) {
+            estadoEl.innerHTML = '<span class="text-warning fw-bold">Sin arqueo inicial:</span> contá lo que hay y cargalo con "Arqueo". Hasta entonces el saldo no es confiable.';
+        } else {
+            const a = data.ultimo_arqueo;
+            const dif = Number(a.diferencia) || 0;
+            const textoDif = Math.abs(dif) < 0.01 ? 'coincidió' : (dif > 0 ? `sobraban ${formatoPesos(dif)}` : `faltaban ${formatoPesos(-dif)}`);
+            estadoEl.innerText = `Último arqueo: ${String(a.fecha_hora || '').slice(0, 16)} (${textoDif}).`;
+        }
+        return data;
+    } catch (e) {
+        console.error('Error al cargar caja fuerte', e);
+        saldoEl.innerText = '—';
+        estadoEl.innerText = 'No se pudo cargar el saldo.';
+        return null;
+    }
+}
+
+async function hacerArqueoCajaFuerte() {
+    const data = await cargarCajaFuerte();
+    if (!data) return;
+    const primero = !data.inicializada;
+    const { value: form } = await Swal.fire({
+        title: primero ? 'Saldo inicial de la caja fuerte' : 'Arqueo de la caja fuerte',
+        html: `
+            <p class="small text-muted mb-2">${primero
+                ? 'Contá toda la plata que hay en la caja fuerte y cargá el total. Desde acá el sistema lleva la cuenta.'
+                : `Según el sistema hay <b>${formatoPesos(data.saldo)}</b>. Contá y cargá lo que hay de verdad.`}</p>
+            <input id="swal-arq-monto" type="number" inputmode="decimal" step="0.01" min="0" class="swal2-input form-control-dark w-75 mx-auto" placeholder="Lo que contaste ($)">
+            <div id="swal-arq-dif" class="small fw-bold mt-2"></div>
+            <input id="swal-arq-motivo" type="text" maxlength="200" autocomplete="off" class="swal2-input form-control-dark w-75 mx-auto" placeholder="${primero ? 'Nota (opcional)' : 'Motivo si no coincide'}">
+        `,
+        background: '#111C2A', color: '#fff',
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Guardar arqueo',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#7c3aed',
+        didOpen: (popup) => {
+            const monto = document.getElementById('swal-arq-monto');
+            const dif = document.getElementById('swal-arq-dif');
+            monto.addEventListener('input', () => {
+                if (primero || monto.value === '') { dif.innerText = ''; return; }
+                const d = (parseFloat(monto.value) || 0) - Number(data.saldo);
+                dif.className = `small fw-bold mt-2 ${Math.abs(d) < 0.01 ? 'text-success' : 'text-danger'}`;
+                dif.innerText = Math.abs(d) < 0.01 ? 'Coincide con el sistema.' : (d > 0 ? `Sobran ${formatoPesos(d)}` : `Faltan ${formatoPesos(-d)}`);
+            });
+            popup.querySelectorAll('input').forEach(el => {
+                el.addEventListener('keypress', (e) => { if (e.key === 'Enter') Swal.clickConfirm(); });
+            });
+            setTimeout(() => monto.focus(), 300);
+        },
+        preConfirm: () => {
+            const valor = document.getElementById('swal-arq-monto').value;
+            const contado = parseFloat(valor);
+            if (valor === '' || !Number.isFinite(contado) || contado < 0) { Swal.showValidationMessage('Cargá lo que contaste'); return false; }
+            const motivo = document.getElementById('swal-arq-motivo').value.trim();
+            const d = contado - Number(data.saldo);
+            if (!primero && Math.abs(d) >= 0.01 && motivo.length < 5) { Swal.showValidationMessage('No coincide: escribí el motivo'); return false; }
+            return { cuenta: 'CAJA_FUERTE', monto_contado: contado, motivo };
+        }
+    });
+    if (!form) return;
+    try {
+        Swal.fire({ title: 'Guardando...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        const res = await apiFetchSeguro('/tesoreria/arqueo', { method: 'POST', body: JSON.stringify(form) });
+        const r = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: 'Arqueo guardado', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarCajaFuerte();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
+async function verMovimientosCajaFuerte() {
+    const data = await cargarCajaFuerte();
+    if (!data) {
+        Swal.fire({ icon: 'error', title: 'Error', text: 'No se pudieron cargar los movimientos.', background: '#111C2A', color: '#fff' });
+        return;
+    }
+    const filas = (data.movimientos || []).length === 0
+        ? '<tr><td colspan="3" class="py-4 text-muted">Sin movimientos todavía.</td></tr>'
+        : data.movimientos.map(m => {
+            const entra = Number(m.monto) > 0;
+            return `
+                <tr>
+                    <td class="small text-nowrap">${escGasto(String(m.fecha_hora || '').slice(5, 16))}</td>
+                    <td class="text-start">
+                        <div class="fw-bold">${escGasto(ORIGENES_MOV_TESORERIA[m.origen_tipo] || m.origen_tipo)}</div>
+                        <div class="small text-muted text-break">${escGasto(m.concepto)}</div>
+                    </td>
+                    <td class="text-end fw-bold text-nowrap ${entra ? 'text-success' : 'text-danger'}">${entra ? '+' : '−'}${formatoPesos(Math.abs(m.monto))}</td>
+                </tr>`;
+        }).join('');
+    Swal.fire({
+        title: 'Caja fuerte',
+        width: 620,
+        html: `
+            <div class="fw-bold mb-2" style="color:#c4b5fd;">Saldo: ${formatoPesos(data.saldo)}</div>
+            <div class="table-responsive text-start" style="max-height:420px; overflow-y:auto;">
+                <table class="table table-dark table-sm align-middle mb-0"><tbody>${filas}</tbody></table>
+            </div>`,
+        background: '#111C2A', color: '#fff',
+        showConfirmButton: false,
+        showCloseButton: true
+    });
 }
 
 // Asegurate de que tu DOMContentLoaded final quede así:
@@ -566,6 +697,11 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarResumenMensual();
     cargarHistorial();
     cargarRetirosDueno();
+    cargarCajaFuerte();
+    const btnArqueo = document.getElementById('btnArqueoCajaFuerte');
+    if (btnArqueo) btnArqueo.addEventListener('click', hacerArqueoCajaFuerte);
+    const btnMovs = document.getElementById('btnMovsCajaFuerte');
+    if (btnMovs) btnMovs.addEventListener('click', verMovimientosCajaFuerte);
     const btnGestion = document.getElementById('btnGestionCategorias');
     if (btnGestion) btnGestion.addEventListener('click', abrirGestionCategorias);
     const btnRetiro = document.getElementById('btnRetiroDueno');
