@@ -17,8 +17,22 @@ async function apiFetchSeguro(recurso, config = {}) {
     return res;
 }
 
-const empleadoStorage = JSON.parse(localStorage.getItem('empleado_pos')) || {};
-const idUsuarioReal = empleadoStorage.id || parseInt(localStorage.getItem('usuario_id')) || 1;
+function escGasto(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+// FastAPI devuelve {detail} en errores (texto o lista de validación); el código viejo solo miraba {error}.
+async function leerRespuestaGasto(res) {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error || data.detail) {
+        let msg = data.error || data.detail || 'El servidor rechazó la operación.';
+        if (Array.isArray(msg)) msg = msg.map((d) => d.msg || '').filter(Boolean).join(' · ') || 'Datos inválidos.';
+        throw new Error(msg);
+    }
+    return data;
+}
 
 // --- 1. CARGAR CATEGORÍAS EN EL SELECTOR ---
 async function cargarCategorias() {
@@ -31,7 +45,7 @@ async function cargarCategorias() {
         
         if (data.categorias) {
             data.categorias.forEach(cat => {
-                selector.innerHTML += `<option value="${cat.id}">${cat.nombre}</option>`;
+                selector.innerHTML += `<option value="${cat.id}">${escGasto(cat.nombre)}</option>`;
             });
         }
     } catch (e) {
@@ -78,9 +92,7 @@ async function crearCategoria() {
                 method: 'POST',
                 body: JSON.stringify(formValues)
             });
-            const data = await res.json();
-            
-            if(data.error) throw new Error(data.error);
+            const data = await leerRespuestaGasto(res);
             
             Swal.fire({
                 icon: 'success', 
@@ -124,8 +136,7 @@ async function registrarGastoNuevo() {
             descripcion_detalle: detalle,
             monto: parseFloat(monto),
             metodo_pago: origen,
-            origen_fondos: origen,
-            usuario_id: idUsuarioReal        
+            origen_fondos: origen
         };
 
         const res = await apiFetchSeguro('/gastos/registrar', {
@@ -133,9 +144,7 @@ async function registrarGastoNuevo() {
             body: JSON.stringify(payload)
         });
 
-        const data = await res.json();
-
-        if (data.error) throw new Error(data.error);
+        const data = await leerRespuestaGasto(res);
 
         Swal.fire({
             icon: 'success',
@@ -232,15 +241,18 @@ async function cargarHistorial() {
             // Etiqueta de color según de dónde salió la plata (o si no salió de ningún lado)
             const origenInfo = mapearOrigenFondos(mov.origen_fondos);
 
+            const badgeOrigen = `<span class="badge ${origenInfo.color}">${origenInfo.texto}</span>`
+                + (esAnulado ? '<span class="badge bg-danger ms-1">ANULADO</span>' : '');
             tbody.innerHTML += `
                 <tr class="${esAnulado ? 'text-decoration-line-through opacity-50' : ''}">
-                    <td class="text-white">${fechaCorta}</td>
-                    <td class="text-start fw-bold text-info">${mov.categoria}</td>
-                    <td class="text-start text-muted">${mov.detalle}</td>
-                    <td>
-                        <span class="badge ${origenInfo.color}">${origenInfo.texto}</span>
-                        ${esAnulado ? '<span class="badge bg-danger ms-1">ANULADO</span>' : ''}
+                    <td class="text-white">${escGasto(fechaCorta)}</td>
+                    <td class="text-start">
+                        <div class="fw-bold text-info">${escGasto(mov.categoria)}</div>
+                        <div class="d-md-none small text-muted text-break">${escGasto(mov.detalle)}</div>
+                        <div class="d-md-none mt-1">${badgeOrigen}</div>
                     </td>
+                    <td class="text-start text-muted col-hide-xs">${escGasto(mov.detalle)}</td>
+                    <td class="col-hide-xs">${badgeOrigen}</td>
                     <td class="text-end fw-bold text-danger pe-4">${plataLimpia}</td>
                 </tr>
             `;
@@ -278,8 +290,8 @@ function renderModalGestionCategorias(categorias) {
             const inactiva = (c.activo ?? 1) === 0;
             return `
                 <tr data-id="${c.id}" class="${inactiva ? 'opacity-50' : ''}">
-                    <td class="text-start">${c.nombre} ${inactiva ? '<span class="badge bg-secondary ms-1">Oculta</span>' : ''}</td>
-                    <td class="small">${ETIQUETAS_TIPO_CATEGORIA[c.tipo_categoria] || c.tipo_categoria}</td>
+                    <td class="text-start">${escGasto(c.nombre)} ${inactiva ? '<span class="badge bg-secondary ms-1">Oculta</span>' : ''}</td>
+                    <td class="small">${escGasto(ETIQUETAS_TIPO_CATEGORIA[c.tipo_categoria] || c.tipo_categoria)}</td>
                     <td class="text-end">
                         <button class="btn btn-sm btn-outline-info btn-editar-cat" title="Editar"><i class="bi bi-pencil"></i></button>
                         <button class="btn btn-sm btn-outline-danger btn-eliminar-cat" title="Eliminar / Ocultar"><i class="bi bi-trash"></i></button>
@@ -323,9 +335,9 @@ function renderModalGestionCategorias(categorias) {
 
 async function editarCategoriaModal(cat) {
     const { value: formValues } = await Swal.fire({
-        title: `Editar: ${cat.nombre}`,
+        title: `Editar: ${escGasto(cat.nombre)}`,
         html: `
-            <input id="swal-edit-nombre" class="swal2-input form-control-dark w-75 mx-auto" value="${cat.nombre}">
+            <input id="swal-edit-nombre" class="swal2-input form-control-dark w-75 mx-auto" value="${escGasto(cat.nombre)}">
             <select id="swal-edit-tipo" class="swal2-select form-select-dark w-75 mx-auto mt-3">
                 <option value="OPERATIVO" ${cat.tipo_categoria === 'OPERATIVO' ? 'selected' : ''}>Gasto del Local (Costos)</option>
                 <option value="RETIRO_SOCIO" ${cat.tipo_categoria === 'RETIRO_SOCIO' ? 'selected' : ''}>Retiro Personal / Socio</option>
@@ -364,8 +376,7 @@ async function editarCategoriaModal(cat) {
         const res = await apiFetchSeguro(`/gastos/categorias/${cat.id}`, {
             method: 'PUT', body: JSON.stringify(formValues)
         });
-        const data = await res.json();
-        if (data.detail || data.error) throw new Error(data.detail || data.error);
+        const data = await leerRespuestaGasto(res);
 
         Swal.fire({ icon: 'success', title: '¡Listo!', text: data.mensaje, background: '#111C2A', color: '#fff', timer: 1500, showConfirmButton: false });
         cargarCategorias();
@@ -377,7 +388,7 @@ async function editarCategoriaModal(cat) {
 
 async function eliminarCategoriaConfirmar(cat) {
     const result = await Swal.fire({
-        title: `¿Eliminar "${cat.nombre}"?`,
+        title: `¿Eliminar "${escGasto(cat.nombre)}"?`,
         html: 'Si nunca tuvo gastos registrados, se borra para siempre.<br>Si ya tiene historial, se oculta en vez de borrarse (no se pierde ningún dato viejo).',
         icon: 'warning',
         background: '#111C2A', color: '#fff',
@@ -389,8 +400,7 @@ async function eliminarCategoriaConfirmar(cat) {
 
     try {
         const res = await apiFetchSeguro(`/gastos/categorias/${cat.id}`, { method: 'DELETE' });
-        const data = await res.json();
-        if (data.detail || data.error) throw new Error(data.detail || data.error);
+        const data = await leerRespuestaGasto(res);
 
         Swal.fire({ icon: 'success', title: '¡Listo!', text: data.mensaje, background: '#111C2A', color: '#fff' });
         cargarCategorias();

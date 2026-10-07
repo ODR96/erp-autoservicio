@@ -71,11 +71,11 @@ def get_db():
 
 class NuevaCategoria(BaseModel):
     nombre: str = Field(..., min_length=2, max_length=50)
-    tipo_categoria: str = Field(..., description="OPERATIVO o RETIRO_SOCIO")
+    tipo_categoria: str = Field(..., pattern="^(OPERATIVO|RETIRO_SOCIO|MOVIMIENTO_INTERNO)$")
 
 class EditarCategoria(BaseModel):
     nombre: str = Field(..., min_length=2, max_length=50)
-    tipo_categoria: str = Field(..., description="OPERATIVO o RETIRO_SOCIO")
+    tipo_categoria: str = Field(..., pattern="^(OPERATIVO|RETIRO_SOCIO|MOVIMIENTO_INTERNO)$")
     activo: bool = True
 
 class NuevoGasto(BaseModel):
@@ -85,7 +85,28 @@ class NuevoGasto(BaseModel):
     metodo_pago: str = Field(..., min_length=2, max_length=50)
     origen_fondos: str = Field(..., min_length=2, max_length=50)
     turno_id: Optional[int] = None
-    usuario_id: int
+    usuario_id: Optional[int] = None
+
+
+def _turno_para_retiro(db, turno_id):
+    """Turno del que sale el efectivo. Sin turno explícito, solo si hay una única caja del mostrador abierta."""
+    if turno_id:
+        turno = db.execute(
+            "SELECT id, caja_id FROM turnos_caja WHERE estado_turno = 'ABIERTO' AND id = ?", (turno_id,)
+        ).fetchone()
+        if not turno:
+            raise HTTPException(status_code=400, detail="El turno de caja está cerrado. Abrí uno para sacar efectivo del cajón.")
+        return turno
+    abiertos = db.execute('''
+        SELECT t.id, t.caja_id FROM turnos_caja t
+        LEFT JOIN cajas_fisicas cf ON cf.id = t.caja_id
+        WHERE t.estado_turno = 'ABIERTO' AND IFNULL(cf.solo_admin, 0) = 0
+    ''').fetchall()
+    if not abiertos:
+        raise HTTPException(status_code=400, detail="No hay caja del mostrador abierta para sacar efectivo.")
+    if len(abiertos) > 1:
+        raise HTTPException(status_code=400, detail="Hay más de una caja del mostrador abierta. Cargá el gasto desde la caja que pone la plata (F10).")
+    return abiertos[0]
 
 # =================================================================
 # 1. RUTAS BLINDADAS
@@ -182,9 +203,24 @@ def _alerta_gasto_alto(monto: float, detalle: str):
         f"Detalle: {detalle or 'Sin detalle'}"
     )
 
-@router.post("/registrar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
-def registrar_gasto_operativo(gasto: NuevoGasto, background_tasks: BackgroundTasks, db: sqlite3.Connection = Depends(get_db)):
+@router.post("/registrar")
+def registrar_gasto_operativo(
+    gasto: NuevoGasto,
+    background_tasks: BackgroundTasks,
+    db: sqlite3.Connection = Depends(get_db),
+    sesion: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"])),
+):
     try:
+        try:
+            gasto.usuario_id = int(sesion.get("sub"))
+        except (TypeError, ValueError):
+            gasto.usuario_id = gasto.usuario_id or 1
+        # El cajero solo saca del cajón de su turno, nunca de la caja fuerte.
+        if sesion.get("rol") == "CAJERO":
+            gasto.origen_fondos = "CAJA_DIARIA"
+            gasto.metodo_pago = "EFECTIVO"
+            if not gasto.turno_id:
+                raise HTTPException(status_code=400, detail="Abrí un turno de caja para registrar un gasto.")
         cat = db.execute(
             "SELECT nombre, IFNULL(tipo_categoria, 'OPERATIVO') as tipo_categoria FROM categorias_gasto WHERE id = ?",
             (gasto.categoria_id,)
@@ -200,24 +236,19 @@ def registrar_gasto_operativo(gasto: NuevoGasto, background_tasks: BackgroundTas
             raise HTTPException(status_code=400, detail="Esa categoría no es un gasto del local.")
 
         fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
-        
+        sale_del_cajon = "CAJA_DIARIA" in gasto.origen_fondos.upper() or "EFECTIVO" in gasto.metodo_pago.upper()
+        turno = _turno_para_retiro(db, gasto.turno_id) if sale_del_cajon else None
+        turno_gasto = turno["id"] if turno else gasto.turno_id
+
         db.execute('''
             INSERT INTO gastos_operativos (fecha, categoria_id, descripcion_detalle, monto, metodo_pago, origen_fondos, usuario_id, turno_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (fecha_actual, gasto.categoria_id, gasto.descripcion_detalle, gasto.monto, gasto.metodo_pago, gasto.origen_fondos, gasto.usuario_id, gasto.turno_id))
+        ''', (fecha_actual, gasto.categoria_id, gasto.descripcion_detalle, gasto.monto, gasto.metodo_pago, gasto.origen_fondos, gasto.usuario_id, turno_gasto))
         
         # EL ARREGLO DEL RETIRO DEL POS
         retiro_de_caja = False
         turno_retiro = None
-        if "CAJA_DIARIA" in gasto.origen_fondos.upper() or "EFECTIVO" in gasto.metodo_pago.upper():
-            turno = db.execute("SELECT id, caja_id FROM turnos_caja WHERE estado_turno = 'ABIERTO' AND id = ?", (gasto.turno_id,)).fetchone()
-            if not turno:
-                turno = db.execute("SELECT id, caja_id FROM turnos_caja WHERE estado_turno = 'ABIERTO' ORDER BY id DESC LIMIT 1").fetchone()
-                
-            if not turno:
-                raise HTTPException(status_code=400, detail="No hay turno abierto para sacar efectivo.")
-                
-            # Ahora inyectamos los 7 parámetros correctos
+        if turno:
             db.execute('''
                 INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id, caja_id)
                 VALUES (?, ?, 'RETIRO', ?, ?, ?, ?)
@@ -237,13 +268,13 @@ def registrar_gasto_operativo(gasto: NuevoGasto, background_tasks: BackgroundTas
             )
         elif gasto.monto > 50000:
             background_tasks.add_task(_alerta_gasto_alto, gasto.monto, gasto.descripcion_detalle)
-        return {"mensaje": "Gasto y retiro registrados."}
+        return {"mensaje": "Gasto registrado y retirado del cajón." if retiro_de_caja else "Gasto registrado."}
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
         logger.error(f"Error registrando gasto: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Ocurrió un error interno al registrar el gasto.")
 
 @router.get("/historial", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def obtener_historial_gastos(limite: int = 50, db: sqlite3.Connection = Depends(get_db)):
@@ -253,7 +284,7 @@ def obtener_historial_gastos(limite: int = 50, db: sqlite3.Connection = Depends(
                    g.monto, g.origen_fondos, IFNULL(g.estado, 'ACTIVO') as estado
             FROM gastos_operativos g
             JOIN categorias_gasto c ON g.categoria_id = c.id
-            ORDER BY g.fecha DESC LIMIT ?
+            ORDER BY g.fecha DESC, g.id DESC LIMIT ?
         ''', (limite,))
         return {"movimientos": [dict(row) for row in cursor.fetchall()]}
     except Exception as e:
