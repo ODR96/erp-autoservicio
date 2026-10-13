@@ -22,6 +22,51 @@ app.use(express.json());
 
 let listo = false;
 const gruposVistos = new Map();
+const CONTROL_MS = 10 * 60 * 1000;
+const FALLAS_PARA_SALIR = 2;
+let fallasSeguidas = 0;
+let controlTimer = null;
+
+function salir(motivo) {
+    console.error(`Bot sale para que PM2 lo reinicie: ${motivo}`);
+    setTimeout(() => process.exit(1), 400);
+}
+
+async function estadoConTimeout() {
+    let timer;
+    const pendiente = client.getState();
+    pendiente.catch(() => {});
+    try {
+        return await Promise.race([
+            pendiente,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error('getState no respondió')), 20000);
+            })
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function empezarControl() {
+    if (controlTimer) return;
+    controlTimer = setInterval(async () => {
+        try {
+            const estado = await estadoConTimeout();
+            if (estado === 'CONNECTED') {
+                fallasSeguidas = 0;
+                return;
+            }
+            fallasSeguidas += 1;
+            console.log(`Control: estado ${estado || 'vacío'} (${fallasSeguidas}/${FALLAS_PARA_SALIR})`);
+        } catch (e) {
+            fallasSeguidas += 1;
+            console.log(`Control: ${(e && e.message) || e} (${fallasSeguidas}/${FALLAS_PARA_SALIR})`);
+        }
+        if (fallasSeguidas >= FALLAS_PARA_SALIR) salir('control de conexión');
+    }, CONTROL_MS);
+    if (controlTimer.unref) controlTimer.unref();
+}
 
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: process.env.WWEBJS_AUTH || '.wwebjs_auth' }),
@@ -37,12 +82,24 @@ client.on('qr', (qr) => {
 
 client.on('ready', () => {
     listo = true;
+    fallasSeguidas = 0;
     console.log('BOT CONECTADO EXITOSAMENTE A WHATSAPP');
+    empezarControl();
 });
 
 client.on('disconnected', (razon) => {
     listo = false;
     console.log('WhatsApp desconectado:', razon);
+    if (String(razon) === 'LOGOUT') {
+        console.log('SESIÓN CERRADA. Al reiniciar va a pedir el QR: hay que escanearlo.');
+    }
+    salir(razon || 'disconnected');
+});
+
+client.on('auth_failure', (msg) => {
+    listo = false;
+    console.error('Fallo de autenticación:', msg);
+    salir('auth_failure');
 });
 
 function normalizarDestino(raw) {
@@ -336,7 +393,10 @@ app.post('/enviar', exigirToken, (req, res) => {
         .catch((error) => console.error('Error enviando mensaje:', error));
 });
 
-client.initialize();
+client.initialize().catch((e) => {
+    console.error('No arrancó WhatsApp:', (e && e.message) || e);
+    salir('initialize');
+});
 app.listen(PUERTO, '127.0.0.1', () => {
     console.log(`Puente API solo en 127.0.0.1:${PUERTO}`);
     console.log(`Fotos de factura → ${ERP_URL}/proveedores/borradores/desde_whatsapp`);
