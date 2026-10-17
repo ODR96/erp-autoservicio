@@ -278,6 +278,20 @@ class NuevaVenta(BaseModel):
     cajero_nombre: str = "Sistema"
     turno_id: int
 
+def _anotar_transferencias_venta(cursor, venta, venta_id, total_final, usuario_id):
+    """La transferencia del mostrador no entra al banco hasta que el dueño la cuenta."""
+    from backend.mod_tesoreria.rutas_tesoreria import crear_pendiente
+    if (venta.metodo_pago or "").upper() == "MIXTO":
+        for pata in venta.pagos_mixtos or []:
+            if "TRANSFERENCIA" in (pata.metodo or "").upper() and float(pata.monto or 0) > 0.009:
+                crear_pendiente(cursor, "BANCO", float(pata.monto), f"Transferencia ticket #{venta_id}",
+                                "TRANSFERENCIA_VENTA", venta_id, venta.turno_id, usuario_id)
+        return
+    if "TRANSFERENCIA" in (venta.metodo_pago or "").upper() and float(total_final or 0) > 0.009:
+        crear_pendiente(cursor, "BANCO", float(total_final), f"Transferencia ticket #{venta_id}",
+                        "TRANSFERENCIA_VENTA", venta_id, venta.turno_id, usuario_id)
+
+
 def _metodo_es_qr(metodo: str) -> bool:
     m = (metodo or "").upper()
     return "QR" in m
@@ -561,6 +575,7 @@ def registrar_venta(venta: NuevaVenta, background_tasks: BackgroundTasks):
             cae_afip = "SIMULADO-736482649274"
             cursor.execute("UPDATE ventas_cabecera SET tipo_comprobante = 'FACTURA B', estado = 'FACTURADO_AFIP' WHERE id = ?", (venta_id,))
 
+        _anotar_transferencias_venta(cursor, venta, venta_id, total_final, usuario_id_caja)
         aviso = _aviso_descuento(
             cursor,
             venta.descuento_recargo_global,

@@ -11,6 +11,8 @@ ZONA_AR = timezone(timedelta(hours=-3))
 
 CUENTAS = {
     "CAJA_FUERTE": "Caja fuerte",
+    "MERCADOPAGO": "Mercado Pago",
+    "BANCO": "Banco",
 }
 
 
@@ -105,7 +107,7 @@ def mover_tesoreria(cursor, cuenta: str, monto: float, concepto: str, origen_tip
         saldo = saldo_cuenta(cursor, cuenta)
         if saldo + monto < -0.009:
             raise ErrorTesoreria(
-                f"La {CUENTAS[cuenta].lower()} tiene ${saldo:,.2f} según el sistema y querés sacar ${-monto:,.2f}. "
+                f"{CUENTAS[cuenta]} tiene ${saldo:,.2f} según el sistema y querés sacar ${-monto:,.2f}. "
                 f"Si en realidad hay más, hacé un arqueo en Tesorería."
             )
     cursor.execute('''
@@ -130,6 +132,37 @@ def crear_pendiente(cursor, cuenta: str, monto: float, concepto: str, origen_tip
     ''', (datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S"), cuenta, monto, (concepto or "")[:200],
           origen_tipo, origen_id, turno_id, usuario_id))
     return cursor.lastrowid
+
+
+def asentar_cobro_qr(cursor, cobro_id, monto, comision):
+    """El neto del QR entra a Mercado Pago. Si ya se asentó este cobro, no lo repite."""
+    ya = cursor.execute(
+        "SELECT 1 FROM tesoreria_movimientos WHERE origen_tipo = 'COBRO_QR' AND origen_id = ?",
+        (cobro_id,),
+    ).fetchone()
+    if ya:
+        return None
+    neto = round(float(monto or 0) - float(comision or 0), 2)
+    if neto < 0.01:
+        return None
+    return mover_tesoreria(cursor, "MERCADOPAGO", neto, f"QR #{cobro_id}", "COBRO_QR", cobro_id, None)
+
+
+def revertir_cobro_qr(cursor, cobro_id):
+    """Saca de Mercado Pago el neto que había entrado con ese QR."""
+    ya = cursor.execute(
+        "SELECT 1 FROM tesoreria_movimientos WHERE origen_tipo = 'REEMBOLSO_QR' AND origen_id = ?",
+        (cobro_id,),
+    ).fetchone()
+    if ya:
+        return None
+    fila = cursor.execute(
+        "SELECT monto FROM tesoreria_movimientos WHERE origen_tipo = 'COBRO_QR' AND origen_id = ?",
+        (cobro_id,),
+    ).fetchone()
+    if not fila:
+        return None
+    return mover_tesoreria(cursor, "MERCADOPAGO", -float(fila[0]), f"Reembolso QR #{cobro_id}", "REEMBOLSO_QR", cobro_id, None)
 
 
 def _usuario_de(sesion):
@@ -308,5 +341,44 @@ def recibir_pendiente(pendiente_id: int, body: RecepcionPendiente, sesion: dict 
     except Exception:
         conexion.rollback()
         raise HTTPException(status_code=500, detail="No se pudo registrar la recepción.")
+    finally:
+        conexion.close()
+
+
+class Transferencia(BaseModel):
+    origen: str
+    destino: str
+    monto: float
+    motivo: Optional[str] = ""
+
+
+@router.post("/transferencia")
+def transferir(body: Transferencia, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    """Pasa plata de una cuenta a otra. No es un gasto: sale de una y entra en la otra."""
+    origen = (body.origen or "").upper()
+    destino = (body.destino or "").upper()
+    if origen not in CUENTAS or destino not in CUENTAS:
+        raise HTTPException(status_code=400, detail="Cuenta de tesorería inválida.")
+    if origen == destino:
+        raise HTTPException(status_code=400, detail="Elegí dos cuentas distintas.")
+    monto = round(float(body.monto or 0), 2)
+    if monto < 0.01:
+        raise HTTPException(status_code=400, detail="El monto tiene que ser mayor a 0.")
+    motivo = " ".join((body.motivo or "").split())[:120]
+    nota = f": {motivo}" if motivo else ""
+    usuario_id = _usuario_de(sesion)
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        sale = mover_tesoreria(cursor, origen, -monto, f"Pasa a {CUENTAS[destino]}{nota}", "TRANSFERENCIA", None, usuario_id)
+        mover_tesoreria(cursor, destino, monto, f"Entra de {CUENTAS[origen]}{nota}", "TRANSFERENCIA", sale, usuario_id)
+        conexion.commit()
+        return {"mensaje": f"Pasaron ${monto:,.2f} de {CUENTAS[origen]} a {CUENTAS[destino]}."}
+    except ErrorTesoreria as e:
+        conexion.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo pasar la plata.")
     finally:
         conexion.close()

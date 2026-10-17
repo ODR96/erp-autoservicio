@@ -576,50 +576,80 @@ const ORIGENES_MOV_TESORERIA = {
     ADELANTO: 'Adelanto de sueldo',
     SUELDO: 'Sueldo',
     ARQUEO: 'Arqueo',
-    ANULACION: 'Anulación'
+    ANULACION: 'Anulación',
+    COBRO_QR: 'QR Mercado Pago',
+    REEMBOLSO_QR: 'Reembolso QR',
+    TRANSFERENCIA: 'Pase entre cuentas',
+    TRANSFERENCIA_VENTA: 'Transferencia de venta',
+    CAMBIO: 'Cambio al cajón'
 };
 
+const CUENTAS_TESORERIA = ['CAJA_FUERTE', 'MERCADOPAGO', 'BANCO'];
+
+function textoEstadoCuenta(data) {
+    if (!data.inicializada) {
+        return '<span class="text-warning fw-bold">Sin arqueo inicial.</span> Contá lo que hay y cargalo. Hasta entonces el saldo no frena.';
+    }
+    const a = data.ultimo_arqueo;
+    const dif = Number(a.diferencia) || 0;
+    const textoDif = Math.abs(dif) < 0.01 ? 'coincidió' : (dif > 0 ? `sobraban ${formatoPesos(dif)}` : `faltaban ${formatoPesos(-dif)}`);
+    return `Último arqueo: ${escGasto(String(a.fecha_hora || '').slice(0, 16))} (${textoDif}).`;
+}
+
 async function cargarCajaFuerte() {
-    const saldoEl = document.getElementById('saldoCajaFuerte');
-    const estadoEl = document.getElementById('estadoCajaFuerte');
-    if (!saldoEl) return null;
+    const cont = document.getElementById('cuentasTesoreria');
+    if (!cont) return null;
     try {
-        const res = await apiFetchSeguro('/tesoreria/cuenta/CAJA_FUERTE?limite=100');
-        const data = await leerRespuestaGasto(res);
-        saldoEl.innerText = formatoPesos(data.saldo);
-        if (!data.inicializada) {
-            estadoEl.innerHTML = '<span class="text-warning fw-bold">Sin arqueo inicial:</span> contá lo que hay y cargalo con "Arqueo". Hasta entonces el saldo no es confiable.';
-        } else {
-            const a = data.ultimo_arqueo;
-            const dif = Number(a.diferencia) || 0;
-            const textoDif = Math.abs(dif) < 0.01 ? 'coincidió' : (dif > 0 ? `sobraban ${formatoPesos(dif)}` : `faltaban ${formatoPesos(-dif)}`);
-            estadoEl.innerText = `Último arqueo: ${String(a.fecha_hora || '').slice(0, 16)} (${textoDif}).`;
+        const cuentas = [];
+        for (const codigo of CUENTAS_TESORERIA) {
+            const res = await apiFetchSeguro(`/tesoreria/cuenta/${codigo}?limite=100`);
+            cuentas.push(await leerRespuestaGasto(res));
         }
-        const btnPend = document.getElementById('btnPorRecibir');
-        const pend = data.por_recibir || { cantidad: 0, total: 0 };
-        if (btnPend) {
-            btnPend.style.display = pend.cantidad > 0 ? 'inline-block' : 'none';
-            document.getElementById('txtPorRecibir').innerText =
-                `Por recibir: ${formatoPesos(pend.total)} (${pend.cantidad} ${pend.cantidad === 1 ? 'sobre' : 'sobres'}) — no suma hasta que lo cuentes`;
-        }
-        return data;
+        cont.innerHTML = cuentas.map(c => {
+            const pend = c.por_recibir || { cantidad: 0, total: 0 };
+            const aviso = pend.cantidad > 0
+                ? `<button type="button" class="btn btn-sm btn-warning fw-bold mt-2" data-teso="pend" data-cuenta="${escGasto(c.cuenta)}">Por recibir: ${formatoPesos(pend.total)} (${pend.cantidad}) — no suma hasta que lo cuentes</button>`
+                : '';
+            return `
+                <div class="kpi-card p-3 d-flex flex-wrap align-items-center justify-content-between gap-3" style="border-left-color:#a78bfa;">
+                    <div>
+                        <h6 class="text-muted text-uppercase fw-bold small mb-1">${escGasto(c.nombre)} (según el sistema)</h6>
+                        <h2 class="fw-bold mb-0" style="color:#c4b5fd;">${formatoPesos(c.saldo)}</h2>
+                        <div class="small text-muted mt-1">${textoEstadoCuenta(c)}</div>
+                        ${aviso}
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn fw-bold" style="background:#7c3aed; color:#fff;" data-teso="arqueo" data-cuenta="${escGasto(c.cuenta)}">Arqueo</button>
+                        <button type="button" class="btn btn-outline-light" data-teso="movs" data-cuenta="${escGasto(c.cuenta)}" title="Movimientos">Lista</button>
+                    </div>
+                </div>`;
+        }).join('') + `
+            <button type="button" id="btnPasarPlata" class="btn btn-outline-info fw-bold align-self-start">Pasar plata entre cuentas</button>`;
+        return cuentas[0];
     } catch (e) {
-        console.error('Error al cargar caja fuerte', e);
-        saldoEl.innerText = '—';
-        estadoEl.innerText = 'No se pudo cargar el saldo.';
+        console.error('Error al cargar tesorería', e);
+        cont.innerHTML = '<div class="text-warning">No se pudieron cargar las cuentas.</div>';
         return null;
     }
 }
 
-async function hacerArqueoCajaFuerte() {
-    const data = await cargarCajaFuerte();
-    if (!data) return;
+async function hacerArqueoCajaFuerte(cuenta) {
+    const codigo = (typeof cuenta === 'string' && cuenta) ? cuenta : 'CAJA_FUERTE';
+    let data;
+    try {
+        const res = await apiFetchSeguro(`/tesoreria/cuenta/${codigo}?limite=1`);
+        data = await leerRespuestaGasto(res);
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+        return;
+    }
+    const nombre = data.nombre || codigo;
     const primero = !data.inicializada;
     const { value: form } = await Swal.fire({
-        title: primero ? 'Saldo inicial de la caja fuerte' : 'Arqueo de la caja fuerte',
+        title: primero ? `Saldo inicial de ${nombre}` : `Arqueo de ${nombre}`,
         html: `
             <p class="small text-muted mb-2">${primero
-                ? 'Contá toda la plata que hay en la caja fuerte y cargá el total. Desde acá el sistema lleva la cuenta.'
+                ? `Contá toda la plata que hay en ${escGasto(nombre)} y cargá el total. Desde acá el sistema lleva la cuenta.`
                 : `Según el sistema hay <b>${formatoPesos(data.saldo)}</b>. Contá y cargá lo que hay de verdad.`}</p>
             <input id="swal-arq-monto" type="number" inputmode="decimal" step="0.01" min="0" class="swal2-input form-control-dark w-75 mx-auto" placeholder="Lo que contaste ($)">
             <div id="swal-arq-dif" class="small fw-bold mt-2"></div>
@@ -652,7 +682,7 @@ async function hacerArqueoCajaFuerte() {
             const motivo = document.getElementById('swal-arq-motivo').value.trim();
             const d = contado - Number(data.saldo);
             if (!primero && Math.abs(d) >= 0.01 && motivo.length < 5) { Swal.showValidationMessage('No coincide: escribí el motivo'); return false; }
-            return { cuenta: 'CAJA_FUERTE', monto_contado: contado, motivo };
+            return { cuenta: codigo, monto_contado: contado, motivo };
         }
     });
     if (!form) return;
@@ -669,6 +699,7 @@ async function hacerArqueoCajaFuerte() {
 
 // Sobres de cierre y sangrías del cajero: no suman hasta que el dueño los cuenta.
 let pendientesCajaFuerte = [];
+let cuentaPorRecibir = 'CAJA_FUERTE';
 
 function difPendienteHtml(dif) {
     const d = Number(dif) || 0;
@@ -676,10 +707,11 @@ function difPendienteHtml(dif) {
     return `<span class="text-danger fw-bold">${d < 0 ? 'faltaron' : 'sobraron'} ${formatoPesos(Math.abs(d))}</span>`;
 }
 
-async function verPorRecibir() {
+async function verPorRecibir(cuenta) {
+    if (typeof cuenta === 'string' && cuenta) cuentaPorRecibir = cuenta;
     let data;
     try {
-        const res = await apiFetchSeguro('/tesoreria/pendientes?cuenta=CAJA_FUERTE&recibidos=10');
+        const res = await apiFetchSeguro(`/tesoreria/pendientes?cuenta=${cuentaPorRecibir}&recibidos=10`);
         data = await leerRespuestaGasto(res);
     } catch (e) {
         Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
@@ -707,7 +739,7 @@ async function verPorRecibir() {
                 <td class="text-end small text-nowrap">${difPendienteHtml(p.diferencia)}</td>
             </tr>`).join('');
     Swal.fire({
-        title: 'Por recibir en la caja fuerte',
+        title: 'Por recibir',
         width: 680,
         html: `
             <p class="small text-muted mb-2">Lo declaró el cajero. Entra a la caja fuerte lo que cuentes vos, no lo declarado.</p>
@@ -775,8 +807,15 @@ async function recibirPendiente(id) {
     }
 }
 
-async function verMovimientosCajaFuerte() {
-    const data = await cargarCajaFuerte();
+async function verMovimientosCajaFuerte(cuenta) {
+    const codigo = (typeof cuenta === 'string' && cuenta) ? cuenta : 'CAJA_FUERTE';
+    let data;
+    try {
+        const res = await apiFetchSeguro(`/tesoreria/cuenta/${codigo}?limite=100`);
+        data = await leerRespuestaGasto(res);
+    } catch (e) {
+        data = null;
+    }
     if (!data) {
         Swal.fire({ icon: 'error', title: 'Error', text: 'No se pudieron cargar los movimientos.', background: '#111C2A', color: '#fff' });
         return;
@@ -796,7 +835,7 @@ async function verMovimientosCajaFuerte() {
                 </tr>`;
         }).join('');
     Swal.fire({
-        title: 'Caja fuerte',
+        title: data.nombre || 'Cuenta',
         width: 620,
         html: `
             <div class="fw-bold mb-2" style="color:#c4b5fd;">Saldo: ${formatoPesos(data.saldo)}</div>
@@ -809,6 +848,40 @@ async function verMovimientosCajaFuerte() {
     });
 }
 
+async function pasarPlataEntreCuentas() {
+    const opciones = CUENTAS_TESORERIA.map(c => `<option value="${c}">${c === 'CAJA_FUERTE' ? 'Caja fuerte' : (c === 'MERCADOPAGO' ? 'Mercado Pago' : 'Banco')}</option>`).join('');
+    const { value: form } = await Swal.fire({
+        title: 'Pasar plata',
+        html: `
+            <p class="small text-muted mb-2">Sale de una cuenta y entra en la otra. No es un gasto.</p>
+            <select id="swal-tr-origen" class="swal2-select">${opciones}</select>
+            <select id="swal-tr-destino" class="swal2-select">${opciones}</select>
+            <input id="swal-tr-monto" type="number" min="0" step="0.01" class="swal2-input" placeholder="Monto">
+            <input id="swal-tr-motivo" type="text" maxlength="120" class="swal2-input" placeholder="Nota (opcional)">`,
+        background: '#111C2A', color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Pasar',
+        confirmButtonColor: '#0ea5e9',
+        preConfirm: () => {
+            const origen = document.getElementById('swal-tr-origen').value;
+            const destino = document.getElementById('swal-tr-destino').value;
+            const monto = parseFloat(document.getElementById('swal-tr-monto').value);
+            if (origen === destino) { Swal.showValidationMessage('Elegí dos cuentas distintas'); return false; }
+            if (!Number.isFinite(monto) || monto <= 0) { Swal.showValidationMessage('Cargá el monto'); return false; }
+            return { origen, destino, monto, motivo: document.getElementById('swal-tr-motivo').value.trim() };
+        }
+    });
+    if (!form) return;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/transferencia', { method: 'POST', body: JSON.stringify(form) });
+        const r = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: 'Listo', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarCajaFuerte();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
 // Asegurate de que tu DOMContentLoaded final quede así:
 document.addEventListener('DOMContentLoaded', () => {
     cargarCategorias();
@@ -816,12 +889,18 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarHistorial();
     cargarRetirosDueno();
     cargarCajaFuerte();
-    const btnArqueo = document.getElementById('btnArqueoCajaFuerte');
-    if (btnArqueo) btnArqueo.addEventListener('click', hacerArqueoCajaFuerte);
-    const btnMovs = document.getElementById('btnMovsCajaFuerte');
-    if (btnMovs) btnMovs.addEventListener('click', verMovimientosCajaFuerte);
-    const btnPend = document.getElementById('btnPorRecibir');
-    if (btnPend) btnPend.addEventListener('click', verPorRecibir);
+    const cuentas = document.getElementById('cuentasTesoreria');
+    if (cuentas) cuentas.addEventListener('click', (e) => {
+        const pasar = e.target.closest('#btnPasarPlata');
+        if (pasar) { pasarPlataEntreCuentas(); return; }
+        const btn = e.target.closest('[data-teso]');
+        if (!btn) return;
+        const cuenta = btn.getAttribute('data-cuenta');
+        const accion = btn.getAttribute('data-teso');
+        if (accion === 'arqueo') hacerArqueoCajaFuerte(cuenta);
+        else if (accion === 'movs') verMovimientosCajaFuerte(cuenta);
+        else if (accion === 'pend') verPorRecibir(cuenta);
+    });
     const btnGestion = document.getElementById('btnGestionCategorias');
     if (btnGestion) btnGestion.addEventListener('click', abrirGestionCategorias);
     const btnRetiro = document.getElementById('btnRetiroDueno');

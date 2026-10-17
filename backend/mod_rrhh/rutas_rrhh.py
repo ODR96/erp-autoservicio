@@ -18,7 +18,7 @@ ModalidadPago = Literal["MENSUAL", "JORNAL", "POR_HORA"]
 PeriodicidadPago = Literal["SEMANAL", "QUINCENAL", "MENSUAL"]
 ResolucionConsumo = Literal["DESCUENTA_SUELDO", "GASTO_LOCAL"]
 # De dónde estaban los billetes al pagar. CAJA = cajón del turno; CAJA_FUERTE resta su saldo;
-# MERCADOPAGO y BANCO quedan anotados hasta que esas cuentas existan en tesorería.
+# MERCADOPAGO y BANCO restan de su cuenta después del primer arqueo.
 # EXTERNO = pantallas viejas (origen desconocido).
 OrigenAdelanto = Literal["CAJA", "CAJA_FUERTE", "MERCADOPAGO", "BANCO", "BOLSILLO", "EXTERNO"]
 OrigenPagoSueldo = Literal["CAJA", "CAJA_FUERTE", "MERCADOPAGO", "BANCO", "BOLSILLO"]
@@ -540,10 +540,10 @@ def registrar_adelanto(adelanto: AdelantoNuevo, background_tasks: BackgroundTask
         ''', (adelanto.usuario_id, fecha_actual, adelanto.monto, adelanto.detalle, adelanto.usuario_registro, adelanto.origen))
         movimiento_id = cursor.lastrowid
 
-        if adelanto.origen == "CAJA_FUERTE":
+        if adelanto.origen in ("CAJA_FUERTE", "MERCADOPAGO", "BANCO"):
             cursor.execute("SELECT nombre_completo FROM usuarios WHERE id = ?", (adelanto.usuario_id,))
             nombre = (cursor.fetchone() or ["empleado"])[0]
-            mover_tesoreria(cursor, "CAJA_FUERTE", -adelanto.monto, f"Adelanto a {nombre}: {adelanto.detalle}",
+            mover_tesoreria(cursor, adelanto.origen, -adelanto.monto, f"Adelanto a {nombre}: {adelanto.detalle}",
                             "ADELANTO", movimiento_id, adelanto.usuario_registro)
 
         conexion.commit()
@@ -823,8 +823,8 @@ def liquidar_sueldo(liq: LiquidacionNueva, background_tasks: BackgroundTasks):
                     VALUES (?, ?, 'RETIRO', ?, ?, ?)
                 ''', (fecha_actual, liq.liquidado_por, monto_neto_pagado, concepto_pago, liq.turno_id))
                 pago_movimiento_caja_id = cursor.lastrowid
-            elif liq.pago_origen == "CAJA_FUERTE":
-                mover_tesoreria(cursor, "CAJA_FUERTE", -monto_neto_pagado, concepto_pago,
+            elif liq.pago_origen in ("CAJA_FUERTE", "MERCADOPAGO", "BANCO"):
+                mover_tesoreria(cursor, liq.pago_origen, -monto_neto_pagado, concepto_pago,
                                 "SUELDO", liquidacion_id, liq.liquidado_por)
         if liq.pago_origen:
             cursor.execute('''
@@ -847,8 +847,6 @@ def liquidar_sueldo(liq: LiquidacionNueva, background_tasks: BackgroundTasks):
             nota = "No se indicó de dónde salió el pago: no se movió ninguna caja."
         else:
             nota = f"Pago de ${monto_neto_pagado} registrado desde: {TEXTO_ORIGEN[liq.pago_origen]}."
-            if liq.pago_origen in ("MERCADOPAGO", "BANCO"):
-                nota += " Queda anotado; esa cuenta todavía no lleva saldo en el sistema."
 
         return {
             "mensaje": f"Liquidación #{liquidacion_id} generada con éxito.",
@@ -993,12 +991,12 @@ def anular_liquidacion(liquidacion_id: int, anulacion: AnulacionLiquidacion):
             else:
                 aviso_pago = (f" El sueldo salió del turno #{liq['pago_turno_id']}, que ya cerró: el cajón no se toca."
                               " Si el empleado devolvió la plata, guardala en la caja fuerte y hacé un arqueo.")
-        elif liq['pago_origen'] == "CAJA_FUERTE" and neto > 0:
-            mover_tesoreria(cursor, "CAJA_FUERTE", neto, f"Anulación liquidación #{liquidacion_id}",
+        elif liq['pago_origen'] in ("CAJA_FUERTE", "MERCADOPAGO", "BANCO") and neto > 0:
+            mover_tesoreria(cursor, liq['pago_origen'], neto, f"Anulación liquidación #{liquidacion_id}",
                             "ANULACION", liquidacion_id, liq['liquidado_por'])
-            aviso_pago = f" Los ${neto} vuelven al saldo de la caja fuerte."
-        elif liq['pago_origen'] in ("MERCADOPAGO", "BANCO", "BOLSILLO") and neto > 0:
-            aviso_pago = f" El pago había salido de: {TEXTO_ORIGEN[liq['pago_origen']]}. Eso no se mueve solo."
+            aviso_pago = f" Los ${neto} vuelven a {TEXTO_ORIGEN[liq['pago_origen']]}."
+        elif liq['pago_origen'] == "BOLSILLO" and neto > 0:
+            aviso_pago = " El pago había salido del bolsillo del dueño. Eso no se mueve solo."
 
         cursor.execute("UPDATE liquidaciones_sueldos SET estado = 'ANULADO' WHERE id = ?", (liquidacion_id,))
 

@@ -324,12 +324,34 @@ def reembolsar_cobro_aprobado(cursor, cobro):
             order = _mp("GET", f"/v1/orders/{order_id}")
             if _estado_order(order) == "reembolsado":
                 cursor.execute("UPDATE cobros_externos SET estado = 'reembolsado' WHERE id = ?", (cobro_id,))
+                _revertir_qr_en_tesoreria(cursor, cobro_id)
                 return {"ok": True}
         except RuntimeError:
             pass
         raise RuntimeError(f"Mercado Pago no devolvió la plata. El ticket no se anula. {e}")
     cursor.execute("UPDATE cobros_externos SET estado = 'reembolsado' WHERE id = ?", (cobro_id,))
+    _revertir_qr_en_tesoreria(cursor, cobro_id)
     return {"ok": True}
+
+
+def _comision_qr_para_saldo(cursor, cobro_id, monto):
+    cursor.execute("SELECT comision_mp FROM cobros_externos WHERE id = ?", (cobro_id,))
+    fila = cursor.fetchone()
+    if fila and fila["comision_mp"] is not None:
+        return round(float(fila["comision_mp"]), 2)
+    pct = cursor.execute("SELECT pct_costo FROM comisiones_medio WHERE codigo = 'QR'").fetchone()
+    tasa = float(pct[0] if pct else 0.8) / 100.0
+    return round(float(monto or 0) * tasa, 2)
+
+
+def _asentar_qr_en_tesoreria(cursor, cobro_id, monto):
+    from backend.mod_tesoreria.rutas_tesoreria import asentar_cobro_qr
+    asentar_cobro_qr(cursor, cobro_id, monto, _comision_qr_para_saldo(cursor, cobro_id, monto))
+
+
+def _revertir_qr_en_tesoreria(cursor, cobro_id):
+    from backend.mod_tesoreria.rutas_tesoreria import revertir_cobro_qr
+    revertir_cobro_qr(cursor, cobro_id)
 
 
 def _cancelar_pendientes(cursor, pos_id):
@@ -446,6 +468,7 @@ def estado_cobro_qr(cobro_id: int):
                         guardar_comision_qr(cursor, cobro_id, order)
                     except Exception:
                         pass
+                    _asentar_qr_en_tesoreria(cursor, cobro_id, cobro["monto"])
                 conexion.commit()
                 estado = nuevo
         return {

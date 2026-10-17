@@ -501,9 +501,14 @@ def _registrar_pago_en_cursor(cursor, proveedor_id: int, monto: float, metodo: s
     ''', (proveedor_id, fecha_actual, monto, metodo, observaciones or "", usuario_id))
     pago_id = cursor.lastrowid
 
+    cuenta_pago = None
     if _es_pago_caja_fuerte(metodo):
+        cuenta_pago = "CAJA_FUERTE"
+    elif "TRANSFERENCIA" in (metodo or "").upper():
+        cuenta_pago = "BANCO"
+    if cuenta_pago:
         try:
-            mover_tesoreria(cursor, "CAJA_FUERTE", -monto, f"Pago a proveedor #{proveedor_id}: {observaciones or ''}".strip(),
+            mover_tesoreria(cursor, cuenta_pago, -monto, f"Pago a proveedor #{proveedor_id}: {observaciones or ''}".strip(),
                             "PAGO_PROVEEDOR", pago_id, usuario_id)
         except ErrorTesoreria as e:
             raise HTTPException(status_code=400, detail=str(e))

@@ -302,6 +302,11 @@ def registrar_movimiento(mov: MovimientoCaja, background_tasks: BackgroundTasks,
             INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (fecha_actual, mov.usuario_id, tipo_mayuscula, mov.monto, observacion_final, mov.turno_id))
+        if tipo_mayuscula == 'INGRESO':
+            # En el mostrador un ingreso es cambio sacado de la caja fuerte. No se elige cuenta.
+            mover_tesoreria(cursor, "CAJA_FUERTE", -mov.monto,
+                            f"Cambio al turno #{mov.turno_id}: {mov.observaciones or ''}".strip(),
+                            "CAMBIO", cursor.lastrowid, mov.usuario_id)
         if tipo_mayuscula == 'RETIRO' and mov.es_sangria:
             concepto = f"Sangría turno #{mov.turno_id}: {mov.observaciones or ''}".strip()
             # Solo el dueño suma directo: lo de otro queda por recibir hasta que él lo cuente.
@@ -383,8 +388,8 @@ def registrar_retiro_dueno(body: RetiroDueno, background_tasks: BackgroundTasks,
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (fecha_actual, monto, origen, motivo, usuario_id, (body.autorizado_por or "")[:100] or None, turno_id, movimiento_id))
         retiro_id = cursor.lastrowid
-        if origen == "CAJA_FUERTE":
-            mover_tesoreria(cursor, "CAJA_FUERTE", -monto, f"Retiro del dueño: {motivo}", "RETIRO_DUENO", retiro_id, usuario_id)
+        if origen in ("CAJA_FUERTE", "MERCADOPAGO", "BANCO"):
+            mover_tesoreria(cursor, origen, -monto, f"Retiro del dueño: {motivo}", "RETIRO_DUENO", retiro_id, usuario_id)
         conexion.commit()
 
         if origen == "CAJON":
@@ -450,8 +455,8 @@ def anular_retiro_dueno(retiro_id: int, sesion: dict = Depends(VerificarRol(["AD
                 INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
                 VALUES (?, ?, 'INGRESO', ?, ?, ?)
             ''', (ahora, usuario_id, r["monto"], f"[ANULA RETIRO DUEÑO #{retiro_id}]", r["turno_id"]))
-        elif r["origen"] == "CAJA_FUERTE":
-            mover_tesoreria(cursor, "CAJA_FUERTE", r["monto"], f"Anula retiro del dueño #{retiro_id}", "ANULACION", retiro_id, usuario_id)
+        elif r["origen"] in ("CAJA_FUERTE", "MERCADOPAGO", "BANCO"):
+            mover_tesoreria(cursor, r["origen"], r["monto"], f"Anula retiro del dueño #{retiro_id}", "ANULACION", retiro_id, usuario_id)
         cursor.execute(
             "UPDATE retiros_dueno SET estado = 'ANULADO', anulado_en = ?, anulado_por = ? WHERE id = ?",
             (ahora, usuario_id, retiro_id),

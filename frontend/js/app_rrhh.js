@@ -447,8 +447,8 @@ function escRrhh(texto) {
 const AYUDA_ORIGEN_PAGO = {
     CAJA_FUERTE: 'Resta del saldo de la caja fuerte. Si el cajero lo sacó del cajón con una Sangría, elegí esta.',
     CAJA: 'Sale del cajón del turno: entra al Z como retiro y avisa por WhatsApp.',
-    MERCADOPAGO: 'Queda anotado. Mercado Pago todavía no lleva saldo en el sistema.',
-    BANCO: 'Queda anotado. El banco todavía no lleva saldo en el sistema.',
+    MERCADOPAGO: 'Resta del saldo de Mercado Pago.',
+    BANCO: 'Resta del saldo del banco.',
     BOLSILLO: 'No toca ninguna caja del negocio.'
 };
 
