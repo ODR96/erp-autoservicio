@@ -219,6 +219,8 @@ async function cargarResumenMensual() {
 function mapearOrigenFondos(origen) {
     if (origen === 'CAJA_MAYOR') return { texto: 'Caja Fuerte', color: 'bg-success' };
     if (origen && origen.includes('CAJA_DIARIA')) return { texto: 'Cajón (POS)', color: 'bg-secondary' };
+    if (origen === 'TARJETA') return { texto: 'Tarjeta (deuda)', color: 'bg-warning text-dark' };
+    if (origen === 'CHEQUE') return { texto: 'Cheque (el banco al debitarlo)', color: 'bg-warning text-dark' };
     if (origen === 'RRHH') return { texto: 'Sueldo bruto (pago en RRHH)', color: 'bg-info text-dark' };
     if (origen === 'CONSUMO_PERSONAL') return { texto: 'Sin salida de caja (Beneficio)', color: 'bg-info text-dark' };
     return { texto: 'Sin salida de caja', color: 'bg-info text-dark' };
@@ -606,6 +608,24 @@ async function cargarCajaFuerte() {
             const res = await apiFetchSeguro(`/tesoreria/cuenta/${codigo}?limite=100`);
             cuentas.push(await leerRespuestaGasto(res));
         }
+        let deuda = null;
+        try {
+            const resDeuda = await apiFetchSeguro('/tesoreria/deuda/TARJETA');
+            deuda = await leerRespuestaGasto(resDeuda);
+        } catch (e) { deuda = null; }
+        const tarjeta = deuda ? `
+            <div class="kpi-card p-3 d-flex flex-wrap align-items-center justify-content-between gap-3" style="border-left-color:#f59e0b;">
+                <div>
+                    <h6 class="text-muted text-uppercase fw-bold small mb-1">Tarjeta (lo que debés)</h6>
+                    <h2 class="fw-bold mb-0 text-warning">${formatoPesos(deuda.saldo)}</h2>
+                    <div class="small text-muted mt-1">${deuda.inicializada ? 'Pagar el resumen no es un gasto.' : 'Cargá lo que debés hoy. Hasta entonces el número no frena.'}</div>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button type="button" class="btn btn-warning fw-bold" data-teso="deuda-saldo">Lo que debo</button>
+                    <button type="button" class="btn btn-outline-warning fw-bold" data-teso="deuda-pagar">Pagar resumen</button>
+                    <button type="button" class="btn btn-outline-light fw-bold" data-teso="deuda-consumo">Consumo</button>
+                </div>
+            </div>` : '';
         cont.innerHTML = cuentas.map(c => {
             const pend = c.por_recibir || { cantidad: 0, total: 0 };
             const aviso = pend.cantidad > 0
@@ -624,7 +644,7 @@ async function cargarCajaFuerte() {
                         <button type="button" class="btn btn-outline-light" data-teso="movs" data-cuenta="${escGasto(c.cuenta)}" title="Movimientos">Lista</button>
                     </div>
                 </div>`;
-        }).join('') + `
+        }).join('') + tarjeta + `
             <div class="d-flex gap-2">
                 <button type="button" id="btnPasarPlata" class="btn btn-outline-info fw-bold">Pasar plata entre cuentas</button>
                 <button type="button" id="btnEmitirCheque" class="btn btn-outline-warning fw-bold">Emitir cheque</button>
@@ -1019,6 +1039,93 @@ async function pasarPlataEntreCuentas() {
     }
 }
 
+async function fijarDeudaTarjeta() {
+    const { value: monto } = await Swal.fire({
+        title: 'Lo que debés en la tarjeta',
+        input: 'number',
+        inputAttributes: { min: 0, step: '0.01' },
+        text: 'Cargá el saldo del resumen. No es un gasto.',
+        background: '#111C2A', color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Guardar'
+    });
+    if (monto === undefined) return;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/deuda/TARJETA/saldo', { method: 'POST', body: JSON.stringify({ monto_adeudado: parseFloat(monto) }) });
+        const r = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: 'Listo', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarCajaFuerte();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
+async function pagarResumenTarjeta() {
+    const { value: form } = await Swal.fire({
+        title: 'Pagar resumen',
+        html: `
+            <p class="small text-muted">Sale de la caja fuerte o del banco y baja la deuda. No es un gasto.</p>
+            <select id="swal-res-origen" class="swal2-select">
+                <option value="CAJA_FUERTE">Caja fuerte</option>
+                <option value="BANCO">Banco</option>
+            </select>
+            <input id="swal-res-monto" type="number" min="0" step="0.01" class="swal2-input" placeholder="Monto">`,
+        background: '#111C2A', color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Pagar',
+        preConfirm: () => {
+            const monto = parseFloat(document.getElementById('swal-res-monto').value);
+            if (!Number.isFinite(monto) || monto <= 0) { Swal.showValidationMessage('Cargá el monto'); return false; }
+            return { origen: document.getElementById('swal-res-origen').value, monto };
+        }
+    });
+    if (!form) return;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/deuda/TARJETA/pagar', { method: 'POST', body: JSON.stringify(form) });
+        const r = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: 'Pagado', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarCajaFuerte();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
+async function consumoTarjeta() {
+    const cats = [...document.querySelectorAll('#selectCategoriaGasto option')].filter(o => o.value)
+        .map(o => `<option value="${escGasto(o.value)}">${escGasto(o.textContent)}</option>`).join('');
+    const { value: form } = await Swal.fire({
+        title: 'Consumo en la tarjeta',
+        html: `
+            <p class="small text-muted">Interés, abono o servicio. Suma lo que debés y entra como gasto del mes. La mercadería se carga en Proveedores.</p>
+            <select id="swal-con-cat" class="swal2-select">${cats}</select>
+            <input id="swal-con-monto" type="number" min="0" step="0.01" class="swal2-input" placeholder="Monto">
+            <input id="swal-con-det" class="swal2-input" placeholder="Qué es" maxlength="200">`,
+        background: '#111C2A', color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Cargar',
+        preConfirm: () => {
+            const monto = parseFloat(document.getElementById('swal-con-monto').value);
+            const detalle = document.getElementById('swal-con-det').value.trim();
+            const categoria_id = parseInt(document.getElementById('swal-con-cat').value, 10);
+            if (!categoria_id) { Swal.showValidationMessage('Elegí la categoría'); return false; }
+            if (!Number.isFinite(monto) || monto <= 0) { Swal.showValidationMessage('Cargá el monto'); return false; }
+            if (detalle.length < 3) { Swal.showValidationMessage('Escribí qué es'); return false; }
+            return { categoria_id, monto, detalle };
+        }
+    });
+    if (!form) return;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/deuda/TARJETA/consumo', { method: 'POST', body: JSON.stringify(form) });
+        const r = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: 'Cargado', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarCajaFuerte();
+        cargarResumenMensual();
+        cargarHistorial();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
 // Asegurate de que tu DOMContentLoaded final quede así:
 document.addEventListener('DOMContentLoaded', () => {
     cargarCategorias();
@@ -1032,6 +1139,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (pasar) { pasarPlataEntreCuentas(); return; }
         if (e.target.closest('#btnEmitirCheque')) { emitirCheque(); return; }
         if (e.target.closest('#btnVerCheques')) { verCheques(); return; }
+        const teso = (e.target.closest('[data-teso]') || {}).getAttribute ? e.target.closest('[data-teso]').getAttribute('data-teso') : '';
+        if (teso === 'deuda-saldo') { fijarDeudaTarjeta(); return; }
+        if (teso === 'deuda-pagar') { pagarResumenTarjeta(); return; }
+        if (teso === 'deuda-consumo') { consumoTarjeta(); return; }
         const btn = e.target.closest('[data-teso]');
         if (!btn) return;
         const cuenta = btn.getAttribute('data-cuenta');

@@ -91,12 +91,27 @@ def asegurar_tablas_tesoreria_cuentas():
                 usuario_id INTEGER
             )
         ''')
+        # Deuda de tarjeta: el saldo es lo que se debe. Positivo suma deuda, negativo la baja.
+        conexion.execute('''
+            CREATE TABLE IF NOT EXISTS deudas_movimientos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_hora TEXT NOT NULL,
+                cuenta TEXT NOT NULL,
+                monto REAL NOT NULL,
+                concepto TEXT NOT NULL,
+                origen_tipo TEXT NOT NULL,
+                origen_id INTEGER,
+                usuario_id INTEGER
+            )
+        ''')
         conexion.commit()
     finally:
         conexion.close()
 
 
 asegurar_tablas_tesoreria_cuentas()
+
+DEUDAS = {"TARJETA": "Tarjeta"}
 
 
 class ErrorTesoreria(Exception):
@@ -185,6 +200,42 @@ def revertir_cobro_qr(cursor, cobro_id):
     if not fila:
         return None
     return mover_tesoreria(cursor, "MERCADOPAGO", -float(fila[0]), f"Reembolso QR #{cobro_id}", "REEMBOLSO_QR", cobro_id, None)
+
+
+def saldo_deuda(cursor, cuenta: str) -> float:
+    fila = cursor.execute(
+        "SELECT IFNULL(SUM(monto), 0) FROM deudas_movimientos WHERE cuenta = ?", (cuenta,)
+    ).fetchone()
+    return round(float(fila[0] or 0), 2)
+
+
+def deuda_inicializada(cursor, cuenta: str) -> bool:
+    return cursor.execute(
+        "SELECT 1 FROM deudas_movimientos WHERE cuenta = ? AND origen_tipo IN ('SALDO_INICIAL', 'AJUSTE_DEUDA') LIMIT 1",
+        (cuenta,),
+    ).fetchone() is not None
+
+
+def mover_deuda(cursor, cuenta: str, monto: float, concepto: str, origen_tipo: str,
+                origen_id=None, usuario_id=None):
+    """monto > 0 suma lo que se debe. monto < 0 lo baja. No es plata en una cuenta."""
+    if cuenta not in DEUDAS:
+        raise ErrorTesoreria("Esa deuda no existe.")
+    monto = round(float(monto or 0), 2)
+    if abs(monto) < 0.01:
+        return None
+    if monto < 0 and deuda_inicializada(cursor, cuenta):
+        saldo = saldo_deuda(cursor, cuenta)
+        if saldo + monto < -0.009:
+            raise ErrorTesoreria(
+                f"La {DEUDAS[cuenta].lower()} debe ${saldo:,.2f} y querés pagar ${-monto:,.2f}."
+            )
+    cursor.execute('''
+        INSERT INTO deudas_movimientos (fecha_hora, cuenta, monto, concepto, origen_tipo, origen_id, usuario_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S"), cuenta, monto, (concepto or "")[:200],
+          origen_tipo, origen_id, usuario_id))
+    return cursor.lastrowid
 
 
 def crear_cheque_propio(cursor, monto, numero, banco, fecha_cobro, destino, beneficiario,
@@ -597,5 +648,155 @@ def anular_cheque(cheque_id: int, sesion: dict = Depends(VerificarRol(["ADMIN"])
     except Exception:
         conexion.rollback()
         raise HTTPException(status_code=500, detail="No se pudo anular el cheque.")
+    finally:
+        conexion.close()
+
+
+def _deuda_o_404(cuenta: str) -> str:
+    cuenta = (cuenta or "").upper()
+    if cuenta not in DEUDAS:
+        raise HTTPException(status_code=404, detail="Esa deuda no existe.")
+    return cuenta
+
+
+@router.get("/deuda/{cuenta}", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def estado_deuda(cuenta: str):
+    cuenta = _deuda_o_404(cuenta)
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    try:
+        cursor = conexion.cursor()
+        movimientos = cursor.execute('''
+            SELECT id, fecha_hora, monto, concepto, origen_tipo
+            FROM deudas_movimientos WHERE cuenta = ?
+            ORDER BY fecha_hora DESC, id DESC LIMIT 40
+        ''', (cuenta,)).fetchall()
+        return {
+            "cuenta": cuenta,
+            "nombre": DEUDAS[cuenta],
+            "saldo": saldo_deuda(cursor, cuenta),
+            "inicializada": deuda_inicializada(cursor, cuenta),
+            "movimientos": [dict(m) for m in movimientos],
+        }
+    finally:
+        conexion.close()
+
+
+class SaldoDeuda(BaseModel):
+    monto_adeudado: float
+
+
+@router.post("/deuda/{cuenta}/saldo")
+def fijar_saldo_deuda(cuenta: str, body: SaldoDeuda, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    cuenta = _deuda_o_404(cuenta)
+    adeudado = round(float(body.monto_adeudado or 0), 2)
+    if adeudado < 0:
+        raise HTTPException(status_code=400, detail="Lo que debés no puede ser negativo.")
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        saldo = saldo_deuda(cursor, cuenta)
+        primero = not deuda_inicializada(cursor, cuenta)
+        diferencia = round(adeudado - saldo, 2)
+        if abs(diferencia) >= 0.01:
+            mover_deuda(cursor, cuenta, diferencia,
+                        "Saldo de la deuda" if primero else "Ajuste de la deuda",
+                        "SALDO_INICIAL" if primero else "AJUSTE_DEUDA", None, _usuario_de(sesion))
+        conexion.commit()
+        if primero:
+            mensaje = f"Quedó cargado lo que debés en {DEUDAS[cuenta]}: ${adeudado:,.2f}."
+        elif abs(diferencia) < 0.01:
+            mensaje = "Coincide con lo que ya tenía el sistema."
+        else:
+            mensaje = f"Ajustado. Ahora {DEUDAS[cuenta]} debe ${adeudado:,.2f}."
+        return {"mensaje": mensaje, "saldo": adeudado}
+    except HTTPException:
+        conexion.rollback()
+        raise
+    finally:
+        conexion.close()
+
+
+class PagoDeuda(BaseModel):
+    origen: str
+    monto: float
+
+
+@router.post("/deuda/{cuenta}/pagar")
+def pagar_deuda(cuenta: str, body: PagoDeuda, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    cuenta = _deuda_o_404(cuenta)
+    origen = (body.origen or "").upper()
+    if origen not in ("CAJA_FUERTE", "BANCO"):
+        raise HTTPException(status_code=400, detail="El resumen se paga desde la caja fuerte o el banco.")
+    monto = round(float(body.monto or 0), 2)
+    if monto < 0.01:
+        raise HTTPException(status_code=400, detail="El monto tiene que ser mayor a 0.")
+    usuario_id = _usuario_de(sesion)
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        mover_tesoreria(cursor, origen, -monto, f"Pago resumen {DEUDAS[cuenta]}", "PAGO_DEUDA", None, usuario_id)
+        mover_deuda(cursor, cuenta, -monto, f"Pago desde {CUENTAS[origen]}", "PAGO", None, usuario_id)
+        conexion.commit()
+        return {"mensaje": f"Pagaste ${monto:,.2f} de {DEUDAS[cuenta]} desde {CUENTAS[origen]}. No es un gasto."}
+    except ErrorTesoreria as e:
+        conexion.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo pagar el resumen.")
+    finally:
+        conexion.close()
+
+
+class CargoDeuda(BaseModel):
+    monto: float
+    detalle: str
+    categoria_id: int
+
+
+@router.post("/deuda/{cuenta}/consumo")
+def consumo_deuda(cuenta: str, body: CargoDeuda, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    """Gasto o interés que quedó en la tarjeta. Suma la deuda y anota el gasto del mes. No sale plata."""
+    cuenta = _deuda_o_404(cuenta)
+    monto = round(float(body.monto or 0), 2)
+    if monto < 0.01:
+        raise HTTPException(status_code=400, detail="El monto tiene que ser mayor a 0.")
+    detalle = " ".join((body.detalle or "").split())[:200]
+    if len(detalle) < 3:
+        raise HTTPException(status_code=400, detail="Escribí qué es (interés, abono, servicio).")
+    usuario_id = _usuario_de(sesion)
+    ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        from backend.mod_gastos.rutas_gastos import _es_categoria_pago_proveedor, _es_categoria_sueldos
+        cat = cursor.execute(
+            "SELECT nombre, IFNULL(tipo_categoria, 'OPERATIVO') AS tipo FROM categorias_gasto WHERE id = ?",
+            (body.categoria_id,),
+        ).fetchone()
+        if not cat:
+            raise HTTPException(status_code=400, detail="La categoría no existe.")
+        if _es_categoria_pago_proveedor(cat["nombre"] or ""):
+            raise HTTPException(status_code=400, detail="La mercadería se carga en Proveedores, pagando con Tarjeta.")
+        if _es_categoria_sueldos(cat["nombre"] or ""):
+            raise HTTPException(status_code=400, detail="Los sueldos van por RRHH.")
+        if (cat["tipo"] or "").upper() != "OPERATIVO":
+            raise HTTPException(status_code=400, detail="Esa categoría no es un gasto del local.")
+        cursor.execute('''
+            INSERT INTO gastos_operativos (fecha, categoria_id, descripcion_detalle, monto, metodo_pago, origen_fondos, usuario_id, turno_id)
+            VALUES (?, ?, ?, ?, 'TARJETA', 'TARJETA', ?, NULL)
+        ''', (ahora, body.categoria_id, detalle, monto, usuario_id))
+        gasto_id = cursor.lastrowid
+        mover_deuda(cursor, cuenta, monto, detalle, "CONSUMO", gasto_id, usuario_id)
+        conexion.commit()
+        return {"mensaje": f"Quedó en la {DEUDAS[cuenta].lower()}: ${monto:,.2f}. Es gasto del mes y no salió plata."}
+    except HTTPException:
+        conexion.rollback()
+        raise
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo cargar el consumo.")
     finally:
         conexion.close()

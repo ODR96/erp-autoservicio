@@ -14,7 +14,7 @@ import urllib.error
 from backend.database import obtener_conexion, RAIZ_PROYECTO
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
 from backend.mod_productos.rutas_productos import compensar_deuda_stock
-from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria, ErrorTesoreria, crear_cheque_propio
+from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria, mover_deuda, ErrorTesoreria, crear_cheque_propio
 
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3)) # <-- LA HORA ARGENTINA
@@ -509,6 +509,12 @@ def _registrar_pago_en_cursor(cursor, proveedor_id: int, monto: float, metodo: s
         cuenta_pago = "CAJA_FUERTE"
     elif "TRANSFERENCIA" in (metodo or "").upper():
         cuenta_pago = "BANCO"
+    elif "TARJETA" in (metodo or "").upper() and "EFECTIVO" not in (metodo or "").upper():
+        try:
+            mover_deuda(cursor, "TARJETA", monto, f"Pago a proveedor #{proveedor_id}: {observaciones or ''}".strip(),
+                        "PAGO_PROVEEDOR", pago_id, usuario_id)
+        except ErrorTesoreria as e:
+            raise HTTPException(status_code=400, detail=str(e))
     if cuenta_pago:
         try:
             mover_tesoreria(cursor, cuenta_pago, -monto, f"Pago a proveedor #{proveedor_id}: {observaciones or ''}".strip(),
