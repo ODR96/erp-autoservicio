@@ -85,6 +85,7 @@ ORIGENES_RETIRO_DUENO = {
     "CAJA_FUERTE": "Caja fuerte",
     "MERCADOPAGO": "Mercado Pago del negocio",
     "BANCO": "Banco del negocio",
+    "CHEQUE": "Cheque propio",
 }
 
 def _sumar_medio(cursor, turno_id, patron):

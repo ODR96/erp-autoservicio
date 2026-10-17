@@ -581,7 +581,8 @@ const ORIGENES_MOV_TESORERIA = {
     REEMBOLSO_QR: 'Reembolso QR',
     TRANSFERENCIA: 'Pase entre cuentas',
     TRANSFERENCIA_VENTA: 'Transferencia de venta',
-    CAMBIO: 'Cambio al cajón'
+    CAMBIO: 'Cambio al cajón',
+    CHEQUE: 'Cheque propio'
 };
 
 const CUENTAS_TESORERIA = ['CAJA_FUERTE', 'MERCADOPAGO', 'BANCO'];
@@ -624,7 +625,11 @@ async function cargarCajaFuerte() {
                     </div>
                 </div>`;
         }).join('') + `
-            <button type="button" id="btnPasarPlata" class="btn btn-outline-info fw-bold align-self-start">Pasar plata entre cuentas</button>`;
+            <div class="d-flex gap-2">
+                <button type="button" id="btnPasarPlata" class="btn btn-outline-info fw-bold">Pasar plata entre cuentas</button>
+                <button type="button" id="btnEmitirCheque" class="btn btn-outline-warning fw-bold">Emitir cheque</button>
+                <button type="button" id="btnVerCheques" class="btn btn-outline-light fw-bold">Cheques</button>
+            </div>`;
         return cuentas[0];
     } catch (e) {
         console.error('Error al cargar tesorería', e);
@@ -848,6 +853,138 @@ async function verMovimientosCajaFuerte(cuenta) {
     });
 }
 
+const DESTINO_CHEQUE = { PROVEEDOR: 'Proveedor', GASTO: 'Gasto del local', RETIRO: 'Retiro del dueño' };
+
+async function emitirCheque() {
+    const cats = [...document.querySelectorAll('#selectCategoriaGasto option')]
+        .filter(o => o.value)
+        .map(o => `<option value="${escGasto(o.value)}">${escGasto(o.textContent)}</option>`)
+        .join('');
+    const { value: form } = await Swal.fire({
+        title: 'Emitir cheque',
+        html: `
+            <p class="small text-muted mb-2">No es para un proveedor. El banco no se mueve hasta que lo debite.</p>
+            <select id="swal-ch-destino" class="swal2-select">
+                <option value="GASTO">Gasto del local</option>
+                <option value="RETIRO">Retiro mío</option>
+            </select>
+            <select id="swal-ch-cat" class="swal2-select">${cats}</select>
+            <input id="swal-ch-monto" type="number" min="0" step="0.01" class="swal2-input" placeholder="Monto">
+            <input id="swal-ch-num" class="swal2-input" placeholder="Número de cheque" maxlength="40">
+            <input id="swal-ch-banco" class="swal2-input" placeholder="Banco (opcional)">
+            <input id="swal-ch-fecha" type="date" class="swal2-input" title="Fecha en que lo pueden cobrar">
+            <input id="swal-ch-detalle" class="swal2-input" placeholder="A quién o para qué" maxlength="200">`,
+        background: '#111C2A', color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Emitir',
+        confirmButtonColor: '#f59e0b',
+        didOpen: () => {
+            const destino = document.getElementById('swal-ch-destino');
+            const cat = document.getElementById('swal-ch-cat');
+            const sync = () => { cat.style.display = destino.value === 'GASTO' ? '' : 'none'; };
+            destino.addEventListener('change', sync);
+            sync();
+        },
+        preConfirm: () => {
+            const destino = document.getElementById('swal-ch-destino').value;
+            const monto = parseFloat(document.getElementById('swal-ch-monto').value);
+            const numero = document.getElementById('swal-ch-num').value.trim();
+            const detalle = document.getElementById('swal-ch-detalle').value.trim();
+            const categoriaId = parseInt(document.getElementById('swal-ch-cat').value, 10);
+            if (!numero) { Swal.showValidationMessage('Cargá el número de cheque'); return false; }
+            if (!Number.isFinite(monto) || monto <= 0) { Swal.showValidationMessage('Cargá el monto'); return false; }
+            if (detalle.length < 3) { Swal.showValidationMessage('Escribí a quién o para qué es'); return false; }
+            if (destino === 'GASTO' && !categoriaId) { Swal.showValidationMessage('Elegí la categoría'); return false; }
+            return {
+                destino, monto, numero, detalle,
+                categoria_id: destino === 'GASTO' ? categoriaId : null,
+                banco: document.getElementById('swal-ch-banco').value.trim(),
+                fecha_cobro: document.getElementById('swal-ch-fecha').value
+            };
+        }
+    });
+    if (!form) return;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/cheque', { method: 'POST', body: JSON.stringify(form) });
+        const r = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: 'Cheque emitido', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarResumenMensual();
+        cargarHistorial();
+        cargarRetirosDueno();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
+async function verCheques() {
+    let data;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/cheques');
+        data = await leerRespuestaGasto(res);
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+        return;
+    }
+    const filas = (data.cheques || []).map(c => {
+        const quien = c.destino === 'PROVEEDOR' ? (c.proveedor || c.beneficiario) : (c.detalle || c.beneficiario);
+        const acciones = c.estado === 'EMITIDO'
+            ? `<button type="button" class="btn btn-sm btn-warning" onclick="debitarCheque(${Number(c.id)})">Debitó el banco</button>
+               <button type="button" class="btn btn-sm btn-outline-danger ms-1" onclick="anularCheque(${Number(c.id)})">Anular</button>`
+            : (c.estado === 'DEBITADO'
+                ? `<button type="button" class="btn btn-sm btn-outline-danger" onclick="anularCheque(${Number(c.id)})">Anular</button>`
+                : '');
+        return `<tr>
+            <td class="text-start"><div class="fw-bold">${escGasto(c.numero)}${c.banco ? ' · ' + escGasto(c.banco) : ''}</div>
+                <div class="small text-muted">${escGasto(DESTINO_CHEQUE[c.destino] || c.destino)} · ${escGasto(quien || '')}</div></td>
+            <td class="text-end text-nowrap">${formatoPesos(c.monto)}</td>
+            <td class="small">${escGasto(c.estado)}</td>
+            <td class="text-end">${acciones}</td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="4" class="text-muted py-3">No hay cheques.</td></tr>';
+    Swal.fire({
+        title: 'Cheques propios',
+        width: 720,
+        html: `<div class="table-responsive" style="max-height:420px;overflow:auto;"><table class="table table-dark table-sm align-middle mb-0"><tbody>${filas}</tbody></table></div>`,
+        background: '#111C2A', color: '#fff',
+        showConfirmButton: false,
+        showCloseButton: true
+    });
+}
+
+async function debitarCheque(id) {
+    try {
+        const res = await apiFetchSeguro(`/tesoreria/cheque/${id}/debitar`, { method: 'PUT', body: '{}' });
+        const r = await leerRespuestaGasto(res);
+        await Swal.fire({ icon: 'success', title: 'Debitado', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        await cargarCajaFuerte();
+        verCheques();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
+async function anularCheque(id) {
+    const ok = await Swal.fire({
+        title: '¿Anular este cheque?',
+        text: 'Si era un gasto, se anula. Si era de un proveedor, vuelve la deuda. Si el banco ya lo debitó, la plata vuelve al banco.',
+        icon: 'warning', background: '#111C2A', color: '#fff',
+        showCancelButton: true, confirmButtonText: 'Anular', confirmButtonColor: '#dc3545'
+    });
+    if (!ok.isConfirmed) { verCheques(); return; }
+    try {
+        const res = await apiFetchSeguro(`/tesoreria/cheque/${id}/anular`, { method: 'PUT', body: '{}' });
+        const r = await leerRespuestaGasto(res);
+        await Swal.fire({ icon: 'success', title: 'Anulado', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarCajaFuerte();
+        cargarResumenMensual();
+        cargarHistorial();
+        cargarRetirosDueno();
+        verCheques();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
 async function pasarPlataEntreCuentas() {
     const opciones = CUENTAS_TESORERIA.map(c => `<option value="${c}">${c === 'CAJA_FUERTE' ? 'Caja fuerte' : (c === 'MERCADOPAGO' ? 'Mercado Pago' : 'Banco')}</option>`).join('');
     const { value: form } = await Swal.fire({
@@ -893,6 +1030,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cuentas) cuentas.addEventListener('click', (e) => {
         const pasar = e.target.closest('#btnPasarPlata');
         if (pasar) { pasarPlataEntreCuentas(); return; }
+        if (e.target.closest('#btnEmitirCheque')) { emitirCheque(); return; }
+        if (e.target.closest('#btnVerCheques')) { verCheques(); return; }
         const btn = e.target.closest('[data-teso]');
         if (!btn) return;
         const cuenta = btn.getAttribute('data-cuenta');

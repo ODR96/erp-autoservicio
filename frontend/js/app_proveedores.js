@@ -1822,6 +1822,13 @@ async function registrarPagoProveedor() {
         metodo_pago: metodo,
         observaciones: obs
     };
+    if (metodo === 'Cheque') {
+        const numero = (document.getElementById('chqNumero')?.value || '').trim();
+        if (!numero) return Swal.fire('Error', 'Cargá el número de cheque', 'warning');
+        payload.numero_cheque = numero;
+        payload.banco_cheque = (document.getElementById('chqBanco')?.value || '').trim();
+        payload.fecha_cobro_cheque = document.getElementById('chqFechaCobro')?.value || '';
+    }
 
     try {
         // LA RUTA CORRECTA ES /pagar

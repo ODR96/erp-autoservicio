@@ -14,7 +14,7 @@ import urllib.error
 from backend.database import obtener_conexion, RAIZ_PROYECTO
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
 from backend.mod_productos.rutas_productos import compensar_deuda_stock
-from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria, ErrorTesoreria
+from backend.mod_tesoreria.rutas_tesoreria import mover_tesoreria, ErrorTesoreria, crear_cheque_propio
 
 router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3)) # <-- LA HORA ARGENTINA
@@ -56,6 +56,9 @@ class PagoProveedor(BaseModel):
     metodo_pago: str
     observaciones: str = ""
     turno_id: Optional[int] = None
+    numero_cheque: Optional[str] = ""
+    banco_cheque: Optional[str] = ""
+    fecha_cobro_cheque: Optional[str] = ""
 
 class DeudaRapida(BaseModel):
     proveedor_id: int
@@ -692,9 +695,22 @@ def registrar_pago_proveedor(pago: PagoProveedor, background_tasks: BackgroundTa
             detail="El cajero solo puede pagar con efectivo de la registradora. Bolsillo o transferencia: Encargado o Admin."
         )
 
+    es_cheque = "CHEQUE" in (pago.metodo_pago or "").upper()
+    numero_cheque = " ".join((pago.numero_cheque or "").split())
+    if es_cheque and not numero_cheque:
+        raise HTTPException(status_code=400, detail="Cargá el número de cheque.")
+
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
+        if es_cheque:
+            banco = " ".join((pago.banco_cheque or "").split())[:80]
+            repetido = cursor.execute(
+                "SELECT id FROM cheques_propios WHERE numero = ? AND IFNULL(banco, '') = ? AND estado != 'ANULADO'",
+                (numero_cheque, banco),
+            ).fetchone()
+            if repetido:
+                raise HTTPException(status_code=400, detail="Ese número de cheque ya está emitido o debitado.")
         retiro_caja = _registrar_pago_en_cursor(
             cursor,
             pago.proveedor_id,
@@ -704,6 +720,22 @@ def registrar_pago_proveedor(pago: PagoProveedor, background_tasks: BackgroundTa
             usuario_id,
             pago.turno_id,
         )
+        if es_cheque:
+            fila_pago = cursor.execute(
+                "SELECT id FROM pagos_proveedores WHERE proveedor_id = ? ORDER BY id DESC LIMIT 1",
+                (pago.proveedor_id,),
+            ).fetchone()
+            fila_nombre = cursor.execute(
+                "SELECT nombre_comercial FROM proveedores WHERE id = ?",
+                (pago.proveedor_id,),
+            ).fetchone()
+            crear_cheque_propio(
+                cursor, pago.monto_pagado, numero_cheque, banco,
+                (pago.fecha_cobro_cheque or "").strip()[:10] or None,
+                "PROVEEDOR", fila_nombre[0] if fila_nombre else "",
+                pago.observaciones or "", usuario_id,
+                proveedor_id=pago.proveedor_id, pago_id=fila_pago[0] if fila_pago else None,
+            )
         conexion.commit()
         if retiro_caja is not None:
             _avisar_retiro_proveedor(background_tasks, pago.monto_pagado, pago.proveedor_id, usuario_id, retiro_caja)

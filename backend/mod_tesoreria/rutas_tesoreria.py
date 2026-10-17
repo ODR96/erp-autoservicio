@@ -69,6 +69,28 @@ def asegurar_tablas_tesoreria_cuentas():
             )
         ''')
         conexion.execute("CREATE INDEX IF NOT EXISTS idx_tes_pend_estado ON tesoreria_pendientes (estado, fecha_hora)")
+        # Cheque propio: la deuda o el gasto se anota al emitirlo. El banco resta al debitarlo.
+        conexion.execute('''
+            CREATE TABLE IF NOT EXISTS cheques_propios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_emision TEXT NOT NULL,
+                fecha_cobro TEXT,
+                numero TEXT NOT NULL,
+                banco TEXT,
+                monto REAL NOT NULL,
+                beneficiario TEXT,
+                destino TEXT NOT NULL,
+                proveedor_id INTEGER,
+                pago_id INTEGER,
+                gasto_id INTEGER,
+                retiro_id INTEGER,
+                detalle TEXT,
+                estado TEXT NOT NULL DEFAULT 'EMITIDO',
+                debitado_en TEXT,
+                anulado_en TEXT,
+                usuario_id INTEGER
+            )
+        ''')
         conexion.commit()
     finally:
         conexion.close()
@@ -163,6 +185,20 @@ def revertir_cobro_qr(cursor, cobro_id):
     if not fila:
         return None
     return mover_tesoreria(cursor, "MERCADOPAGO", -float(fila[0]), f"Reembolso QR #{cobro_id}", "REEMBOLSO_QR", cobro_id, None)
+
+
+def crear_cheque_propio(cursor, monto, numero, banco, fecha_cobro, destino, beneficiario,
+                        detalle, usuario_id, proveedor_id=None, pago_id=None, gasto_id=None, retiro_id=None):
+    """El cheque queda emitido. No toca el banco: eso pasa al debitarlo."""
+    ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute('''
+        INSERT INTO cheques_propios (
+            fecha_emision, fecha_cobro, numero, banco, monto, beneficiario, destino,
+            proveedor_id, pago_id, gasto_id, retiro_id, detalle, estado, usuario_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'EMITIDO', ?)
+    ''', (ahora, fecha_cobro or None, numero, banco or None, monto, beneficiario or None, destino,
+          proveedor_id, pago_id, gasto_id, retiro_id, detalle or None, usuario_id))
+    return cursor.lastrowid
 
 
 def _usuario_de(sesion):
@@ -380,5 +416,186 @@ def transferir(body: Transferencia, sesion: dict = Depends(VerificarRol(["ADMIN"
     except Exception:
         conexion.rollback()
         raise HTTPException(status_code=500, detail="No se pudo pasar la plata.")
+    finally:
+        conexion.close()
+
+
+class ChequeNuevo(BaseModel):
+    destino: str
+    monto: float
+    numero: str
+    banco: Optional[str] = ""
+    fecha_cobro: Optional[str] = ""
+    detalle: Optional[str] = ""
+    proveedor_id: Optional[int] = None
+    categoria_id: Optional[int] = None
+
+
+def _numero_cheque(numero: str) -> str:
+    limpio = " ".join((numero or "").split())
+    if len(limpio) < 1:
+        raise HTTPException(status_code=400, detail="Cargá el número de cheque.")
+    return limpio[:40]
+
+
+@router.get("/cheques", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def listar_cheques():
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    try:
+        filas = conexion.execute('''
+            SELECT c.*, IFNULL(p.nombre_comercial, '') AS proveedor
+            FROM cheques_propios c
+            LEFT JOIN proveedores p ON p.id = c.proveedor_id
+            ORDER BY c.id DESC LIMIT 80
+        ''').fetchall()
+        return {"cheques": [dict(f) for f in filas]}
+    finally:
+        conexion.close()
+
+
+@router.post("/cheque")
+def emitir_cheque(body: ChequeNuevo, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    """Emitir un cheque que no es de proveedor: gasto del local o retiro del dueño.
+    El de proveedor se emite al pagarle, desde Proveedores."""
+    destino = (body.destino or "").upper()
+    if destino not in ("GASTO", "RETIRO"):
+        raise HTTPException(status_code=400, detail="Si es de un proveedor, cargalo en Proveedores. Acá: gasto del local o retiro tuyo.")
+    monto = round(float(body.monto or 0), 2)
+    if monto < 0.01:
+        raise HTTPException(status_code=400, detail="El monto tiene que ser mayor a 0.")
+    numero = _numero_cheque(body.numero)
+    banco = " ".join((body.banco or "").split())[:80]
+    fecha_cobro = (body.fecha_cobro or "").strip()[:10] or None
+    detalle = " ".join((body.detalle or "").split())[:200]
+    if len(detalle) < 3:
+        raise HTTPException(status_code=400, detail="Escribí a quién o para qué es el cheque.")
+    usuario_id = _usuario_de(sesion)
+    ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        repetido = cursor.execute(
+            "SELECT id FROM cheques_propios WHERE numero = ? AND IFNULL(banco, '') = ? AND estado != 'ANULADO'",
+            (numero, banco),
+        ).fetchone()
+        if repetido:
+            raise HTTPException(status_code=400, detail="Ese número de cheque ya está emitido o debitado.")
+        gasto_id = None
+        retiro_id = None
+        if destino == "GASTO":
+            if not body.categoria_id:
+                raise HTTPException(status_code=400, detail="Elegí la categoría del gasto.")
+            from backend.mod_gastos.rutas_gastos import _es_categoria_pago_proveedor, _es_categoria_sueldos
+            cat = cursor.execute(
+                "SELECT nombre, IFNULL(tipo_categoria, 'OPERATIVO') AS tipo FROM categorias_gasto WHERE id = ?",
+                (body.categoria_id,),
+            ).fetchone()
+            if not cat:
+                raise HTTPException(status_code=400, detail="La categoría no existe.")
+            if _es_categoria_pago_proveedor(cat["nombre"] or ""):
+                raise HTTPException(status_code=400, detail="Un pago a proveedor se carga en Proveedores, con método Cheque.")
+            if _es_categoria_sueldos(cat["nombre"] or ""):
+                raise HTTPException(status_code=400, detail="Los sueldos van por RRHH.")
+            if (cat["tipo"] or "").upper() != "OPERATIVO":
+                raise HTTPException(status_code=400, detail="Esa categoría no es un gasto del local.")
+            cursor.execute('''
+                INSERT INTO gastos_operativos (fecha, categoria_id, descripcion_detalle, monto, metodo_pago, origen_fondos, usuario_id, turno_id)
+                VALUES (?, ?, ?, ?, 'CHEQUE', 'CHEQUE', ?, NULL)
+            ''', (ahora, body.categoria_id, f"Cheque {numero}: {detalle}", monto, usuario_id))
+            gasto_id = cursor.lastrowid
+        else:
+            cursor.execute('''
+                INSERT INTO retiros_dueno (fecha_hora, monto, origen, motivo, usuario_id, estado)
+                VALUES (?, ?, 'CHEQUE', ?, ?, 'ACTIVO')
+            ''', (ahora, monto, f"Cheque {numero}: {detalle}", usuario_id))
+            retiro_id = cursor.lastrowid
+        cheque_id = crear_cheque_propio(
+            cursor, monto, numero, banco, fecha_cobro, destino, detalle, detalle, usuario_id,
+            gasto_id=gasto_id, retiro_id=retiro_id,
+        )
+        conexion.commit()
+        return {"mensaje": f"Cheque {numero} emitido. El banco no se movió: restálo cuando lo debiten.", "id": cheque_id}
+    except HTTPException:
+        conexion.rollback()
+        raise
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo emitir el cheque.")
+    finally:
+        conexion.close()
+
+
+@router.put("/cheque/{cheque_id}/debitar")
+def debitar_cheque(cheque_id: int, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        ch = cursor.execute("SELECT * FROM cheques_propios WHERE id = ?", (cheque_id,)).fetchone()
+        if not ch:
+            raise HTTPException(status_code=404, detail="Ese cheque no existe.")
+        if ch["estado"] != "EMITIDO":
+            raise HTTPException(status_code=400, detail="Ese cheque no está pendiente de débito.")
+        ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        mover_tesoreria(cursor, "BANCO", -float(ch["monto"]), f"Débito cheque {ch['numero']}", "CHEQUE", cheque_id, _usuario_de(sesion))
+        cursor.execute("UPDATE cheques_propios SET estado = 'DEBITADO', debitado_en = ? WHERE id = ?", (ahora, cheque_id))
+        conexion.commit()
+        return {"mensaje": f"Cheque {ch['numero']} debitado. Salió del banco."}
+    except HTTPException:
+        conexion.rollback()
+        raise
+    except ErrorTesoreria as e:
+        conexion.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo debitar el cheque.")
+    finally:
+        conexion.close()
+
+
+def _anular_efecto_cheque(cursor, ch):
+    monto = float(ch["monto"] or 0)
+    if ch["destino"] == "PROVEEDOR" and ch["proveedor_id"]:
+        cursor.execute(
+            "UPDATE proveedores_ctacte SET saldo_deudor = saldo_deudor + ? WHERE proveedor_id = ?",
+            (monto, ch["proveedor_id"]),
+        )
+    elif ch["destino"] == "GASTO" and ch["gasto_id"]:
+        cursor.execute("UPDATE gastos_operativos SET estado = 'ANULADO' WHERE id = ?", (ch["gasto_id"],))
+    elif ch["destino"] == "RETIRO" and ch["retiro_id"]:
+        cursor.execute("UPDATE retiros_dueno SET estado = 'ANULADO' WHERE id = ?", (ch["retiro_id"],))
+
+
+@router.put("/cheque/{cheque_id}/anular")
+def anular_cheque(cheque_id: int, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        ch = cursor.execute("SELECT * FROM cheques_propios WHERE id = ?", (cheque_id,)).fetchone()
+        if not ch:
+            raise HTTPException(status_code=404, detail="Ese cheque no existe.")
+        if ch["estado"] == "ANULADO":
+            raise HTTPException(status_code=400, detail="Ese cheque ya está anulado.")
+        ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        if ch["estado"] == "DEBITADO":
+            mover_tesoreria(cursor, "BANCO", float(ch["monto"]), f"Anula débito cheque {ch['numero']}", "ANULACION", cheque_id, _usuario_de(sesion))
+        _anular_efecto_cheque(cursor, ch)
+        cursor.execute("UPDATE cheques_propios SET estado = 'ANULADO', anulado_en = ? WHERE id = ?", (ahora, cheque_id))
+        conexion.commit()
+        return {"mensaje": f"Cheque {ch['numero']} anulado."}
+    except HTTPException:
+        conexion.rollback()
+        raise
+    except ErrorTesoreria as e:
+        conexion.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo anular el cheque.")
     finally:
         conexion.close()
