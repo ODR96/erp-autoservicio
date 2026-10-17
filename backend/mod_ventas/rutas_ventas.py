@@ -37,6 +37,62 @@ def asegurar_columnas_multi_caja():
 asegurar_columnas_multi_caja()
 
 
+def corregir_hora_movimientos_stock():
+    """La venta, la anulación y el remito se guardaban sin fecha: SQLite les puso UTC.
+    Una sola vez se alinean a la hora Argentina. Merma y ajustes ya estaban bien."""
+    conexion = obtener_conexion()
+    try:
+        conexion.execute("""
+            CREATE TABLE IF NOT EXISTS migraciones_aplicadas (
+                nombre TEXT PRIMARY KEY,
+                aplicada_en TEXT NOT NULL
+            )
+        """)
+        if conexion.execute(
+            "SELECT 1 FROM migraciones_aplicadas WHERE nombre = 'stock_venta_hora_ar'"
+        ).fetchone():
+            return
+        conexion.execute("BEGIN")
+        conexion.execute("""
+            UPDATE movimientos_stock
+            SET fecha_hora = (
+                SELECT c.fecha_hora FROM ventas_cabecera c
+                WHERE c.id = CAST(
+                    trim(substr(movimientos_stock.motivo, 9, instr(substr(movimientos_stock.motivo, 9) || ' ', ' ') - 1))
+                    AS INTEGER
+                )
+            )
+            WHERE tipo_movimiento IN ('VENTA_AUTOMATICA', 'VENTA_FALTANTE_STOCK')
+              AND motivo LIKE 'Ticket #%'
+              AND EXISTS (
+                SELECT 1 FROM ventas_cabecera c
+                WHERE c.id = CAST(
+                    trim(substr(movimientos_stock.motivo, 9, instr(substr(movimientos_stock.motivo, 9) || ' ', ' ') - 1))
+                    AS INTEGER
+                )
+              )
+        """)
+        conexion.execute("""
+            UPDATE movimientos_stock
+            SET fecha_hora = datetime(fecha_hora, '-3 hours')
+            WHERE tipo_movimiento IN ('ANULACION', 'REMITO_DEPOSITO', 'REMITO_FALTANTE_STOCK')
+              AND fecha_hora IS NOT NULL
+        """)
+        conexion.execute(
+            "INSERT INTO migraciones_aplicadas (nombre, aplicada_en) VALUES ('stock_venta_hora_ar', ?)",
+            (datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+        conexion.commit()
+    except Exception:
+        conexion.rollback()
+        raise
+    finally:
+        conexion.close()
+
+
+corregir_hora_movimientos_stock()
+
+
 def _campo_fila(fila, clave, default=None):
     try:
         if clave in fila.keys():
@@ -111,9 +167,9 @@ def descontar_stock_fifo(
             (descuento, lote["id"]),
         )
         cursor.execute(
-            """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo)
-               VALUES (?, ?, ?, ?, ?)""",
-            (producto_id, lote["id"], descuento, tipo_movimiento, etiqueta),
+            """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo, fecha_hora)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (producto_id, lote["id"], descuento, tipo_movimiento, etiqueta, fecha_iso),
         )
         costo_total += descuento * _costo_unitario_lote(lote["costo"], costo_fallback)
         restante -= descuento
@@ -129,9 +185,9 @@ def descontar_stock_fifo(
         )
         nuevo_lote = cursor.lastrowid
         cursor.execute(
-            """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo)
-               VALUES (?, ?, ?, ?, ?)""",
-            (producto_id, nuevo_lote, restante, tipo_faltante, etiqueta),
+            """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo, fecha_hora)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (producto_id, nuevo_lote, restante, tipo_faltante, etiqueta, fecha_iso),
         )
         costo_total += restante * costo_faltante
 
@@ -726,19 +782,19 @@ def anular_venta(venta_id: int, peticion: AnularVentaRequest, background_tasks: 
 
         cursor.execute("SELECT lote_id, cantidad, producto_id FROM movimientos_stock WHERE motivo LIKE ?", (f"Ticket #{venta_id}%",))
         movimientos_afectados = cursor.fetchall()
+        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
 
         for mov in movimientos_afectados:
             lote_id, cantidad, producto_id = mov
             cursor.execute("UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible + ? WHERE id = ?", (cantidad, lote_id))
             cursor.execute('''
-                INSERT INTO movimientos_stock (producto_id, lote_id, tipo_movimiento, cantidad, motivo)
-                VALUES (?, ?, 'ANULACION', ?, ?)
-            ''', (producto_id, lote_id, cantidad, f"Anulación Ticket #{venta_id}"))
+                INSERT INTO movimientos_stock (producto_id, lote_id, tipo_movimiento, cantidad, motivo, fecha_hora)
+                VALUES (?, ?, 'ANULACION', ?, ?, ?)
+            ''', (producto_id, lote_id, cantidad, f"Anulación Ticket #{venta_id}", fecha_actual))
 
         metodo_pago = venta[2].upper()
         total_venta = venta[3]
         cliente_id = venta[4]
-        fecha_actual = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         retiro_anulado = None
         motivo_retiro = ""
 
