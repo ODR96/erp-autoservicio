@@ -69,7 +69,9 @@ def asegurar_tablas_tesoreria_cuentas():
             )
         ''')
         conexion.execute("CREATE INDEX IF NOT EXISTS idx_tes_pend_estado ON tesoreria_pendientes (estado, fecha_hora)")
-        # Cheque propio: la deuda o el gasto se anota al emitirlo. El banco resta al debitarlo.
+        # Cheque propio: la deuda o el gasto se anota al emitirlo.
+        # Depositado no mueve el banco: avisa que ya lo presentaron.
+        # Cobrado (estado DEBITADO) es el único paso que resta de Banco.
         conexion.execute('''
             CREATE TABLE IF NOT EXISTS cheques_propios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,11 +88,15 @@ def asegurar_tablas_tesoreria_cuentas():
                 retiro_id INTEGER,
                 detalle TEXT,
                 estado TEXT NOT NULL DEFAULT 'EMITIDO',
+                depositado_en TEXT,
                 debitado_en TEXT,
                 anulado_en TEXT,
                 usuario_id INTEGER
             )
         ''')
+        columnas_cheque = {fila[1] for fila in conexion.execute("PRAGMA table_info(cheques_propios)")}
+        if "depositado_en" not in columnas_cheque:
+            conexion.execute("ALTER TABLE cheques_propios ADD COLUMN depositado_en TEXT")
         # Deuda de tarjeta: el saldo es lo que se debe. Positivo suma deuda, negativo la baja.
         conexion.execute('''
             CREATE TABLE IF NOT EXISTS deudas_movimientos (
@@ -498,9 +504,23 @@ def listar_cheques():
             SELECT c.*, IFNULL(p.nombre_comercial, '') AS proveedor
             FROM cheques_propios c
             LEFT JOIN proveedores p ON p.id = c.proveedor_id
-            ORDER BY c.id DESC LIMIT 80
+            ORDER BY
+                CASE c.estado WHEN 'DEPOSITADO' THEN 0 WHEN 'EMITIDO' THEN 1 WHEN 'DEBITADO' THEN 2 ELSE 3 END,
+                CASE WHEN c.estado IN ('DEPOSITADO', 'EMITIDO') THEN IFNULL(c.fecha_cobro, '9999-12-31') ELSE '0000' END,
+                c.id DESC
+            LIMIT 200
         ''').fetchall()
-        return {"cheques": [dict(f) for f in filas]}
+        depositados = conexion.execute(
+            "SELECT COUNT(*), IFNULL(SUM(monto), 0) FROM cheques_propios WHERE estado = 'DEPOSITADO'"
+        ).fetchone()
+        return {
+            "cheques": [dict(f) for f in filas],
+            "depositados": {
+                "cantidad": depositados[0],
+                "total": round(float(depositados[1] or 0), 2),
+            },
+            "saldo_banco": saldo_cuenta(conexion.cursor(), "BANCO"),
+        }
     finally:
         conexion.close()
 
@@ -568,7 +588,7 @@ def emitir_cheque(body: ChequeNuevo, sesion: dict = Depends(VerificarRol(["ADMIN
             gasto_id=gasto_id, retiro_id=retiro_id,
         )
         conexion.commit()
-        return {"mensaje": f"Cheque {numero} emitido. El banco no se movió: restálo cuando lo debiten.", "id": cheque_id}
+        return {"mensaje": f"Cheque {numero} emitido. El banco no se movió: marcalo cobrado cuando lo debiten.", "id": cheque_id}
     except HTTPException:
         conexion.rollback()
         raise
@@ -579,8 +599,9 @@ def emitir_cheque(body: ChequeNuevo, sesion: dict = Depends(VerificarRol(["ADMIN
         conexion.close()
 
 
-@router.put("/cheque/{cheque_id}/debitar")
-def debitar_cheque(cheque_id: int, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+@router.put("/cheque/{cheque_id}/depositar")
+def depositar_cheque(cheque_id: int, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    """El beneficiario ya lo presentó. No mueve el banco: sirve para ver cuánto tiene que haber mañana."""
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -589,12 +610,41 @@ def debitar_cheque(cheque_id: int, sesion: dict = Depends(VerificarRol(["ADMIN"]
         if not ch:
             raise HTTPException(status_code=404, detail="Ese cheque no existe.")
         if ch["estado"] != "EMITIDO":
-            raise HTTPException(status_code=400, detail="Ese cheque no está pendiente de débito.")
+            raise HTTPException(status_code=400, detail="Solo un cheque emitido se marca depositado.")
         ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
-        mover_tesoreria(cursor, "BANCO", -float(ch["monto"]), f"Débito cheque {ch['numero']}", "CHEQUE", cheque_id, _usuario_de(sesion))
+        cursor.execute(
+            "UPDATE cheques_propios SET estado = 'DEPOSITADO', depositado_en = ? WHERE id = ?",
+            (ahora, cheque_id),
+        )
+        conexion.commit()
+        return {"mensaje": f"Cheque {ch['numero']} depositado. El banco no se movió."}
+    except HTTPException:
+        conexion.rollback()
+        raise
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo marcar el cheque depositado.")
+    finally:
+        conexion.close()
+
+
+@router.put("/cheque/{cheque_id}/debitar")
+def debitar_cheque(cheque_id: int, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    """Cobrado: el banco ya lo debitó. Único paso que resta de Banco."""
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        ch = cursor.execute("SELECT * FROM cheques_propios WHERE id = ?", (cheque_id,)).fetchone()
+        if not ch:
+            raise HTTPException(status_code=404, detail="Ese cheque no existe.")
+        if ch["estado"] not in ("EMITIDO", "DEPOSITADO"):
+            raise HTTPException(status_code=400, detail="Ese cheque no está pendiente de cobro.")
+        ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        mover_tesoreria(cursor, "BANCO", -float(ch["monto"]), f"Cobro cheque {ch['numero']}", "CHEQUE", cheque_id, _usuario_de(sesion))
         cursor.execute("UPDATE cheques_propios SET estado = 'DEBITADO', debitado_en = ? WHERE id = ?", (ahora, cheque_id))
         conexion.commit()
-        return {"mensaje": f"Cheque {ch['numero']} debitado. Salió del banco."}
+        return {"mensaje": f"Cheque {ch['numero']} cobrado. Salió del banco."}
     except HTTPException:
         conexion.rollback()
         raise
