@@ -320,7 +320,7 @@ async function iniciarInterfazPOS() {
         const resCajas = await apiFetch(`${obtenerBaseUrl()}/caja/cajas_fisicas`);
         const dataCajas = await resCajas.json();
         cajasPermitidas = dataCajas.cajas || [];
-        if (!sesionEsJefe()) {
+        if (rol !== 'ADMIN') {
             cajasPermitidas = cajasPermitidas.filter(c => !c.solo_admin && Number(c.id) !== 99);
         }
     } catch (error) {

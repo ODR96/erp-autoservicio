@@ -198,7 +198,7 @@ def listar_cajas_fisicas(payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGA
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     rol = ((payload or {}).get("rol") or "").upper()
-    if rol == "CAJERO":
+    if rol != "ADMIN":
         cursor.execute(
             "SELECT id, nombre, IFNULL(solo_admin, 0) AS solo_admin FROM cajas_fisicas WHERE activa = 1 AND IFNULL(solo_admin, 0) = 0 ORDER BY id ASC"
         )
@@ -222,7 +222,7 @@ def abrir_turno(apertura: AperturaCaja, background_tasks: BackgroundTasks):
         if caja_fisica[2]: 
             cursor.execute("SELECT rol FROM usuarios WHERE id = ?", (apertura.usuario_id,))
             usuario = cursor.fetchone()
-            if not usuario or usuario[0] not in ['ADMIN', 'ENCARGADO']: raise Exception("Caja exclusiva para Administración.")
+            if not usuario or usuario[0] != 'ADMIN': raise Exception("Caja exclusiva para Administración.")
 
         cursor.execute("SELECT id FROM turnos_caja WHERE caja_id = ? AND estado_turno = 'ABIERTO'", (apertura.caja_id,))
         if cursor.fetchone(): raise Exception("Ya hay un turno abierto en esta caja.")
