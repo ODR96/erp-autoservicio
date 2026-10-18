@@ -142,7 +142,7 @@ function renderizarGrafico(datos) {
         type: 'bar',
         data: {
             labels: horas,
-            datasets: [{ label: 'Tickets', data: ventas, backgroundColor: '#38bdf8', borderRadius: 4 }]
+            datasets: [{ label: 'Tickets', data: ventas, backgroundColor: '#3d5c78', borderRadius: 4 }]
         },
         options: {
             responsive: true, maintainAspectRatio: false, color: '#fff',

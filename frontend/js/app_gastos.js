@@ -614,10 +614,10 @@ async function cargarCajaFuerte() {
             deuda = await leerRespuestaGasto(resDeuda);
         } catch (e) { deuda = null; }
         const tarjeta = deuda ? `
-            <div class="kpi-card p-3 d-flex flex-wrap align-items-center justify-content-between gap-3" style="border-left-color:#f59e0b;">
+            <div class="kpi-card p-3 d-flex flex-wrap align-items-center justify-content-between gap-3">
                 <div>
                     <h6 class="text-muted text-uppercase fw-bold small mb-1">Tarjeta (lo que debés)</h6>
-                    <h2 class="fw-bold mb-0 text-warning">${formatoPesos(deuda.saldo)}</h2>
+                    <h2 class="fw-bold mb-0">${formatoPesos(deuda.saldo)}</h2>
                     <div class="small text-muted mt-1">${deuda.inicializada ? 'Pagar el resumen no es un gasto.' : 'Cargá lo que debés hoy. Hasta entonces el número no frena.'}</div>
                 </div>
                 <div class="d-flex gap-2 flex-wrap">
@@ -633,20 +633,20 @@ async function cargarCajaFuerte() {
                 : '<div class="small text-muted mt-2">Nada por recibir.</div>';
             return `
                 <div class="col-md-4">
-                    <div class="kpi-card p-3 h-100 d-flex flex-column" style="border-left-color:#a78bfa;">
+                    <div class="kpi-card p-3 h-100 d-flex flex-column">
                         <h6 class="text-muted text-uppercase fw-bold small mb-1">${escGasto(c.nombre)}</h6>
-                        <h2 class="fw-bold mb-1" style="color:#c4b5fd;">${formatoPesos(c.saldo)}</h2>
+                        <h2 class="fw-bold mb-1">${formatoPesos(c.saldo)}</h2>
                         <div class="small text-muted">${textoEstadoCuenta(c)}</div>
                         ${aviso}
                         <div class="d-flex gap-2 mt-auto pt-3">
-                            <button type="button" class="btn btn-sm fw-bold flex-grow-1" style="background:#7c3aed; color:#fff;" data-teso="arqueo" data-cuenta="${escGasto(c.cuenta)}">Arqueo</button>
+                            <button type="button" class="btn btn-sm btn-outline-light flex-grow-1" data-teso="arqueo" data-cuenta="${escGasto(c.cuenta)}">Arqueo</button>
                             <button type="button" class="btn btn-sm btn-outline-light" data-teso="movs" data-cuenta="${escGasto(c.cuenta)}">Movimientos</button>
                         </div>
                     </div>
                 </div>`;
         }).join('') + `</div>`;
         cont.innerHTML = plata + tarjeta + `
-            <button type="button" id="btnPasarPlata" class="btn btn-outline-info fw-bold mt-3">Pasar plata entre cuentas</button>`;
+            <button type="button" id="btnPasarPlata" class="btn btn-outline-light mt-3">Pasar plata entre cuentas</button>`;
         return cuentas[0];
     } catch (e) {
         console.error('Error al cargar tesorería', e);
@@ -682,7 +682,7 @@ async function hacerArqueoCajaFuerte(cuenta) {
         showCancelButton: true,
         confirmButtonText: 'Guardar arqueo',
         cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#7c3aed',
+        confirmButtonColor: '#1a3348',
         didOpen: (popup) => {
             const monto = document.getElementById('swal-arq-monto');
             const dif = document.getElementById('swal-arq-dif');
@@ -794,7 +794,7 @@ async function recibirPendiente(id) {
         showCancelButton: true,
         confirmButtonText: 'Guardar en caja fuerte',
         cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#7c3aed',
+        confirmButtonColor: '#1a3348',
         didOpen: (popup) => {
             const monto = document.getElementById('swal-pend-monto');
             const dif = document.getElementById('swal-pend-dif');
@@ -860,7 +860,7 @@ async function verMovimientosCajaFuerte(cuenta) {
         title: data.nombre || 'Cuenta',
         width: 620,
         html: `
-            <div class="fw-bold mb-2" style="color:#c4b5fd;">Saldo: ${formatoPesos(data.saldo)}</div>
+            <div class="fw-bold mb-2">Saldo: ${formatoPesos(data.saldo)}</div>
             <div class="table-responsive text-start" style="max-height:420px; overflow-y:auto;">
                 <table class="table table-dark table-sm align-middle mb-0"><tbody>${filas}</tbody></table>
             </div>`,

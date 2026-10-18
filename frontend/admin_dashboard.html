@@ -24,23 +24,27 @@
             overflow: hidden;
         }
 
-        /* MAGIA 1: Estilizar la barra de Scroll para que sea elegante y oscura */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
+        .sidebar-menu {
+            scrollbar-width: none;
         }
-
-        ::-webkit-scrollbar-track {
-            background: #06101D;
+        .sidebar-menu::-webkit-scrollbar {
+            width: 0;
+            height: 0;
+            display: none;
         }
-
-        ::-webkit-scrollbar-thumb {
-            background: #1F304A;
+        .content-area,
+        .content-area * {
+            scrollbar-width: thin;
+            scrollbar-color: #1a3050 transparent;
+        }
+        .content-area::-webkit-scrollbar,
+        .content-area *::-webkit-scrollbar { width: 8px; height: 8px; }
+        .content-area::-webkit-scrollbar-track,
+        .content-area *::-webkit-scrollbar-track { background: transparent; }
+        .content-area::-webkit-scrollbar-thumb,
+        .content-area *::-webkit-scrollbar-thumb {
+            background: #1a3050;
             border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: #38bdf8;
         }
 
         /* MAGIA 2: Forzar la barra de navegación de layout.js a modo oscuro (NUEVO) */
@@ -114,21 +118,10 @@
 
 
 
-        .bg-icon-primary {
-            background-color: #0ea5e9;
-        }
-
-        .bg-icon-warning {
-            background-color: #f59e0b;
-        }
-
-        .bg-icon-danger {
-            background-color: #ef4444;
-        }
-
-        .bg-icon-success {
-            background-color: #10b981;
-        }
+        .bg-icon-primary { background-color: #1a3348; color: #d5e4ef; }
+        .bg-icon-warning { background-color: #2c2820; color: #e4d7bc; }
+        .bg-icon-danger { background-color: #2a1c1c; color: #e7d0d0; }
+        .bg-icon-success { background-color: #1a2e24; color: #c5ddd0; }
 
         .panel-header {
             padding: 15px 20px;
@@ -149,8 +142,7 @@
             /* Fondo sólido para tapar el scroll */
             color: #E2E8F0;
             /* Texto claro y legible */
-            border-bottom: 2px solid #0ea5e9;
-            /* Una línea celeste sutil abajo */
+            border-bottom: 1px solid #243044;
             padding: 12px 10px;
             white-space: nowrap;
             overflow: hidden;
@@ -172,8 +164,32 @@
         .top-navbar .text-dark { color: #E2E8F0 !important; }
         .top-navbar .text-muted { color: #94A3B8 !important; }
         .top-navbar .btn-hamburguesa { color: #E2E8F0 !important; }
-        .top-navbar .btn-light { background: #1F304A; border-color: #1F304A; }
+        .top-navbar .btn-light { background: #111C2A; border-color: #1F304A; box-shadow: none !important; }
         .top-navbar .bi-bell, .top-navbar .bi-person-circle { color: #94A3B8 !important; }
+        .top-navbar #cajaDolar {
+            background: #111C2A !important;
+            border-color: #1F304A !important;
+            color: #b7cbb7 !important;
+        }
+        .content-area .text-warning { color: #d9cba8 !important; }
+        .content-area .text-info { color: #9bb4c6 !important; }
+        .content-area .text-danger { color: #c48a8a !important; }
+        .content-area .text-success { color: #8fb59a !important; }
+        .content-area .btn-outline-info {
+            color: #b7c9d6;
+            border-color: #2c4a63;
+        }
+        .content-area .btn-outline-info:hover {
+            background: #1a3348;
+            color: #d5e4ef;
+            border-color: #2c4a63;
+        }
+        .content-area .bg-warning { background-color: #2c2820 !important; color: #e4d7bc !important; }
+        .content-area .bg-success { background-color: #1a2e24 !important; color: #c5ddd0 !important; }
+        .content-area .bg-danger { background-color: #2a1c1c !important; color: #e7d0d0 !important; }
+        .content-area .bg-primary,
+        .content-area .bg-info { background-color: #1a3348 !important; color: #d5e4ef !important; }
+        .content-area .progress-bar { background-color: #8a7344 !important; }
 
         @media (max-width: 767.98px) {
             html, body {
@@ -233,7 +249,7 @@
                     </button>
                 </div>
                 <!-- PISO OPERATIVO DEL MES -->
-                <div class="card-dash p-3 mb-4" style="border-left: 4px solid #f59e0b;">
+                <div class="card-dash p-3 mb-4">
                     <div class="d-flex justify-content-between align-items-end mb-2 flex-wrap gap-2">
                         <div>
                             <h6 class="text-uppercase fw-bold text-muted mb-0 small">Piso operativo del mes</h6>
@@ -243,7 +259,7 @@
                         <span class="badge bg-warning text-dark fw-bold" id="dash-progreso-porcentaje">0%</span>
                     </div>
                     <div class="progress" style="height: 12px; background-color: #1F304A;">
-                        <div class="progress-bar bg-warning progress-bar-striped progress-bar-animated"
+                        <div class="progress-bar"
                             id="dash-progreso-barra" role="progressbar" style="width: 0%"></div>
                     </div>
                 </div>
@@ -299,7 +315,7 @@
                     </div>
                     <div class="col-xl-3 col-md-6">
                         <div class="card-dash p-3 d-flex align-items-center justify-content-between h-100"
-                            style="border: 2px solid #10b981;">
+                            style="border: 1px solid #2a4a38;">
                             <div class="kpi-text-container" style="padding-right: 5px;">
                                 <span class="text-uppercase small fw-bold text-success">Ganancia Neta Pura</span>
                                 <h3 class="fw-bold mb-0 text-success mt-1" id="dash-ganancia"
@@ -348,7 +364,7 @@
                         </div>
                     </div>
                     <div class="col-lg-4">
-                        <div class="card-dash h-100 d-flex flex-column" style="border-top: 4px solid #ef4444;">
+                        <div class="card-dash h-100 d-flex flex-column" style="border-top: 2px solid #5c3a3a;">
                             <div
                                 class="panel-header d-flex justify-content-between align-items-center bg-danger bg-opacity-10">
                                 <h5 class="fw-bold text-danger mb-0"><i
@@ -436,7 +452,7 @@
                     <div class="col-lg-6">
                         <div class="card-dash h-100">
                             <div class="panel-header">
-                                <h6 class="fw-bold text-warning mb-0" style="color: #f59e0b!important;">
+                                <h6 class="fw-bold text-warning mb-0">
                                     <i class="bi bi-clock-history me-2"></i> Próximos a Vencer
                                     <span class="badge bg-warning text-dark ms-2 fs-6" id="badge-vencimientos">0</span>
                                 </h6>
@@ -481,7 +497,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="js/layout.js?v=1.0.42"></script>
-    <script src="js/app_dashboard.js?v=1.0.38"></script>
+    <script src="js/app_dashboard.js?v=1.0.39"></script>
 </body>
 
 </html>
