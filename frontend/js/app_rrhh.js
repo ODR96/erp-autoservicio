@@ -376,7 +376,13 @@ async function cargarCuentaEmpleado() {
     data.movimientos.forEach(m => {
         const montoSaldado = m.monto_saldado || 0;
         let estado;
-        if (m.liquidacion_id) {
+        const esAdelantoPendiente = (m.tipo_movimiento || '').toUpperCase() === 'ADELANTO' && !m.liquidacion_id && montoSaldado <= 0.009;
+        const btnAnular = esAdelantoPendiente
+            ? `<button type="button" class="btn btn-sm btn-outline-danger py-0" onclick="anularAdelanto(${Number(m.id)})">Anular</button>`
+            : '';
+        if ((m.detalle || '').indexOf('ANULADO:') === 0) {
+            estado = '<span class="badge bg-secondary">Anulado</span>';
+        } else if (m.liquidacion_id) {
             estado = '<span class="badge bg-secondary">Saldado</span>';
         } else if (montoSaldado > 0) {
             // Deuda grande que se cobró de a partes: ya se le descontó algo pero todavía
@@ -392,7 +398,7 @@ async function cargarCuentaEmpleado() {
                 <td>${m.tipo_movimiento}</td>
                 <td class="small">${escRrhh(m.detalle)}${origen}</td>
                 <td class="text-end fw-bold">$${m.monto}</td>
-                <td class="text-center">${estado}</td>
+                <td class="text-center">${estado} ${btnAnular}</td>
             </tr>
         `;
     });
@@ -400,6 +406,31 @@ async function cargarCuentaEmpleado() {
 
 // De dónde estaban los billetes al pagar (adelanto o sueldo). La caja fuerte resta su saldo;
 // Mercado Pago y banco quedan anotados hasta que esas cuentas lleven saldo.
+async function anularAdelanto(id) {
+    const { value: pin } = await Swal.fire({
+        title: 'Anular adelanto',
+        input: 'password',
+        inputPlaceholder: 'Tu PIN de Administrador',
+        text: 'Si salió de la caja fuerte, Mercado Pago o el banco, la plata vuelve. Si salió de un turno ya cerrado, no se anula.',
+        showCancelButton: true,
+        confirmButtonText: 'Anular',
+        confirmButtonColor: '#dc3545'
+    });
+    if (!pin) return;
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/rrhh/cuenta_empleado/adelanto/${id}/anular`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin_autorizante: pin })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        Swal.fire('Anulado', data.mensaje, 'success');
+        cargarCuentaEmpleado();
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
 async function buscarTurnosAbiertos() {
     Swal.fire({ title: 'Buscando cajas abiertas...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
     let turnos = [];

@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
-from backend.mod_clientes.rutas_clientes import persistir_imputacion_fifo, _estado_cuenta_de, exigir_cuenta_habilitada
+from backend.mod_clientes.rutas_clientes import persistir_imputacion_fifo, _estado_cuenta_de, exigir_cuenta_habilitada, _ticket_detalle
 from backend.mod_config.rutas_config import liquidar_comision, plata
 
 router = APIRouter()
@@ -20,6 +20,8 @@ def asegurar_columnas_multi_caja():
     except: pass
     # NULL a propósito: las ventas viejas caen al costo maestro. DEFAULT 0 mentiría CMV=0.
     try: cursor.execute("ALTER TABLE ventas_detalle ADD COLUMN costo_unitario_historico REAL")
+    except: pass
+    try: cursor.execute("ALTER TABLE ventas_detalle ADD COLUMN anulado INTEGER NOT NULL DEFAULT 0")
     except: pass
     try: cursor.execute("ALTER TABLE ventas_cabecera ADD COLUMN override_mora_motivo TEXT")
     except: pass
@@ -146,6 +148,7 @@ def _costo_unitario_lote(costo_lote, costo_fallback) -> float:
 def descontar_stock_fifo(
     cursor, producto_id, cantidad, venta_id, cajero_nombre, fecha_iso, costo_fallback,
     tipo_movimiento="VENTA_AUTOMATICA", tipo_faltante="VENTA_FALTANTE_STOCK", motivo=None,
+    usuario_id=None,
 ) -> float:
     """Descuenta lotes por vencimiento. Devuelve el costo total de esa mercadería (no el precio de góndola)."""
     restante = float(cantidad)
@@ -167,9 +170,9 @@ def descontar_stock_fifo(
             (descuento, lote["id"]),
         )
         cursor.execute(
-            """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo, fecha_hora)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (producto_id, lote["id"], descuento, tipo_movimiento, etiqueta, fecha_iso),
+            """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo, fecha_hora, usuario_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (producto_id, lote["id"], descuento, tipo_movimiento, etiqueta, fecha_iso, usuario_id),
         )
         costo_total += descuento * _costo_unitario_lote(lote["costo"], costo_fallback)
         restante -= descuento
@@ -185,9 +188,9 @@ def descontar_stock_fifo(
         )
         nuevo_lote = cursor.lastrowid
         cursor.execute(
-            """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo, fecha_hora)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (producto_id, nuevo_lote, restante, tipo_faltante, etiqueta, fecha_iso),
+            """INSERT INTO movimientos_stock (producto_id, lote_id, cantidad, tipo_movimiento, motivo, fecha_hora, usuario_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (producto_id, nuevo_lote, restante, tipo_faltante, etiqueta, fecha_iso, usuario_id),
         )
         costo_total += restante * costo_faltante
 
@@ -195,7 +198,7 @@ def descontar_stock_fifo(
 
 
 def costo_y_descuento_linea(
-    cursor, producto_id, cantidad, venta_id, cajero_nombre, fecha_iso, costo_fallback, **fifo
+    cursor, producto_id, cantidad, venta_id, cajero_nombre, fecha_iso, costo_fallback, usuario_id=None, **fifo
 ) -> float:
     """Descuenta el producto o, si es combo, cada componente. Devuelve el costo unitario de la línea."""
     cantidad = float(cantidad or 0)
@@ -220,7 +223,7 @@ def costo_y_descuento_linea(
         fila_hijo = cursor.fetchone()
         costo_hijo = fila_hijo[0] if fila_hijo else costo_fallback
         costo_total += descontar_stock_fifo(
-            cursor, hijo_id, cant, venta_id, cajero_nombre, fecha_iso, costo_hijo, **fifo
+            cursor, hijo_id, cant, venta_id, cajero_nombre, fecha_iso, costo_hijo, usuario_id=usuario_id, **fifo
         )
     return round(costo_total / cantidad, 4) if cantidad else 0.0
 
@@ -477,6 +480,7 @@ def registrar_venta(venta: NuevaVenta, background_tasks: BackgroundTasks):
                 venta.cajero_nombre,
                 fecha_actual,
                 costo_fallback,
+                usuario_id=usuario_id_caja,
             )
             cursor.execute('''
                 INSERT INTO ventas_detalle 
@@ -621,7 +625,8 @@ def generar_ticket(venta_id: int):
         if not venta: return {"error": "Ese número de ticket no existe"}
             
         cursor.execute('''
-            SELECT vd.descripcion_historica as nombre, vd.cantidad, vd.precio_unitario_historico as precio_unitario, vd.subtotal, p.unidad_medida 
+            SELECT vd.id, vd.producto_id, vd.descripcion_historica as nombre, vd.cantidad, vd.precio_unitario_historico as precio_unitario,
+                   vd.subtotal, IFNULL(vd.anulado, 0) as anulado, p.unidad_medida
             FROM ventas_detalle vd
             LEFT JOIN productos p ON vd.producto_id = p.id
             WHERE vd.venta_id = ?
@@ -646,6 +651,7 @@ def generar_ticket(venta_id: int):
                 "fecha": venta['fecha_hora'],
                 "numero_ticket": f"0001-{venta['id']:08d}",
                 "cajero": _cajero_de_venta(cursor, venta),
+                "metodo_pago": venta["metodo_pago"],
             },
             "detalle_compra": [dict(item) for item in detalle],
             "totales": {
@@ -769,6 +775,171 @@ def historial_ventas_turno(turno_id: int):
         return {"error": str(e)}
     finally:
         conexion.close()
+
+class AnularLineaCuenta(BaseModel):
+    motivo: str
+
+
+def _devolver_producto_del_ticket(cursor, venta_id, producto_id, cantidad, usuario_id, fecha, motivo):
+    if not producto_id or cantidad <= 0.001:
+        return
+    cursor.execute(
+        """
+        SELECT lote_id,
+               SUM(CASE WHEN tipo_movimiento = 'ANULACION' THEN -cantidad ELSE cantidad END) AS neto
+        FROM movimientos_stock
+        WHERE producto_id = ?
+          AND (motivo LIKE ? OR motivo LIKE ?)
+        GROUP BY lote_id
+        HAVING neto > 0.001
+        ORDER BY lote_id
+        """,
+        (producto_id, f"Ticket #{venta_id}%", f"%Ticket #{venta_id}%"),
+    )
+    falta = float(cantidad)
+    for lote_id, neto in cursor.fetchall():
+        if falta <= 0.001:
+            break
+        toma = min(float(neto), falta)
+        cursor.execute(
+            "UPDATE lotes_stock SET cantidad_disponible = cantidad_disponible + ? WHERE id = ?",
+            (toma, lote_id),
+        )
+        cursor.execute(
+            """INSERT INTO movimientos_stock
+               (producto_id, lote_id, tipo_movimiento, cantidad, motivo, fecha_hora, usuario_id)
+               VALUES (?, ?, 'ANULACION', ?, ?, ?, ?)""",
+            (producto_id, lote_id, toma, f"Anulación línea Ticket #{venta_id}: {motivo}"[:200], fecha, usuario_id),
+        )
+        falta -= toma
+    if falta > 0.05:
+        raise Exception("No se pudo devolver todo el stock de esa línea. Revisá si ya estaba anulada.")
+
+
+def _achicar_cargo_cliente(cursor, cliente_id, cargo_id, nuevo_monto):
+    """Baja el cargo. Si un pago ya lo cubría de más, ese sobrante se imputa al resto de la cuenta."""
+    fila = cursor.execute(
+        "SELECT monto, IFNULL(monto_saldado, 0) FROM movimientos_clientes WHERE id = ?",
+        (cargo_id,),
+    ).fetchone()
+    saldado = float(fila[1] or 0)
+    cursor.execute("UPDATE movimientos_clientes SET monto = ? WHERE id = ?", (nuevo_monto, cargo_id))
+    if saldado <= nuevo_monto + 0.009:
+        return
+    exceso = round(saldado - nuevo_monto, 2)
+    cursor.execute("UPDATE movimientos_clientes SET monto_saldado = ? WHERE id = ?", (nuevo_monto, cargo_id))
+    cursor.execute(
+        "SELECT id, pago_id, monto FROM clientes_pago_aplicaciones WHERE cargo_id = ? ORDER BY id DESC",
+        (cargo_id,),
+    )
+    for ap_id, pago_id, monto_ap in cursor.fetchall():
+        if exceso <= 0.009:
+            break
+        toma = min(exceso, float(monto_ap))
+        if toma >= float(monto_ap) - 0.009:
+            cursor.execute("DELETE FROM clientes_pago_aplicaciones WHERE id = ?", (ap_id,))
+        else:
+            cursor.execute(
+                "UPDATE clientes_pago_aplicaciones SET monto = monto - ? WHERE id = ?",
+                (toma, ap_id),
+            )
+        persistir_imputacion_fifo(cursor, cliente_id, pago_id, toma)
+        exceso = round(exceso - toma, 2)
+
+
+@router.put("/{venta_id}/linea/{detalle_id}/anular")
+def anular_linea_cuenta(venta_id: int, detalle_id: int, body: AnularLineaCuenta,
+                        sesion: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
+    """Saca un ítem de un fiado con el turno ya cerrado. No toca el cajón."""
+    motivo = " ".join((body.motivo or "").split())
+    if len(motivo) < 5:
+        return {"error": "Escribí el motivo (5 letras o más)."}
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        try:
+            usuario_id = int(sesion.get("sub"))
+        except (TypeError, ValueError):
+            usuario_id = None
+        venta = cursor.execute(
+            "SELECT estado, metodo_pago, total_venta, cliente_id, IFNULL(recargo_medio, 0), IFNULL(descuento_recargo_global, 0) FROM ventas_cabecera WHERE id = ?",
+            (venta_id,),
+        ).fetchone()
+        if not venta:
+            raise Exception("Esa venta no existe.")
+        if venta[0] == "ANULADA":
+            raise Exception("Esa venta ya está anulada.")
+        metodo = (venta[1] or "").upper()
+        if metodo not in ("FIADO", "CUENTA CORRIENTE"):
+            raise Exception("Solo se anula una línea de una cuenta corriente. Efectivo y QR se anulan con el turno abierto.")
+        if not venta[3]:
+            raise Exception("Esa venta no tiene cliente.")
+        linea = cursor.execute(
+            "SELECT id, producto_id, cantidad, subtotal, IFNULL(anulado, 0), descripcion_historica FROM ventas_detalle WHERE id = ? AND venta_id = ?",
+            (detalle_id, venta_id),
+        ).fetchone()
+        if not linea:
+            raise Exception("Esa línea no está en el ticket.")
+        if linea[4]:
+            raise Exception("Esa línea ya está anulada.")
+        bruto = cursor.execute(
+            "SELECT IFNULL(SUM(subtotal), 0), COUNT(*) FROM ventas_detalle WHERE venta_id = ? AND IFNULL(anulado, 0) = 0",
+            (venta_id,),
+        ).fetchone()
+        suma_lineas, vivas = float(bruto[0] or 0), int(bruto[1] or 0)
+        if suma_lineas <= 0.009:
+            raise Exception("Ese ticket no tiene importe para anular.")
+        neto = round(float(venta[2] or 0) - float(venta[4] or 0), 2)
+        if vivas <= 1:
+            parte = neto
+        else:
+            parte = round(float(linea[3] or 0) / suma_lineas * neto, 2)
+        if parte <= 0.009:
+            raise Exception("Esa línea no tiene importe.")
+
+        fecha = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "SELECT producto_hijo_id, cantidad_hijo FROM productos_combos WHERE producto_padre_id = ?",
+            (linea[1],),
+        )
+        componentes = cursor.fetchall()
+        if componentes:
+            for hijo_id, cant_hijo in componentes:
+                _devolver_producto_del_ticket(
+                    cursor, venta_id, hijo_id, float(linea[2] or 0) * float(cant_hijo or 0), usuario_id, fecha, motivo,
+                )
+        else:
+            _devolver_producto_del_ticket(cursor, venta_id, linea[1], float(linea[2] or 0), usuario_id, fecha, motivo)
+
+        cursor.execute("UPDATE ventas_detalle SET anulado = 1 WHERE id = ?", (detalle_id,))
+        nuevo_total = round(float(venta[2] or 0) - parte, 2)
+        cursor.execute("UPDATE ventas_cabecera SET total_venta = ? WHERE id = ?", (max(nuevo_total, 0), venta_id))
+        if vivas <= 1:
+            cursor.execute("UPDATE ventas_cabecera SET estado = 'ANULADA' WHERE id = ?", (venta_id,))
+
+        cliente_id = venta[3]
+        cursor.execute("UPDATE clientes SET saldo_actual_deudor = saldo_actual_deudor - ? WHERE id = ?", (parte, cliente_id))
+        cargos = cursor.execute(
+            "SELECT id, monto, IFNULL(detalle, '') FROM movimientos_clientes WHERE cliente_id = ? AND UPPER(tipo_movimiento) = 'CARGO'",
+            (cliente_id,),
+        ).fetchall()
+        cargo = next((c for c in cargos if _ticket_detalle(c[2]) == str(venta_id)), None)
+        if not cargo:
+            raise Exception("No encontré el cargo de ese ticket en la cuenta del cliente.")
+        nuevo_cargo = round(max(float(cargo[1] or 0) - parte, 0), 2)
+        _achicar_cargo_cliente(cursor, cliente_id, cargo[0], nuevo_cargo)
+        cursor.execute(
+            "UPDATE movimientos_clientes SET detalle = detalle || ? WHERE id = ?",
+            (f" | Anulada: {linea[5]} ({motivo})"[:180], cargo[0]),
+        )
+        conexion.commit()
+        return {"mensaje": f"Se anuló {linea[5]}. La deuda bajó ${parte:,.2f}. El cajón no se tocó.", "monto": parte}
+    except Exception as e:
+        conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        conexion.close()
+
 
 class AnularVentaRequest(BaseModel):
     usuario_id: int

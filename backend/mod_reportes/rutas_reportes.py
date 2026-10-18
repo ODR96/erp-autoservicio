@@ -40,9 +40,10 @@ def _sumar_venta_sin_iva(cursor, where_sql, params) -> float:
         JOIN (
             SELECT venta_id, SUM(IFNULL(subtotal, 0)) AS lineas
             FROM ventas_detalle
+            WHERE IFNULL(anulado, 0) = 0
             GROUP BY venta_id
         ) base ON base.venta_id = d.venta_id
-        WHERE ''' + where_sql
+        WHERE IFNULL(d.anulado, 0) = 0 AND ''' + where_sql
     ultimo = None
     for precio in (
         "(IFNULL(c.total_venta, 0) - IFNULL(c.recargo_medio, 0))",
@@ -257,6 +258,7 @@ def calcular_ganancia_neta(mes: str = None):
             LEFT JOIN productos p ON v.producto_id = p.id
             WHERE strftime('%Y-%m', c.fecha_hora) = ?
             AND c.estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')
+            AND IFNULL(v.anulado, 0) = 0
         ''', (mes,))
         costos_mercaderia = cursor.fetchone()[0] or 0.0
 

@@ -565,6 +565,63 @@ def registrar_adelanto(adelanto: AdelantoNuevo, background_tasks: BackgroundTask
         conexion.close()
 
 
+class AnularAdelanto(BaseModel):
+    pin_autorizante: str
+
+
+@router.put("/cuenta_empleado/adelanto/{movimiento_id}/anular", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def anular_adelanto(movimiento_id: int, body: AnularAdelanto):
+    """Anula un adelanto que todavía no se descontó en una liquidación. Devuelve la plata a su origen."""
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        if not _verificar_pin_admin(cursor, body.pin_autorizante):
+            raise Exception("PIN incorrecto o sin privilegios de Administrador.")
+        mov = cursor.execute("SELECT * FROM movimientos_cuenta_empleado WHERE id = ?", (movimiento_id,)).fetchone()
+        if not mov or (mov["tipo_movimiento"] or "").upper() != "ADELANTO":
+            raise Exception("Ese adelanto no existe.")
+        if mov["liquidacion_id"] or float(mov["monto_saldado"] or 0) > 0.009:
+            raise Exception("Ese adelanto ya se descontó en una liquidación. Anulá la liquidación, no el adelanto.")
+        fecha = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+        origen = (mov["origen_fondos"] or "").upper()
+        monto = float(mov["monto"] or 0)
+        aviso = ""
+        if origen == "CAJA":
+            caja = cursor.execute(
+                """SELECT id, turno_id FROM movimientos_caja
+                   WHERE tipo_movimiento = 'RETIRO' AND ABS(monto - ?) < 0.02
+                     AND observaciones = ?
+                   ORDER BY id DESC LIMIT 1""",
+                (monto, f"[ADELANTO DE SUELDO] {mov['detalle']}"),
+            ).fetchone()
+            if not caja:
+                raise Exception("No encontré la salida de ese adelanto en el cajón.")
+            turno = cursor.execute("SELECT estado_turno FROM turnos_caja WHERE id = ?", (caja["turno_id"],)).fetchone()
+            if not turno or turno["estado_turno"] != "ABIERTO":
+                raise Exception("Ese adelanto salió de un turno que ya cerró. El cajón no se toca. Anotalo como ingreso en un turno abierto si el empleado devolvió la plata.")
+            cursor.execute(
+                """INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
+                   VALUES (?, ?, 'INGRESO', ?, ?, ?)""",
+                (fecha, mov["usuario_registro"], monto, f"[ANULA ADELANTO #{movimiento_id}]", caja["turno_id"]),
+            )
+            aviso = f" Los ${monto:,.2f} vuelven al cajón del turno #{caja['turno_id']}."
+        elif origen in ("CAJA_FUERTE", "MERCADOPAGO", "BANCO"):
+            mover_tesoreria(cursor, origen, monto, f"Anula adelanto #{movimiento_id}", "ANULACION", movimiento_id, mov["usuario_registro"])
+            aviso = f" Los ${monto:,.2f} vuelven a {TEXTO_ORIGEN.get(origen, origen)}."
+        cursor.execute(
+            "UPDATE movimientos_cuenta_empleado SET monto_saldado = monto, detalle = ? WHERE id = ?",
+            (f"ANULADO: {mov['detalle']}"[:255], movimiento_id),
+        )
+        conexion.commit()
+        return {"mensaje": "Adelanto anulado." + aviso}
+    except Exception as e:
+        conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        conexion.close()
+
+
 @router.post("/cuenta_empleado/consumo", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def registrar_consumo_mercaderia(consumo: ConsumoMercaderiaNuevo):
     conexion = obtener_conexion()

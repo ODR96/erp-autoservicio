@@ -487,6 +487,33 @@ async function cargarHistorialCliente(id) {
     }
 }
 
+async function anularLineaCuenta(ventaId, detalleId) {
+    const { value: motivo } = await Swal.fire({
+        title: 'Anular este producto',
+        input: 'text',
+        inputPlaceholder: 'Motivo (5 letras o más)',
+        text: 'Baja la deuda y devuelve el stock. El cajón no se toca. Si el ticket tenía descuento, se saca la parte de esta línea.',
+        showCancelButton: true,
+        confirmButtonText: 'Anular línea',
+        confirmButtonColor: '#dc3545',
+        inputValidator: (v) => (!v || v.trim().length < 5) ? 'Escribí el motivo' : undefined
+    });
+    if (!motivo) return;
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/ventas/${ventaId}/linea/${detalleId}/anular`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ motivo: motivo.trim() })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await Swal.fire('Anulado', data.mensaje, 'success');
+        if (clienteSeleccionadoId) await seleccionarCliente(clienteSeleccionadoId);
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
+}
+
 // NUEVA FUNCIÓN: Trae la factura completa al panel de administración
 async function verDetalleTicketAdmin(ventaId) {
     Swal.fire({ title: 'Buscando Remito...', didOpen: () => Swal.showLoading() });
@@ -499,10 +526,16 @@ async function verDetalleTicketAdmin(ventaId) {
         let html = `<div class="table-responsive"><table class="table table-sm text-start align-middle">
         <thead class="table-light"><tr><th>Cant.</th><th>Producto</th><th class="text-end">Total</th></tr></thead><tbody>`;
 
+        const metodoTicket = (data.encabezado.metodo_pago || '').toUpperCase();
+        const esCuenta = metodoTicket === 'FIADO' || metodoTicket === 'CUENTA CORRIENTE';
         data.detalle_compra.forEach(d => {
-            html += `<tr>
+            const anulada = Number(d.anulado) === 1;
+            const btn = esCuenta && !anulada && d.id
+                ? `<button type="button" class="btn btn-sm btn-outline-danger py-0" onclick="anularLineaCuenta(${ventaId}, ${Number(d.id)})">Anular</button>`
+                : (anulada ? '<span class="badge bg-secondary">Anulada</span>' : '');
+            html += `<tr class="${anulada ? 'text-decoration-line-through text-muted' : ''}">
             <td class="fw-bold">${d.cantidad}</td>
-            <td class="small">${escCli(d.nombre)}</td>
+            <td class="small">${escCli(d.nombre)} ${btn}</td>
             <td class="text-end fw-bold text-success">$${d.subtotal.toFixed(2)}</td>
         </tr>`;
         });
