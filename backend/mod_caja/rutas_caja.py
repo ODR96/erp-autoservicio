@@ -184,7 +184,8 @@ class MovimientoCaja(BaseModel):
     monto: float
     observaciones: str
     turno_id: int
-    es_sangria: Optional[bool] = False  # <-- NUEVO: True = Retiro físico/tesorería (NO es Gasto Operativo)
+    es_sangria: Optional[bool] = False  # True = va a la caja fuerte (o por recibir). No es un gasto.
+    es_pago_mostrador: Optional[bool] = False  # True = salió del cajón con nota. No toca deuda ni caja fuerte.
 
 class CierreCaja(BaseModel):
     turno_id: int
@@ -296,7 +297,14 @@ def registrar_movimiento(mov: MovimientoCaja, background_tasks: BackgroundTasks,
         # ETIQUETA DE TESORERÍA: si es Sangría física, lo marcamos clarito en la
         # observación para diferenciarlo en la Auditoría de Turno de un retiro por Gasto Operativo.
         observacion_final = mov.observaciones
-        if tipo_mayuscula == 'RETIRO' and mov.es_sangria:
+        if mov.es_pago_mostrador and mov.es_sangria:
+            raise Exception("Un pago del mostrador no va a la caja fuerte.")
+        if tipo_mayuscula == 'RETIRO' and mov.es_pago_mostrador:
+            nota = " ".join((mov.observaciones or "").split())
+            if len(nota) < 3:
+                raise Exception("Escribí la nota.")
+            observacion_final = f"[PAGO MOSTRADOR] {nota}"[:200]
+        elif tipo_mayuscula == 'RETIRO' and mov.es_sangria:
             observacion_final = f"[SANGRÍA/RETIRO FÍSICO] {mov.observaciones}"
         
         cursor.execute('''

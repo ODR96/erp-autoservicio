@@ -2390,54 +2390,21 @@ function cargarVentaEspera(index) {
 // --- MÓDULO INGRESO Y RETIRO DE CAJA (F10) (SIN HARDCODEO) ---
 // --- MÓDULO INGRESO Y RETIRO DE CAJA (F10) (DISEÑO OSCURO UNIFICADO) ---
 async function registrarPagoProveedorDesdePOS() {
-    let proveedores = [];
-    try {
-        Swal.fire({ title: 'Cargando proveedores...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-        const res = await apiFetch(`${obtenerBaseUrl()}/proveedores/listado?solo_activos=true`);
-        const data = await res.json();
-        Swal.close();
-        proveedores = Array.isArray(data) ? data : (data.proveedores || []);
-        proveedores = proveedores.filter(p => p.activo !== 0);
-    } catch (e) {
-        Swal.fire({ title: 'Error', text: 'No se pudieron cargar los proveedores.', background: '#111C2A', color: '#fff', icon: 'error' });
-        inputScan.focus();
-        return;
-    }
-
-    if (proveedores.length === 0) {
-        Swal.fire({ title: 'Sin proveedores', text: 'Cargá el proveedor en Admin → Proveedores.', background: '#111C2A', color: '#fff', icon: 'info' });
-        inputScan.focus();
-        return;
-    }
-
-    const estilosInput = `
-        <style>
-            .swal2-input::-webkit-outer-spin-button,
-            .swal2-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-            .swal2-input[type=number] { -moz-appearance: textfield; }
-            .input-dark-custom { background-color: #070B14 !important; border: 1px solid #1F304A !important; color: white !important; border-radius: 8px !important; width: 80% !important; margin: 0 auto 15px auto !important; }
-            .sel-dark-custom { background-color: #070B14; border: 1px solid #1F304A; color: white; width: 80%; margin: 0 auto 15px auto; border-radius: 8px; display: block; padding: 0.5rem; }
-        </style>
-    `;
-    let opciones = '<select id="swal-proveedor" class="sel-dark-custom"><option value="" disabled selected>-- Proveedor --</option>';
-    proveedores.forEach(p => {
-        const saldo = Number(p.saldo_deudor || 0);
-        opciones += `<option value="${p.id}">${p.nombre_comercial} (debe $${saldo.toFixed(2)})</option>`;
-    });
-    opciones += '</select>';
-
     const { value: formValues } = await Swal.fire({
         title: '<span style="color:#fff; font-weight:bold;">Pago a proveedor</span>',
-        html: estilosInput + opciones +
-            `<p style="color:#94a3b8; font-size:0.85rem; width:80%; margin:0 auto 10px auto;">Sale del cajón. No es gasto del mes. Si le debés, baja el saldo.</p>` +
-            `<input id="swal-monto" type="number" class="swal2-input input-dark-custom" placeholder="Monto ($)">` +
-            `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (ej: pan, factura 123)">`,
+        html: `
+            <div class="campos-pos">
+                <label class="campo-etiqueta" for="swal-monto">Monto</label>
+                <input id="swal-monto" type="number" class="campo-pos" placeholder="0.00">
+                <label class="campo-etiqueta" for="swal-motivo">Nota</label>
+                <input id="swal-motivo" type="text" class="campo-pos" autocomplete="off" maxlength="160" placeholder="Ej: mercadería">
+            </div>`,
         background: '#111C2A',
         color: '#fff',
         showCancelButton: true,
         confirmButtonText: 'Pagar',
         cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#38bdf8',
+        confirmButtonColor: '#1a3348',
         cancelButtonColor: '#475569',
         focusConfirm: false,
         didOpen: () => {
@@ -2445,14 +2412,12 @@ async function registrarPagoProveedorDesdePOS() {
             const monto = document.getElementById('swal-monto');
             if (monto) monto.focus();
         },
-        preConfirm: async () => {
-            const provId = document.getElementById('swal-proveedor').value;
+        preConfirm: () => {
             const monto = document.getElementById('swal-monto').value;
             const motivo = (document.getElementById('swal-motivo').value || '').trim();
-            if (!provId) { Swal.showValidationMessage('Elegí el proveedor'); return false; }
             if (!monto || monto <= 0) { Swal.showValidationMessage('Ingrese un monto mayor a 0'); return false; }
-            if (!motivo) { Swal.showValidationMessage('Completá el detalle'); return false; }
-            return { proveedor_id: parseInt(provId), monto: parseFloat(monto), motivo };
+            if (motivo.length < 3) { Swal.showValidationMessage('Escribí la nota'); return false; }
+            return { monto: parseFloat(monto), motivo };
         }
     });
 
@@ -2461,7 +2426,7 @@ async function registrarPagoProveedorDesdePOS() {
         return;
     }
 
-    const okProveedor = await solicitarAutorizacion(`Pago a proveedor de $${Number(formValues.monto).toFixed(2)}. ${formValues.motivo}`);
+    const okProveedor = await solicitarAutorizacion(`Pago de mostrador de $${Number(formValues.monto).toFixed(2)}. ${formValues.motivo}`);
     if (!okProveedor) {
         inputScan.focus();
         return;
@@ -2469,24 +2434,22 @@ async function registrarPagoProveedorDesdePOS() {
 
     try {
         Swal.fire({ title: 'Registrando...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-        const response = await apiFetch(`${obtenerBaseUrl()}/proveedores/pagar`, {
+        const response = await apiFetch(`${obtenerBaseUrl()}/caja/movimiento`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({
-                proveedor_id: formValues.proveedor_id,
-                monto_pagado: formValues.monto,
-                metodo_pago: 'EFECTIVO CAJA',
+                tipo_movimiento: 'retiro',
+                monto: formValues.monto,
                 observaciones: formValues.motivo,
-                turno_id: turnoActualId
+                turno_id: turnoActualId,
+                caja_id: terminal_id,
+                usuario_id: empleadoLogueado.id,
+                es_sangria: false,
+                es_pago_mostrador: true
             })
         });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            const detalle = data.detail;
-            throw new Error(typeof detalle === 'string' ? detalle : (data.error || 'No se pudo registrar el pago.'));
-        }
-        if (data.error) throw new Error(data.error);
-        Swal.fire({ title: '✅ Pago registrado', text: `$${formValues.monto} salieron de caja. No entra en gastos del mes.`, background: '#111C2A', color: '#fff', icon: 'success', timer: 2200, showConfirmButton: false });
+        await exigirRespuestaOk(response, 'No se pudo registrar el pago.');
+        Swal.fire({ title: 'Pago registrado', text: `$${formValues.monto} salieron del cajón. No entra a la caja fuerte ni baja una deuda.`, background: '#111C2A', color: '#fff', icon: 'success', timer: 2200, showConfirmButton: false });
     } catch (e) {
         Swal.fire({ title: 'Error', text: e.message, background: '#111C2A', color: '#fff', icon: 'error' });
     }
@@ -2516,18 +2479,14 @@ async function registrarMovimientoCaja(tipo) {
         let tipoRetiro = null;
         const eleccion = await Swal.fire({
             title: '<span style="color:#fff; font-weight:bold;">¿Qué tipo de retiro es?</span>',
-            html: `<div class="d-grid gap-2" style="width:92%; margin:12px auto 0 auto;">
-                     <button type="button" class="btn btn-lg fw-bold" id="ret-gasto"
-                        style="background:#1e3a5f; color:#fff; border:1px solid #38bdf8; padding:14px 16px;">
-                        Gasto del local
-                     </button>
+            html: `<div class="d-grid gap-2">
                      <button type="button" class="btn btn-lg fw-bold" id="ret-proveedor"
-                        style="background:#1e3a5f; color:#fff; border:1px solid #f59e0b; padding:14px 16px;">
+                        style="background:#1a3348; color:#d5e4ef; border:1px solid #2c4a63; padding:14px 16px;">
                         Pago a proveedor
                      </button>
                      <button type="button" class="btn btn-lg fw-bold" id="ret-sangria"
-                        style="background:#1e3a5f; color:#fff; border:1px solid #22c55e; padding:14px 16px;">
-                        Sangría (a caja fuerte)
+                        style="background:#2c2820; color:#e4d7bc; border:1px solid #4a4336; padding:14px 16px;">
+                        Sangría
                      </button>
                    </div>`,
             background: '#111C2A',
@@ -2538,7 +2497,6 @@ async function registrarMovimientoCaja(tipo) {
             cancelButtonColor: '#475569',
             didOpen: () => {
                 const pick = (valor) => { tipoRetiro = valor; Swal.clickConfirm(); };
-                document.getElementById('ret-gasto').onclick = () => pick('gasto');
                 document.getElementById('ret-proveedor').onclick = () => pick('proveedor');
                 document.getElementById('ret-sangria').onclick = () => pick('sangria');
             },
@@ -2553,63 +2511,20 @@ async function registrarMovimientoCaja(tipo) {
             await registrarPagoProveedorDesdePOS();
             return;
         }
-        esSangria = eleccion.value === 'sangria';
+        esSangria = true;
     }
 
-    const titulo = tipo === 'ingreso'
-        ? 'Ingreso de Dinero'
-        : (esSangria ? 'Sangría / Retiro Físico' : 'Retiro por Gasto del Local');
-    const colorBtn = tipo === 'ingreso' ? '#10b981' : (esSangria ? '#f59e0b' : '#ef4444');
-    let opcionesCategoria = '';
+    const titulo = tipo === 'ingreso' ? 'Ingreso de Dinero' : 'Sangría';
+    const colorBtn = tipo === 'ingreso' ? '#1a3348' : '#2c2820';
+    const ayudaMotivo = 'Motivo';
 
-    // La categoría de gasto SOLO aplica si es un Gasto del Local real
-    if (tipo === 'retiro' && !esSangria) {
-        try {
-            Swal.fire({ title: 'Cargando...', background: '#111C2A', color: '#fff', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-            const resCat = await apiFetch(`${obtenerBaseUrl()}/gastos/categorias`);
-            const dataCat = await resCat.json();
-            Swal.close();
-            
-            if(dataCat.categorias) {
-                opcionesCategoria = '<label class="d-block text-start fw-bold small mb-1" style="width:80%; margin:0 auto; color:#cbd5e1;">Categoría de gasto</label>';
-                opcionesCategoria += '<select id="swal-categoria" class="form-select form-select-lg mb-3" style="background-color: #070B14; border: 1px solid #1F304A; color: #F8FAFC; width: 80%; margin: 0 auto; border-radius: 8px;">';
-                opcionesCategoria += '<option value="" disabled selected>-- Elegí una categoría --</option>';
-                dataCat.categorias.forEach(c => {
-                    const tipoCat = (c.tipo_categoria || 'OPERATIVO').toUpperCase();
-                    const nombre = (c.nombre || '').toLowerCase();
-                    if (tipoCat !== 'OPERATIVO') return;
-                    if (nombre.includes('proveedor')) return;
-                    opcionesCategoria += `<option value="${c.id}">${c.nombre}</option>`;
-                });
-                opcionesCategoria += '</select>';
-            }
-        } catch (e) {
-            console.error("Fallo al cargar categorías", e);
-            opcionesCategoria = '<input id="swal-categoria" type="hidden" value="1">';
-        }
-    }
-
-    // CSS integrado para matar las flechitas feas de los input number
-    const estilosInput = `
-        <style>
-            .swal2-input::-webkit-outer-spin-button,
-            .swal2-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-            .swal2-input[type=number] { -moz-appearance: textfield; }
-            .input-dark-custom { background-color: #070B14 !important; border: 1px solid #1F304A !important; color: white !important; border-radius: 8px !important; width: 80% !important; margin: 0 auto 15px auto !important; }
-            .input-dark-custom:focus { border-color: #38bdf8 !important; box-shadow: 0 0 5px rgba(56, 189, 248, 0.5) !important; }
-        </style>
-    `;
-
-    let inputsHtml = estilosInput + `<input id="swal-monto" type="number" class="swal2-input input-dark-custom" placeholder="Monto ($)">`;
-
-    if (tipo === 'retiro' && !esSangria) {
-        inputsHtml += opcionesCategoria;
-        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Detalle (Ej: Luz, limpieza, flete)">`;
-    } else if (tipo === 'retiro' && esSangria) {
-        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" autocomplete="off" placeholder="Motivo">`;
-    } else {
-        inputsHtml += `<input id="swal-motivo" type="text" class="swal2-input input-dark-custom" placeholder="Motivo (Ej: Cambio inicial)">`;
-    }
+    const inputsHtml = `
+        <div class="campos-pos">
+            <label class="campo-etiqueta" for="swal-monto">Monto</label>
+            <input id="swal-monto" type="number" class="campo-pos" placeholder="0.00">
+            <label class="campo-etiqueta" for="swal-motivo">${ayudaMotivo}</label>
+            <input id="swal-motivo" type="text" class="campo-pos" autocomplete="off" maxlength="160" placeholder="Ej: detalle">
+        </div>`;
 
     const { value: formValues } = await Swal.fire({
         title: `<span style="color: #fff; font-weight: bold;">${titulo}</span>`,
@@ -2635,27 +2550,17 @@ async function registrarMovimientoCaja(tipo) {
         preConfirm: async () => {
             const monto = document.getElementById('swal-monto').value;
             const motivo = document.getElementById('swal-motivo').value;
-            let catId = null;
 
             if (!monto || monto <= 0) { Swal.showValidationMessage('Ingrese un monto mayor a 0'); return false; }
-            if (tipo === 'ingreso' && !motivo) { Swal.showValidationMessage('Debe especificar el motivo'); return false; }
+            if (!motivo) { Swal.showValidationMessage('Completá el motivo'); return false; }
 
-            if (tipo === 'retiro') {
-                if (!esSangria) {
-                    const catEl = document.getElementById('swal-categoria');
-                    if(catEl) catId = catEl.value;
-                    if(!catId) { Swal.showValidationMessage('Elegí una categoría de gasto'); return false; }
-                }
-                if (!motivo) { Swal.showValidationMessage('Completá el detalle/motivo'); return false; }
-            }
-
-            return { monto: parseFloat(monto), motivo: motivo, categoria_id: catId };
+            return { monto: parseFloat(monto), motivo: motivo };
         }
     });
 
     if (formValues) {
         if (tipo === 'retiro') {
-            const que = esSangria ? 'Sangría' : 'Retiro por gasto';
+            const que = 'Sangría';
             const autorizado = await solicitarAutorizacion(`${que} de $${Number(formValues.monto).toFixed(2)}. ${formValues.motivo}`);
             if (!autorizado) {
                 inputScan.focus();
@@ -2700,29 +2605,9 @@ async function registrarMovimientoCaja(tipo) {
                     body: JSON.stringify(payloadMovimiento)
                 });
                 await exigirRespuestaOk(response, "Fallo en el servidor al registrar la sangría");
-
-            } else if (tipo === 'retiro') {
-                // --- GASTO DEL LOCAL: flujo original, impacta gastos_operativos ---
-                const payloadGasto = {
-                    categoria_id: parseInt(formValues.categoria_id),
-                    descripcion_detalle: formValues.motivo,
-                    monto: formValues.monto,
-                    metodo_pago: "EFECTIVO",
-                    origen_fondos: "CAJA_DIARIA",
-                    turno_id: turnoActualId,
-                    usuario_id: empleadoLogueado.id
-                };
-
-                const response = await apiFetch(`${obtenerBaseUrl()}/gastos/registrar`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify(payloadGasto)
-                });
-
-                await exigirRespuestaOk(response, "Fallo al asentar el gasto en Tesorería");
             }
 
-            const etiquetaExito = tipo === 'ingreso' ? 'ingreso' : (esSangria ? 'sangría' : 'retiro/gasto');
+            const etiquetaExito = tipo === 'ingreso' ? 'ingreso' : 'sangría';
             Swal.fire({ title: '✅ Registrado', text: `Se guardó un ${etiquetaExito} de $${formValues.monto} en el sistema.`, background: '#111C2A', color: '#fff', icon: 'success', timer: 2000, showConfirmButton: false });
         } catch (e) {
             Swal.fire({ title: 'Error', text: e.message, background: '#111C2A', color: '#fff', icon: 'error' });
@@ -3027,11 +2912,13 @@ async function cierreZ() {
     const { value: conteoZ } = await Swal.fire({
         title: 'CIERRE Z (Finalizar Turno)',
         html: `
-            <label class="form-label small fw-bold d-block text-start mt-2">Billetes que hay en el cajón ahora</label>
-            <input id="swal-z-total" type="number" inputmode="decimal" min="0" class="swal2-input mt-0" placeholder="Ej: 110000">
-            <label class="form-label small fw-bold d-block text-start mt-3">De eso, queda de cambio para el próximo turno</label>
-            <input id="swal-z-cambio" type="number" inputmode="decimal" min="0" class="swal2-input mt-0" placeholder="Ej: 10000">
-            <div id="swal-z-guardar" class="fw-bold mt-3"></div>`,
+            <div class="campos-pos">
+                <label class="campo-etiqueta" for="swal-z-total">Billetes que hay en el cajón ahora</label>
+                <input id="swal-z-total" type="number" inputmode="decimal" min="0" class="campo-pos" placeholder="0.00">
+                <label class="campo-etiqueta" for="swal-z-cambio">De eso, queda de cambio para el próximo turno</label>
+                <input id="swal-z-cambio" type="number" inputmode="decimal" min="0" class="campo-pos" placeholder="0.00">
+                <div id="swal-z-guardar" class="fw-bold mt-2"></div>
+            </div>`,
         focusConfirm: false,
         showCancelButton: true,
         confirmButtonColor: '#d33',

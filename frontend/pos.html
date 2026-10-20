@@ -426,8 +426,74 @@
         }
         .swal2-input::placeholder,
         .swal2-textarea::placeholder,
-        .swal2-html-container .form-control::placeholder {
+        .swal2-html-container .form-control::placeholder,
+        .swal2-html-container .campo-pos::placeholder {
             color: #64748B !important;
+        }
+        .swal2-popup > .swal2-input,
+        .swal2-popup > .swal2-select,
+        .swal2-popup > .swal2-textarea {
+            width: calc(100% - 3rem) !important;
+            margin: 0.75rem 1.5rem 0 !important;
+            height: 48px !important;
+            box-sizing: border-box !important;
+        }
+        .campos-pos {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            width: 100%;
+            text-align: left;
+            gap: 6px;
+        }
+        .campos-pos .campo-etiqueta {
+            display: block;
+            margin: 8px 0 0;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #cbd5e1;
+            text-align: left;
+        }
+        .campos-pos .campo-pos,
+        .swal2-html-container .campo-pos {
+            display: block;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: 48px !important;
+            min-height: 48px !important;
+            margin: 0 !important;
+            padding: 0 14px !important;
+            box-sizing: border-box !important;
+            background: #070B14 !important;
+            color: #F8FAFC !important;
+            border: 1px solid #1F304A !important;
+            border-radius: 8px !important;
+            font-size: 1rem !important;
+            box-shadow: none !important;
+        }
+        .campo-pos:focus {
+            border-color: #8aa0b8 !important;
+            outline: none;
+        }
+        .campo-pos::-webkit-outer-spin-button,
+        .campo-pos::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .campo-pos[type=number] { -moz-appearance: textfield; }
+        .modal .form-control,
+        .modal .form-select,
+        .modal .input-group-text {
+            min-height: 48px;
+        }
+        .modal .input-group > .form-control,
+        .modal .input-group > .input-group-text {
+            height: 48px;
+        }
+        .modal .input-group-lg > .form-control,
+        .modal .input-group-lg > .input-group-text {
+            height: 52px;
+            min-height: 52px;
         }
         .swal2-validation-message {
             background: #3f1d1d !important;
@@ -752,30 +818,34 @@
                     </h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body p-4">
-                    <div class="row g-2 mb-3">
-                        <div class="col-4"><label class="form-label small fw-bold">DNI / CUIT</label><input type="text"
-                                id="nuevoClienteDni" class="form-control"></div>
-                        <div class="col-8"><label class="form-label small fw-bold">Nombre Completo</label><input
-                                type="text" id="nuevoClienteNombre" class="form-control"></div>
+                <div class="modal-body p-4 vstack gap-3">
+                    <div>
+                        <label class="form-label small fw-bold" for="nuevoClienteDni">DNI / CUIT</label>
+                        <input type="text" id="nuevoClienteDni" class="form-control">
                     </div>
-                    <div class="row g-2 mb-4">
-                        <div class="col-6"><label class="form-label small fw-bold">WhatsApp</label><input type="text"
-                                id="nuevoClienteTel" class="form-control" placeholder="5493704XXXXXX"
-                                inputmode="numeric"></div>
-                        <div class="col-6"><label class="form-label small fw-bold">Límite Cta. Cte.</label>
-                            <div class="input-group"><span class="input-group-text">$</span><input type="number"
-                                    id="nuevoClienteLimite" class="form-control" value="50000"></div>
-                        </div>
-                        <div class="col-6"><label class="form-label small fw-bold">Día de cobro</label>
-                            <select id="nuevoClienteDiaVencimiento" class="form-select"></select>
+                    <div>
+                        <label class="form-label small fw-bold" for="nuevoClienteNombre">Nombre completo</label>
+                        <input type="text" id="nuevoClienteNombre" class="form-control">
+                    </div>
+                    <div>
+                        <label class="form-label small fw-bold" for="nuevoClienteTel">WhatsApp</label>
+                        <input type="text" id="nuevoClienteTel" class="form-control" placeholder="5493704XXXXXX" inputmode="numeric">
+                    </div>
+                    <div>
+                        <label class="form-label small fw-bold" for="nuevoClienteLimite">Límite de cuenta</label>
+                        <div class="input-group">
+                            <span class="input-group-text">$</span>
+                            <input type="number" id="nuevoClienteLimite" class="form-control" value="50000">
                         </div>
                     </div>
-                    <div class="alert alert-warning border-warning p-3 mb-0" id="cajaPinAltaCliente"><label
-                            class="form-label small fw-bold text-dark"><i class="bi bi-shield-lock-fill"></i>
-                            Autorización de Encargado</label><input type="password" id="pinAutorizacion"
-                            class="form-control text-center fw-bold" placeholder="Ingrese PIN"
-                            ></div>
+                    <div>
+                        <label class="form-label small fw-bold" for="nuevoClienteDiaVencimiento">Día de cobro</label>
+                        <select id="nuevoClienteDiaVencimiento" class="form-select"></select>
+                    </div>
+                    <div class="alert alert-warning border-warning p-3 mb-0" id="cajaPinAltaCliente">
+                        <label class="form-label small fw-bold text-dark" for="pinAutorizacion"><i class="bi bi-shield-lock-fill"></i> Autorización de encargado</label>
+                        <input type="password" id="pinAutorizacion" class="form-control text-center fw-bold" placeholder="PIN">
+                    </div>
                 </div>
                 <div class="modal-footer"><button class="btn btn-secondary"
                         data-bs-dismiss="modal">Cancelar</button><button class="btn btn-success fw-bold"
@@ -1064,7 +1134,7 @@
 
     <!-- ===== ARCHIVOS JS SEPARADOS ===== -->
     <script src="js/layout.js?v=1.0.50"></script>
-    <script src="js/app_pos.js?v=1.0.80"></script>
+    <script src="js/app_pos.js?v=1.0.83"></script>
 
 </body>
 
