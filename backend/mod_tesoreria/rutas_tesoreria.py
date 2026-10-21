@@ -12,8 +12,25 @@ ZONA_AR = timezone(timedelta(hours=-3))
 CUENTAS = {
     "CAJA_FUERTE": "Caja fuerte",
     "MERCADOPAGO": "Mercado Pago",
+    "AHORRO_MP": "Ahorro Mercado Pago",
     "BANCO": "Banco",
 }
+
+
+def porcentaje_apartado_mp(cursor) -> float:
+    """Porcentaje del neto de QR que va al ahorro. Sale de Configuración. 0 no aparta."""
+    try:
+        fila = cursor.execute("SELECT apartado_mp_pct FROM configuracion_local WHERE id = 1").fetchone()
+    except sqlite3.OperationalError:
+        return 0.0
+    if not fila or fila[0] is None:
+        return 0.0
+    pct = float(fila[0])
+    if pct <= 0:
+        return 0.0
+    if pct > 100:
+        return 100.0
+    return pct
 
 
 def asegurar_tablas_tesoreria_cuentas():
@@ -117,7 +134,7 @@ def asegurar_tablas_tesoreria_cuentas():
 
 asegurar_tablas_tesoreria_cuentas()
 
-DEUDAS = {"TARJETA": "Tarjeta"}
+DEUDAS = {"TARJETA": "Tarjeta", "PRESTAMO": "deuda del préstamo"}
 
 
 class ErrorTesoreria(Exception):
@@ -178,7 +195,8 @@ def crear_pendiente(cursor, cuenta: str, monto: float, concepto: str, origen_tip
 
 
 def asentar_cobro_qr(cursor, cobro_id, monto, comision):
-    """El neto del QR entra a Mercado Pago. Si ya se asentó este cobro, no lo repite."""
+    """El neto del QR entra a Mercado Pago. El apartado va al ahorro de la misma app.
+    Si ya se asentó este cobro, no lo repite. Los cobros viejos quedan como estaban."""
     ya = cursor.execute(
         "SELECT 1 FROM tesoreria_movimientos WHERE origen_tipo = 'COBRO_QR' AND origen_id = ?",
         (cobro_id,),
@@ -188,11 +206,20 @@ def asentar_cobro_qr(cursor, cobro_id, monto, comision):
     neto = round(float(monto or 0) - float(comision or 0), 2)
     if neto < 0.01:
         return None
-    return mover_tesoreria(cursor, "MERCADOPAGO", neto, f"QR #{cobro_id}", "COBRO_QR", cobro_id, None)
+    apartado = round(neto * porcentaje_apartado_mp(cursor) / 100.0, 2)
+    if apartado < 0.01 or apartado > neto:
+        apartado = 0.0
+    visible = round(neto - apartado, 2)
+    mov = None
+    if visible >= 0.01:
+        mov = mover_tesoreria(cursor, "MERCADOPAGO", visible, f"QR #{cobro_id}", "COBRO_QR", cobro_id, None)
+    if apartado >= 0.01:
+        mover_tesoreria(cursor, "AHORRO_MP", apartado, f"Apartado QR #{cobro_id}", "APARTADO_QR", cobro_id, None)
+    return mov
 
 
 def revertir_cobro_qr(cursor, cobro_id):
-    """Saca de Mercado Pago el neto que había entrado con ese QR."""
+    """Saca el neto que había entrado con ese QR, de la cuenta visible y del ahorro."""
     ya = cursor.execute(
         "SELECT 1 FROM tesoreria_movimientos WHERE origen_tipo = 'REEMBOLSO_QR' AND origen_id = ?",
         (cobro_id,),
@@ -203,9 +230,18 @@ def revertir_cobro_qr(cursor, cobro_id):
         "SELECT monto FROM tesoreria_movimientos WHERE origen_tipo = 'COBRO_QR' AND origen_id = ?",
         (cobro_id,),
     ).fetchone()
-    if not fila:
+    apartado = cursor.execute(
+        "SELECT monto FROM tesoreria_movimientos WHERE origen_tipo = 'APARTADO_QR' AND origen_id = ?",
+        (cobro_id,),
+    ).fetchone()
+    if not fila and not apartado:
         return None
-    return mover_tesoreria(cursor, "MERCADOPAGO", -float(fila[0]), f"Reembolso QR #{cobro_id}", "REEMBOLSO_QR", cobro_id, None)
+    mov = None
+    if fila and float(fila[0] or 0) >= 0.01:
+        mov = mover_tesoreria(cursor, "MERCADOPAGO", -float(fila[0]), f"Reembolso QR #{cobro_id}", "REEMBOLSO_QR", cobro_id, None)
+    if apartado and float(apartado[0] or 0) >= 0.01:
+        mover_tesoreria(cursor, "AHORRO_MP", -float(apartado[0]), f"Reembolso apartado QR #{cobro_id}", "REEMBOLSO_APARTADO", cobro_id, None)
+    return mov
 
 
 def saldo_deuda(cursor, cuenta: str) -> float:
@@ -296,6 +332,61 @@ def estado_cuenta(cuenta: str, limite: int = 50):
             "inicializada": ultimo is not None,
             "ultimo_arqueo": dict(ultimo) if ultimo else None,
             "movimientos": [dict(m) for m in movimientos],
+        }
+    finally:
+        conexion.close()
+
+
+def _fecha_dia(fecha: str) -> str:
+    texto = (fecha or "").strip()[:10]
+    if len(texto) == 10 and texto[4] == "-" and texto[7] == "-":
+        try:
+            datetime.strptime(texto, "%Y-%m-%d")
+            return texto
+        except ValueError:
+            pass
+    return datetime.now(ZONA_AR).strftime("%Y-%m-%d")
+
+
+def _suma_mov(cursor, cuenta: str, origen: str, fecha: str, entra: bool) -> float:
+    signo = ">" if entra else "<"
+    fila = cursor.execute(
+        f"SELECT IFNULL(SUM(monto), 0) FROM tesoreria_movimientos "
+        f"WHERE cuenta = ? AND origen_tipo = ? AND fecha_hora LIKE ? AND monto {signo} 0",
+        (cuenta, origen, fecha + "%"),
+    ).fetchone()
+    return round(abs(float(fila[0] or 0)), 2)
+
+
+@router.get("/mercadopago/dia", dependencies=[Depends(VerificarRol(["ADMIN"]))])
+def dia_mercadopago(fecha: str = ""):
+    """Lo que el sistema anotó ese día. No cambia ningún saldo."""
+    fecha = _fecha_dia(fecha)
+    conexion = obtener_conexion()
+    try:
+        cursor = conexion.cursor()
+        qr_visible = _suma_mov(cursor, "MERCADOPAGO", "COBRO_QR", fecha, True)
+        apartado = _suma_mov(cursor, "AHORRO_MP", "APARTADO_QR", fecha, True)
+        reembolsos = round(
+            _suma_mov(cursor, "MERCADOPAGO", "REEMBOLSO_QR", fecha, False)
+            + _suma_mov(cursor, "AHORRO_MP", "REEMBOLSO_APARTADO", fecha, False),
+            2,
+        )
+        otras = cursor.execute(
+            "SELECT IFNULL(SUM(monto), 0) FROM tesoreria_movimientos "
+            "WHERE cuenta = 'MERCADOPAGO' AND fecha_hora LIKE ? "
+            "AND origen_tipo NOT IN ('COBRO_QR', 'REEMBOLSO_QR') AND monto < 0",
+            (fecha + "%",),
+        ).fetchone()
+        return {
+            "fecha": fecha,
+            "qr_visible": qr_visible,
+            "apartado": apartado,
+            "entro": round(qr_visible + apartado, 2),
+            "reembolsos": reembolsos,
+            "otras_salidas": round(abs(float(otras[0] or 0)), 2),
+            "saldo_mp": saldo_cuenta(cursor, "MERCADOPAGO"),
+            "saldo_ahorro": saldo_cuenta(cursor, "AHORRO_MP"),
         }
     finally:
         conexion.close()
@@ -809,6 +900,8 @@ class CargoDeuda(BaseModel):
 def consumo_deuda(cuenta: str, body: CargoDeuda, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
     """Gasto o interés que quedó en la tarjeta. Suma la deuda y anota el gasto del mes. No sale plata."""
     cuenta = _deuda_o_404(cuenta)
+    if cuenta == "PRESTAMO":
+        raise HTTPException(status_code=400, detail="El interés del préstamo se carga aparte, no como consumo de tarjeta.")
     monto = round(float(body.monto or 0), 2)
     if monto < 0.01:
         raise HTTPException(status_code=400, detail="El monto tiene que ser mayor a 0.")
@@ -848,5 +941,158 @@ def consumo_deuda(cuenta: str, body: CargoDeuda, sesion: dict = Depends(Verifica
     except Exception:
         conexion.rollback()
         raise HTTPException(status_code=500, detail="No se pudo cargar el consumo.")
+    finally:
+        conexion.close()
+
+
+def _cuenta_de_plata(origen: str) -> str:
+    origen = (origen or "").upper()
+    if origen not in ("CAJA_FUERTE", "BANCO"):
+        raise HTTPException(status_code=400, detail="Elegí caja fuerte o banco.")
+    return origen
+
+
+def _categoria_de_gasto(cursor, categoria_id: int):
+    from backend.mod_gastos.rutas_gastos import _es_categoria_pago_proveedor, _es_categoria_sueldos
+    cat = cursor.execute(
+        "SELECT nombre, IFNULL(tipo_categoria, 'OPERATIVO') AS tipo FROM categorias_gasto WHERE id = ?",
+        (categoria_id,),
+    ).fetchone()
+    if not cat:
+        raise HTTPException(status_code=400, detail="La categoría no existe.")
+    if _es_categoria_pago_proveedor(cat["nombre"] or ""):
+        raise HTTPException(status_code=400, detail="La mercadería se carga en Proveedores.")
+    if _es_categoria_sueldos(cat["nombre"] or ""):
+        raise HTTPException(status_code=400, detail="Los sueldos van por RRHH.")
+    if (cat["tipo"] or "").upper() != "OPERATIVO":
+        raise HTTPException(status_code=400, detail="Esa categoría no es un gasto del local.")
+    return cat
+
+
+def _anotar_gasto(cursor, categoria_id: int, detalle: str, monto: float, metodo: str, usuario_id: int) -> int:
+    ahora = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute('''
+        INSERT INTO gastos_operativos (fecha, categoria_id, descripcion_detalle, monto, metodo_pago, origen_fondos, usuario_id, turno_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+    ''', (ahora, categoria_id, detalle, monto, metodo, metodo, usuario_id))
+    return cursor.lastrowid
+
+
+class RecibirPrestamo(BaseModel):
+    destino: str
+    monto: float
+    detalle: Optional[str] = ""
+
+
+@router.post("/deuda/PRESTAMO/recibir")
+def recibir_prestamo(body: RecibirPrestamo, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    """Entra plata y sube lo que se debe. No es venta ni gasto."""
+    destino = _cuenta_de_plata(body.destino)
+    monto = round(float(body.monto or 0), 2)
+    if monto < 0.01:
+        raise HTTPException(status_code=400, detail="El monto tiene que ser mayor a 0.")
+    detalle = " ".join((body.detalle or "").split())[:200] or "Préstamo recibido"
+    usuario_id = _usuario_de(sesion)
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        mover_tesoreria(cursor, destino, monto, f"Préstamo recibido: {detalle}", "PRESTAMO_RECIBIDO", None, usuario_id)
+        mover_deuda(cursor, "PRESTAMO", monto, detalle, "RECIBIR", None, usuario_id)
+        conexion.commit()
+        return {"mensaje": f"Entraron ${monto:,.2f} a {CUENTAS[destino]}. La deuda del préstamo subió igual."}
+    except ErrorTesoreria as e:
+        conexion.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo anotar el préstamo.")
+    finally:
+        conexion.close()
+
+
+class CuotaPrestamo(BaseModel):
+    origen: str
+    capital: float = 0
+    interes: float = 0
+    categoria_id: Optional[int] = None
+    detalle: str
+
+
+@router.post("/deuda/PRESTAMO/cuota")
+def pagar_cuota_prestamo(body: CuotaPrestamo, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    """Capital baja la deuda y no es gasto. Interés sale de la misma cuenta y es gasto. No se suma a la deuda."""
+    origen = _cuenta_de_plata(body.origen)
+    capital = round(float(body.capital or 0), 2)
+    interes = round(float(body.interes or 0), 2)
+    if capital < 0 or interes < 0:
+        raise HTTPException(status_code=400, detail="Capital e interés no pueden ser negativos.")
+    if capital < 0.01 and interes < 0.01:
+        raise HTTPException(status_code=400, detail="Cargá el capital, el interés, o los dos.")
+    detalle = " ".join((body.detalle or "").split())[:200]
+    if len(detalle) < 3:
+        raise HTTPException(status_code=400, detail="Escribí una nota.")
+    if interes >= 0.01 and not body.categoria_id:
+        raise HTTPException(status_code=400, detail="Elegí la categoría del interés.")
+    usuario_id = _usuario_de(sesion)
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        if capital >= 0.01:
+            if cursor.execute(
+                "SELECT 1 FROM deudas_movimientos WHERE cuenta = 'PRESTAMO' AND origen_tipo IN ('SALDO_INICIAL', 'AJUSTE_DEUDA', 'RECIBIR') LIMIT 1"
+            ).fetchone():
+                saldo = saldo_deuda(cursor, "PRESTAMO")
+                if saldo - capital < -0.009:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"La deuda del préstamo es ${saldo:,.2f} y el capital es ${capital:,.2f}.",
+                    )
+            mover_tesoreria(cursor, origen, -capital, f"Capital préstamo: {detalle}", "PRESTAMO_CAPITAL", None, usuario_id)
+            mover_deuda(cursor, "PRESTAMO", -capital, detalle, "CUOTA", None, usuario_id)
+        if interes >= 0.01:
+            _categoria_de_gasto(cursor, body.categoria_id)
+            gasto_id = _anotar_gasto(cursor, body.categoria_id, f"Interés préstamo: {detalle}", interes, origen, usuario_id)
+            mover_tesoreria(cursor, origen, -interes, f"Interés préstamo: {detalle}", "PRESTAMO_INTERES", gasto_id, usuario_id)
+        conexion.commit()
+        return {"mensaje": f"Cuota desde {CUENTAS[origen]}. Capital ${capital:,.2f} baja la deuda. Interés ${interes:,.2f} es gasto."}
+    except HTTPException:
+        conexion.rollback()
+        raise
+    except ErrorTesoreria as e:
+        conexion.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo pagar la cuota.")
+    finally:
+        conexion.close()
+
+
+@router.post("/deuda/PRESTAMO/intereses")
+def sumar_interes_prestamo(body: CargoDeuda, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    """El interés se suma a la deuda. Es gasto del mes. No sale plata."""
+    monto = round(float(body.monto or 0), 2)
+    if monto < 0.01:
+        raise HTTPException(status_code=400, detail="El monto tiene que ser mayor a 0.")
+    detalle = " ".join((body.detalle or "").split())[:200]
+    if len(detalle) < 3:
+        raise HTTPException(status_code=400, detail="Escribí una nota.")
+    usuario_id = _usuario_de(sesion)
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        _categoria_de_gasto(cursor, body.categoria_id)
+        gasto_id = _anotar_gasto(cursor, body.categoria_id, f"Interés préstamo: {detalle}", monto, "PRESTAMO", usuario_id)
+        mover_deuda(cursor, "PRESTAMO", monto, detalle, "INTERES", gasto_id, usuario_id)
+        conexion.commit()
+        return {"mensaje": f"Se sumaron ${monto:,.2f} a la deuda. Es gasto del mes y no salió plata."}
+    except HTTPException:
+        conexion.rollback()
+        raise
+    except Exception:
+        conexion.rollback()
+        raise HTTPException(status_code=500, detail="No se pudo sumar el interés.")
     finally:
         conexion.close()

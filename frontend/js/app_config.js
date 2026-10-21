@@ -69,6 +69,7 @@ async function cargarConfiguracionActual() {
         document.getElementById('confTopeDescuento').value = config.tope_maximo_descuento_sueldo_pct ?? 50;
         document.getElementById('confUmbralDescuentoPct').value = config.umbral_descuento_pct ?? 5;
         document.getElementById('confUmbralDescuentoPesos').value = config.umbral_descuento_pesos ?? 0;
+        document.getElementById('confApartadoMp').value = config.apartado_mp_pct ?? 0;
 
         if (config.ruta_logo) {
             document.getElementById('previewLogo').src = `${baseUrl}/static/logos/${config.ruta_logo}?t=${new Date().getTime()}`;
@@ -144,6 +145,7 @@ async function guardarConfiguracion(event) {
     formData.append('tope_maximo_descuento_sueldo_pct', document.getElementById('confTopeDescuento').value || 50);
     formData.append('umbral_descuento_pct', document.getElementById('confUmbralDescuentoPct').value || 0);
     formData.append('umbral_descuento_pesos', document.getElementById('confUmbralDescuentoPesos').value || 0);
+    formData.append('apartado_mp_pct', document.getElementById('confApartadoMp').value || 0);
 
     try {
         const baseUrl = obtenerBaseUrl();

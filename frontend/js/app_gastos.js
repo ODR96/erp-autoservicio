@@ -584,10 +584,22 @@ const ORIGENES_MOV_TESORERIA = {
     TRANSFERENCIA: 'Pase entre cuentas',
     TRANSFERENCIA_VENTA: 'Transferencia de venta',
     CAMBIO: 'Cambio al cajón',
-    CHEQUE: 'Cheque propio'
+    CHEQUE: 'Cheque propio',
+    PRESTAMO_RECIBIDO: 'Préstamo recibido',
+    PRESTAMO_CAPITAL: 'Capital del préstamo',
+    PRESTAMO_INTERES: 'Interés del préstamo',
+    APARTADO_QR: 'Apartado de ahorro',
+    REEMBOLSO_APARTADO: 'Reembolso del apartado'
 };
 
-const CUENTAS_TESORERIA = ['CAJA_FUERTE', 'MERCADOPAGO', 'BANCO'];
+const CUENTAS_TESORERIA = ['CAJA_FUERTE', 'MERCADOPAGO', 'AHORRO_MP', 'BANCO'];
+
+function nombreCuentaTesoreria(codigo) {
+    if (codigo === 'CAJA_FUERTE') return 'Caja fuerte';
+    if (codigo === 'MERCADOPAGO') return 'Mercado Pago';
+    if (codigo === 'AHORRO_MP') return 'Ahorro Mercado Pago';
+    return 'Banco';
+}
 
 function textoEstadoCuenta(data) {
     if (!data.inicializada) {
@@ -613,6 +625,11 @@ async function cargarCajaFuerte() {
             const resDeuda = await apiFetchSeguro('/tesoreria/deuda/TARJETA');
             deuda = await leerRespuestaGasto(resDeuda);
         } catch (e) { deuda = null; }
+        let prestamo = null;
+        try {
+            const resPrestamo = await apiFetchSeguro('/tesoreria/deuda/PRESTAMO');
+            prestamo = await leerRespuestaGasto(resPrestamo);
+        } catch (e) { prestamo = null; }
         const tarjeta = deuda ? `
             <div class="kpi-card p-3 d-flex flex-wrap align-items-center justify-content-between gap-3">
                 <div>
@@ -626,6 +643,20 @@ async function cargarCajaFuerte() {
                     <button type="button" class="btn btn-outline-light fw-bold" data-teso="deuda-consumo">Consumo</button>
                 </div>
             </div>` : '';
+        const cajaPrestamo = prestamo ? `
+            <div class="kpi-card p-3 mt-3 d-flex flex-wrap align-items-center justify-content-between gap-3">
+                <div>
+                    <h6 class="text-muted text-uppercase fw-bold small mb-1">Préstamo (lo que debés)</h6>
+                    <h2 class="fw-bold mb-0">${formatoPesos(prestamo.saldo)}</h2>
+                    <div class="small text-muted mt-1">${(prestamo.inicializada || Number(prestamo.saldo) > 0.009) ? 'El capital no es gasto. El interés sí.' : 'Cargá lo que debés, o anotá cuando entre la plata.'}</div>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button type="button" class="btn btn-warning fw-bold" data-teso="prestamo-saldo">Lo que debo</button>
+                    <button type="button" class="btn btn-outline-light fw-bold" data-teso="prestamo-recibir">Recibí plata</button>
+                    <button type="button" class="btn btn-outline-light fw-bold" data-teso="prestamo-cuota">Pagar cuota</button>
+                    <button type="button" class="btn btn-outline-light fw-bold" data-teso="prestamo-interes">Interés que se sumó</button>
+                </div>
+            </div>` : '';
         const plata = `<div class="row g-3 mb-3">` + cuentas.map(c => {
             const pend = c.por_recibir || { cantidad: 0, total: 0 };
             const aviso = pend.cantidad > 0
@@ -637,15 +668,17 @@ async function cargarCajaFuerte() {
                         <h6 class="text-muted text-uppercase fw-bold small mb-1">${escGasto(c.nombre)}</h6>
                         <h2 class="fw-bold mb-1">${formatoPesos(c.saldo)}</h2>
                         <div class="small text-muted">${textoEstadoCuenta(c)}</div>
+                        ${c.cuenta === 'AHORRO_MP' ? '<div class="small text-muted">No está en el total de la app.</div>' : ''}
                         ${aviso}
                         <div class="d-flex gap-2 mt-auto pt-3">
                             <button type="button" class="btn btn-sm btn-outline-light flex-grow-1" data-teso="arqueo" data-cuenta="${escGasto(c.cuenta)}">Arqueo</button>
                             <button type="button" class="btn btn-sm btn-outline-light" data-teso="movs" data-cuenta="${escGasto(c.cuenta)}">Movimientos</button>
+                            ${c.cuenta === 'MERCADOPAGO' ? '<button type="button" class="btn btn-sm btn-outline-light" data-teso="dia-mp">El día</button>' : ''}
                         </div>
                     </div>
                 </div>`;
         }).join('') + `</div>`;
-        cont.innerHTML = plata + tarjeta + `
+        cont.innerHTML = plata + tarjeta + cajaPrestamo + `
             <button type="button" id="btnPasarPlata" class="btn btn-outline-light mt-3">Pasar plata entre cuentas</button>`;
         return cuentas[0];
     } catch (e) {
@@ -1034,7 +1067,7 @@ async function anularCheque(id) {
 }
 
 async function pasarPlataEntreCuentas() {
-    const opciones = CUENTAS_TESORERIA.map(c => `<option value="${c}">${c === 'CAJA_FUERTE' ? 'Caja fuerte' : (c === 'MERCADOPAGO' ? 'Mercado Pago' : 'Banco')}</option>`).join('');
+    const opciones = CUENTAS_TESORERIA.map(c => `<option value="${c}">${nombreCuentaTesoreria(c)}</option>`).join('');
     const { value: form } = await Swal.fire({
         title: 'Pasar plata',
         html: `
@@ -1154,6 +1187,182 @@ async function consumoTarjeta() {
     }
 }
 
+function opcionesCategoriaGasto() {
+    return [...document.querySelectorAll('#selectCategoriaGasto option')].filter(o => o.value)
+        .map(o => `<option value="${escGasto(o.value)}">${escGasto(o.textContent)}</option>`).join('');
+}
+
+function selectCuentaPrestamo(id) {
+    return `<select id="${id}" class="swal2-select"><option value="BANCO">Banco</option><option value="CAJA_FUERTE">Caja fuerte</option></select>`;
+}
+
+async function fijarDeudaPrestamo() {
+    const { value: monto } = await Swal.fire({
+        title: 'Lo que debés del préstamo',
+        input: 'number',
+        inputAttributes: { min: 0, step: '0.01' },
+        background: '#111C2A', color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Guardar'
+    });
+    if (monto === undefined) return;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/deuda/PRESTAMO/saldo', { method: 'POST', body: JSON.stringify({ monto_adeudado: parseFloat(monto) }) });
+        const r = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: 'Listo', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarCajaFuerte();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
+async function recibirPrestamo() {
+    const { value: form } = await Swal.fire({
+        title: 'Recibí plata',
+        html: `
+            ${selectCuentaPrestamo('swal-pr-destino')}
+            <input id="swal-pr-monto" type="number" min="0" step="0.01" class="swal2-input" placeholder="Monto">
+            <input id="swal-pr-det" class="swal2-input" placeholder="Nota (opcional)" maxlength="200">`,
+        background: '#111C2A', color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Anotar',
+        preConfirm: () => {
+            const monto = parseFloat(document.getElementById('swal-pr-monto').value);
+            if (!Number.isFinite(monto) || monto <= 0) { Swal.showValidationMessage('Cargá el monto'); return false; }
+            return {
+                destino: document.getElementById('swal-pr-destino').value,
+                monto,
+                detalle: document.getElementById('swal-pr-det').value.trim()
+            };
+        }
+    });
+    if (!form) return;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/deuda/PRESTAMO/recibir', { method: 'POST', body: JSON.stringify(form) });
+        const r = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: 'Listo', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarCajaFuerte();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
+async function pagarCuotaPrestamo() {
+    const { value: form } = await Swal.fire({
+        title: 'Pagar cuota',
+        html: `
+            ${selectCuentaPrestamo('swal-cu-origen')}
+            <input id="swal-cu-capital" type="number" min="0" step="0.01" class="swal2-input" placeholder="Capital">
+            <input id="swal-cu-interes" type="number" min="0" step="0.01" class="swal2-input" placeholder="Interés">
+            <select id="swal-cu-cat" class="swal2-select">${opcionesCategoriaGasto()}</select>
+            <input id="swal-cu-det" class="swal2-input" placeholder="Nota" maxlength="200">`,
+        background: '#111C2A', color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Pagar',
+        preConfirm: () => {
+            const capital = parseFloat(document.getElementById('swal-cu-capital').value) || 0;
+            const interes = parseFloat(document.getElementById('swal-cu-interes').value) || 0;
+            const detalle = document.getElementById('swal-cu-det').value.trim();
+            const categoria_id = parseInt(document.getElementById('swal-cu-cat').value, 10);
+            if (capital <= 0 && interes <= 0) { Swal.showValidationMessage('Cargá el capital, el interés, o los dos'); return false; }
+            if (interes > 0 && !categoria_id) { Swal.showValidationMessage('Elegí la categoría del interés'); return false; }
+            if (detalle.length < 3) { Swal.showValidationMessage('Escribí una nota'); return false; }
+            return { origen: document.getElementById('swal-cu-origen').value, capital, interes, detalle, categoria_id: categoria_id || null };
+        }
+    });
+    if (!form) return;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/deuda/PRESTAMO/cuota', { method: 'POST', body: JSON.stringify(form) });
+        const r = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: 'Cuota', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarCajaFuerte();
+        cargarResumenMensual();
+        cargarHistorial();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
+async function sumarInteresPrestamo() {
+    const { value: form } = await Swal.fire({
+        title: 'Interés que se sumó',
+        html: `
+            <select id="swal-in-cat" class="swal2-select">${opcionesCategoriaGasto()}</select>
+            <input id="swal-in-monto" type="number" min="0" step="0.01" class="swal2-input" placeholder="Monto">
+            <input id="swal-in-det" class="swal2-input" placeholder="Nota" maxlength="200">`,
+        background: '#111C2A', color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'Sumar',
+        preConfirm: () => {
+            const monto = parseFloat(document.getElementById('swal-in-monto').value);
+            const detalle = document.getElementById('swal-in-det').value.trim();
+            const categoria_id = parseInt(document.getElementById('swal-in-cat').value, 10);
+            if (!categoria_id) { Swal.showValidationMessage('Elegí la categoría'); return false; }
+            if (!Number.isFinite(monto) || monto <= 0) { Swal.showValidationMessage('Cargá el monto'); return false; }
+            if (detalle.length < 3) { Swal.showValidationMessage('Escribí una nota'); return false; }
+            return { categoria_id, monto, detalle };
+        }
+    });
+    if (!form) return;
+    try {
+        const res = await apiFetchSeguro('/tesoreria/deuda/PRESTAMO/intereses', { method: 'POST', body: JSON.stringify(form) });
+        const r = await leerRespuestaGasto(res);
+        Swal.fire({ icon: 'success', title: 'Sumado', text: r.mensaje, background: '#111C2A', color: '#fff' });
+        cargarCajaFuerte();
+        cargarResumenMensual();
+        cargarHistorial();
+    } catch (e) {
+        Swal.fire({ icon: 'error', title: 'Error', text: e.message, background: '#111C2A', color: '#fff' });
+    }
+}
+
+function fechaLocalHoy() {
+    const ahora = new Date();
+    const local = new Date(ahora.getTime() - ahora.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+}
+
+async function pintarDiaMercadoPago(fecha) {
+    const caja = document.getElementById('swal-dia-mp');
+    if (!caja) return;
+    caja.innerHTML = 'Cargando...';
+    try {
+        const res = await apiFetchSeguro(`/tesoreria/mercadopago/dia?fecha=${encodeURIComponent(fecha)}`);
+        const d = await leerRespuestaGasto(res);
+        caja.innerHTML = `
+            <div class="text-start small">
+                <div>Entró por QR: <b>${formatoPesos(d.entro)}</b></div>
+                <div class="ms-3">En el total: ${formatoPesos(d.qr_visible)}</div>
+                <div class="ms-3">Al ahorro: ${formatoPesos(d.apartado)}</div>
+                <div class="mt-2">Reembolsos: ${formatoPesos(d.reembolsos)}</div>
+                <div>Otras salidas del total: ${formatoPesos(d.otras_salidas)}</div>
+                <div class="mt-2">Saldo del total ahora: <b>${formatoPesos(d.saldo_mp)}</b></div>
+                <div>Saldo del ahorro ahora: <b>${formatoPesos(d.saldo_ahorro)}</b></div>
+                <div class="text-muted mt-2">Si no coincide con la app, usá Arqueo. Este cuadro no cambia el saldo.</div>
+            </div>`;
+    } catch (e) {
+        caja.innerHTML = escGasto(e.message);
+    }
+}
+
+async function verDiaMercadoPago() {
+    const hoy = fechaLocalHoy();
+    Swal.fire({
+        title: 'Mercado Pago del día',
+        html: `
+            <input id="swal-dia-fecha" type="date" class="swal2-input" value="${hoy}">
+            <div id="swal-dia-mp" class="mt-2"></div>`,
+        background: '#111C2A', color: '#fff',
+        showConfirmButton: false,
+        showCloseButton: true,
+        didOpen: () => {
+            const input = document.getElementById('swal-dia-fecha');
+            pintarDiaMercadoPago(input.value || hoy);
+            input.addEventListener('change', () => pintarDiaMercadoPago(input.value));
+        }
+    });
+}
+
 // Asegurate de que tu DOMContentLoaded final quede así:
 document.addEventListener('DOMContentLoaded', () => {
     cargarCategorias();
@@ -1169,6 +1378,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (teso === 'deuda-saldo') { fijarDeudaTarjeta(); return; }
         if (teso === 'deuda-pagar') { pagarResumenTarjeta(); return; }
         if (teso === 'deuda-consumo') { consumoTarjeta(); return; }
+        if (teso === 'prestamo-saldo') { fijarDeudaPrestamo(); return; }
+        if (teso === 'prestamo-recibir') { recibirPrestamo(); return; }
+        if (teso === 'prestamo-cuota') { pagarCuotaPrestamo(); return; }
+        if (teso === 'prestamo-interes') { sumarInteresPrestamo(); return; }
+        if (teso === 'dia-mp') { verDiaMercadoPago(); return; }
         const btn = e.target.closest('[data-teso]');
         if (!btn) return;
         const cuenta = btn.getAttribute('data-cuenta');
