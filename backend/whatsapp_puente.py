@@ -204,13 +204,16 @@ def avisar_retiro(monto, motivo: str, usuario: str = "", turno_id=None):
 
 
 def avisar_cierre_z(datos: dict):
-    lineas = [
+    lineas = []
+    if datos.get("reenvio"):
+        lineas.append("Reenvío de un cierre ya hecho")
+    lineas.extend([
         f"Cierre Z #{datos.get('turno_id')}",
         f"Cajero: {datos.get('cajero') or '-'}",
         f"Fondo inicial: {_plata(datos.get('fondo_inicial'))}",
         f"Efectivo: {_plata(datos.get('ventas_efectivo'))}",
         f"Tarjeta: {_plata(datos.get('ventas_tarjeta'))}",
-    ]
+    ])
     if float(datos.get("ventas_tarjeta") or 0) > 0.009:
         lineas.append(f"Comisión tarjeta: {_plata(datos.get('comision_tarjeta'))}")
         lineas.append(f"Neto tarjeta: {_plata(datos.get('neto_tarjeta'))}")

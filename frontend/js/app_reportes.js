@@ -30,9 +30,11 @@ function mesElegido() {
     return document.getElementById('inputMesReporte').value || mesActualAR();
 }
 
-async function apiReportes(path) {
+async function apiReportes(path, opciones) {
     const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
+    const metodo = (opciones && opciones.method) || 'GET';
     const res = await fetch(`${obtenerBaseUrl()}${path}`, {
+        method: metodo,
         headers: { Authorization: `Bearer ${token}` },
     });
     if (res.status === 401 || res.status === 403) {
@@ -298,7 +300,10 @@ async function cargarCierres() {
             <td class="text-end">${plata(cmv)}</td>
             <td class="text-end fw-bold ${clsMargen}">${plata(margen)}</td>
             <td class="text-end fw-bold ${clsDif}">${cerrado ? plata(dif) : '—'}</td>
-            <td class="text-end"><button type="button" class="btn btn-outline-primary btn-sm fw-bold" onclick="verCierre(${Number(t.id)})">Ver</button></td>
+            <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-outline-primary btn-sm fw-bold" onclick="verCierre(${Number(t.id)})">Ver</button>
+                ${(cerrado && !Number(t.solo_admin)) ? `<button type="button" class="btn btn-outline-secondary btn-sm fw-bold ms-1" onclick="reenviarZ(${Number(t.id)})">Reenviar Z</button>` : ''}
+            </td>
         </tr>`;
     }).join('');
     if (resumen) {
@@ -397,6 +402,36 @@ async function cargarSobres() {
             <td class="small">${escHtml(s.nota)}</td>
         </tr>`;
     }).join('');
+}
+
+let reenvioZEnCurso = false;
+
+async function reenviarZ(turnoId) {
+    const id = Number(turnoId);
+    if (!id || reenvioZEnCurso) return;
+    reenvioZEnCurso = true;
+    try {
+        const confirma = await Swal.fire({
+            title: `Reenviar el Z #${id}`,
+            text: 'Se arma con lo guardado al cerrar y con los tickets de ese turno. No vuelve a cerrar la caja.',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Reenviar',
+            cancelButtonText: 'Cancelar',
+        });
+        if (!confirma.isConfirmed) return;
+        const data = await apiReportes(`/caja/reenviar-z/${id}`, { method: 'POST' });
+        if (data.ok) {
+            Swal.fire('Z', data.mensaje || 'El puente lo tomó.', 'success');
+            return;
+        }
+        Swal.fire('Z', data.detail || data.mensaje || 'No se pudo reenviar.', 'error');
+    } catch (e) {
+        if (String(e.message) === '401' || String(e.message) === '403') return;
+        Swal.fire('Z', 'No se pudo reenviar.', 'error');
+    } finally {
+        reenvioZEnCurso = false;
+    }
 }
 
 async function cargarReportes() {

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Query, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import sqlite3
+import threading
 from fastapi import BackgroundTasks
 import requests
 from backend.database import obtener_conexion
@@ -617,6 +618,159 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks,
         return {"error": str(e)}
     finally:
         if conexion: conexion.close()
+
+
+def _admin_activo(sesion) -> int:
+    """El rol lo dice el token, y el usuario tiene que seguir siendo Admin activo."""
+    try:
+        usuario_id = int((sesion or {}).get("sub"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Sesión inválida.")
+    conexion = obtener_conexion()
+    try:
+        fila = conexion.execute(
+            "SELECT 1 FROM usuarios WHERE id = ? AND rol = 'ADMIN' AND estado = 'ACTIVO'",
+            (usuario_id,),
+        ).fetchone()
+    finally:
+        conexion.close()
+    if not fila:
+        raise HTTPException(status_code=403, detail="Acceso denegado.")
+    return usuario_id
+
+
+def _destino_del_cierre(cursor, turno_id, a_guardar):
+    if a_guardar is None or a_guardar < 0.01:
+        return None
+    try:
+        if cursor.execute(
+            "SELECT 1 FROM tesoreria_movimientos WHERE origen_tipo = 'CIERRE_TURNO' AND origen_id = ? LIMIT 1",
+            (turno_id,),
+        ).fetchone():
+            return "CAJA_FUERTE"
+        if cursor.execute(
+            "SELECT 1 FROM tesoreria_pendientes WHERE origen_tipo = 'CIERRE_TURNO' AND origen_id = ? LIMIT 1",
+            (turno_id,),
+        ).fetchone():
+            return "POR_RECIBIR"
+    except sqlite3.OperationalError:
+        return None
+    return None
+
+
+_reenvio_lock = threading.Lock()
+_reenvios_en_curso = set()
+
+
+@router.post("/reenviar-z/{turno_id}")
+def reenviar_cierre_z(turno_id: int, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    """Arma de nuevo el mensaje del Z y lo manda. No cierra, no mueve caja ni stock.
+
+    Lo declarado, lo esperado y la diferencia salen de lo guardado al cerrar.
+    Las ventas se leen de los tickets de ese turno. El digest de faltantes no se repite.
+    """
+    _admin_activo(sesion)
+    with _reenvio_lock:
+        if turno_id in _reenvios_en_curso:
+            raise HTTPException(status_code=429, detail="Ese Z ya se está enviando.")
+        _reenvios_en_curso.add(turno_id)
+    try:
+        return _enviar_z_guardado(turno_id)
+    finally:
+        with _reenvio_lock:
+            _reenvios_en_curso.discard(turno_id)
+
+
+def _enviar_z_guardado(turno_id: int):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        turno = cursor.execute("SELECT * FROM turnos_caja WHERE id = ?", (turno_id,)).fetchone()
+        if not turno:
+            raise HTTPException(status_code=404, detail="Ese turno no existe.")
+        if turno["estado_turno"] != "CERRADO":
+            raise HTTPException(status_code=400, detail="Ese turno sigue abierto. El reenvío es de un cierre ya hecho.")
+        caja = cursor.execute(
+            "SELECT IFNULL(solo_admin, 0) AS solo_admin FROM cajas_fisicas WHERE id = ?",
+            (turno["caja_id"],),
+        ).fetchone()
+        if caja and caja["solo_admin"]:
+            raise HTTPException(status_code=400, detail="Esa caja es de oficina y el Z no se manda.")
+        cajero = cursor.execute(
+            "SELECT nombre_completo FROM usuarios WHERE id = ?",
+            (turno["usuario_id"],),
+        ).fetchone()
+        nombre = cajero["nombre_completo"] if cajero and cajero["nombre_completo"] else f"Usuario #{turno['usuario_id']}"
+        ventas_efectivo = cursor.execute(
+            "SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')",
+            (turno_id,),
+        ).fetchone()[0] or 0.0
+        ventas_tarjeta, comision_tarjeta = _sumar_medio(cursor, turno_id, "%TARJETA%")
+        ventas_qr, comision_qr = _sumar_medio(cursor, turno_id, "%QR%")
+        ventas_virtual = cursor.execute(
+            "SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) LIKE '%BILLETERA%' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')",
+            (turno_id,),
+        ).fetchone()[0] or 0.0
+        ventas_fiados = cursor.execute(
+            "SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) IN ('FIADO', 'CUENTA CORRIENTE') AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')",
+            (turno_id,),
+        ).fetchone()[0] or 0.0
+        ventas_fiados += _fiado_mixto(cursor, turno_id)
+        ventas_transferencia = _sumar_transferencias(cursor, turno_id)
+        total_retiros = cursor.execute(
+            "SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?",
+            (turno_id,),
+        ).fetchone()[0] or 0.0
+        total_ingresos = cursor.execute(
+            "SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?",
+            (turno_id,),
+        ).fetchone()[0] or 0.0
+        fondo = turno["fondo_dejado"] if "fondo_dejado" in turno.keys() else None
+        declarado = float(turno["monto_final_declarado"] or 0)
+        if fondo is None:
+            queda = None
+            a_guardar = None
+        else:
+            queda = round(float(fondo), 2)
+            a_guardar = round(declarado - queda, 2)
+        payload = {
+            "turno_id": turno_id,
+            "cajero": nombre,
+            "fondo_inicial": turno["monto_inicial"],
+            "ventas_efectivo": ventas_efectivo,
+            "ventas_tarjeta": ventas_tarjeta,
+            "comision_tarjeta": comision_tarjeta,
+            "neto_tarjeta": round(ventas_tarjeta - comision_tarjeta, 2),
+            "ventas_qr": ventas_qr,
+            "comision_qr": comision_qr,
+            "neto_qr": round(ventas_qr - comision_qr, 2),
+            "ventas_transferencia": ventas_transferencia,
+            "ventas_virtual": ventas_virtual,
+            "ventas_fiados": ventas_fiados,
+            "ingresos": total_ingresos,
+            "retiros": total_retiros,
+            "detalle_retiros": _detalle_retiros_turno(cursor, turno_id),
+            "esperado": turno["monto_final_sistema"],
+            "declarado": declarado,
+            "diferencia": turno["diferencia"],
+            "queda_de_cambio": queda,
+            "a_guardar": a_guardar,
+            "destino_guardado": _destino_del_cierre(cursor, turno_id, a_guardar),
+            "reenvio": True,
+        }
+    finally:
+        conexion.close()
+
+    from backend.whatsapp_puente import avisar_cierre_z
+    resultado = avisar_cierre_z(payload) or {}
+    if not resultado.get("ok"):
+        raise HTTPException(status_code=503, detail=resultado.get("detalle") or "No se pudo enviar el Z.")
+    return {
+        "ok": True,
+        "mensaje": "El puente lo tomó. Eso no prueba que haya llegado al celular.",
+    }
+
 
 @router.get("/informe_x/{turno_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def sacar_informe_x(turno_id: int):
