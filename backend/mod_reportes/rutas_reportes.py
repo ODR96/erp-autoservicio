@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 from typing import List, Literal
+import re
 import sqlite3
 from backend.database import obtener_conexion
 from backend.mod_usuarios.rutas_usuarios import VerificarRol
@@ -21,6 +22,35 @@ def _hoy_ar_iso():
 
 def _mes_ar(mes: str = None):
     return mes or _ahora_ar().strftime("%Y-%m")
+
+
+def _mes_pedido(mes: str = None) -> str:
+    pedido = _mes_ar(mes)
+    if not re.fullmatch(r"\d{4}-\d{2}", pedido):
+        raise HTTPException(status_code=400, detail="Mes inválido.")
+    if not 1 <= int(pedido[5:7]) <= 12:
+        raise HTTPException(status_code=400, detail="Mes inválido.")
+    return pedido
+
+
+def _exigir_admin_activo(sesion: dict) -> int:
+    """El rol lo dice el token, y además tiene que seguir siendo Admin activo.
+    El body, el query y el localStorage no cuentan."""
+    try:
+        usuario_id = int(sesion.get("sub"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Sesión inválida.")
+    conexion = obtener_conexion()
+    try:
+        fila = conexion.execute(
+            "SELECT 1 FROM usuarios WHERE id = ? AND rol = 'ADMIN' AND estado = 'ACTIVO'",
+            (usuario_id,),
+        ).fetchone()
+    finally:
+        conexion.close()
+    if not fila:
+        raise HTTPException(status_code=403, detail="Acceso denegado.")
+    return usuario_id
 
 
 def _sumar_venta_sin_iva(cursor, where_sql, params) -> float:
@@ -818,6 +848,85 @@ def listar_cierres_mes(mes: str = None, incluir_oficina: bool = False):
         }
     finally:
         conexion.close()
+
+
+@router.get("/sobres")
+def listar_faltantes_sobres(mes: str = None, sesion: dict = Depends(VerificarRol(["ADMIN"]))):
+    """Sobres de caja fuerte ya contados donde faltó plata. No mueve nada.
+
+    El mes es el del sobre (cuando el cajero lo armó). El faltante es lo contado
+    menos lo declarado, y solo entra si es negativo. Transferencias al banco no
+    son sobres. Los que todavía están por recibir no tienen faltante.
+    """
+    _exigir_admin_activo(sesion)
+    mes = _mes_pedido(mes)
+    vacio = {"mes": mes, "cajeros": [], "sobres": [], "sin_contar": 0, "total_faltante": 0.0}
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    try:
+        filas = conexion.execute('''
+            SELECT p.id, p.fecha_hora, p.recibido_en, p.origen_tipo, p.turno_id, p.concepto,
+                   p.monto_declarado, p.monto_contado, p.diferencia, p.nota, p.usuario_id,
+                   IFNULL(NULLIF(TRIM(u.nombre_completo), ''), 'Sin nombre') AS cajero
+            FROM tesoreria_pendientes p
+            LEFT JOIN usuarios u ON u.id = p.usuario_id
+            WHERE p.estado = 'RECIBIDO'
+              AND p.cuenta = 'CAJA_FUERTE'
+              AND p.origen_tipo IN ('CIERRE_TURNO', 'SANGRIA')
+              AND p.diferencia < -0.009
+              AND strftime('%Y-%m', p.fecha_hora) = ?
+            ORDER BY cajero, p.fecha_hora, p.id
+        ''', (mes,)).fetchall()
+        sin_contar = conexion.execute('''
+            SELECT COUNT(*)
+            FROM tesoreria_pendientes
+            WHERE estado = 'PENDIENTE'
+              AND cuenta = 'CAJA_FUERTE'
+              AND origen_tipo IN ('CIERRE_TURNO', 'SANGRIA')
+              AND strftime('%Y-%m', fecha_hora) = ?
+        ''', (mes,)).fetchone()[0] or 0
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            return vacio
+        raise
+    finally:
+        conexion.close()
+
+    grupos = {}
+    sobres = []
+    total = 0.0
+    for fila in filas:
+        faltante = round(abs(float(fila["diferencia"] or 0)), 2)
+        total = round(total + faltante, 2)
+        uid = fila["usuario_id"]
+        grupo = grupos.get(uid)
+        if not grupo:
+            grupo = {"usuario_id": uid, "cajero": fila["cajero"], "sobres": 0, "faltante": 0.0}
+            grupos[uid] = grupo
+        grupo["sobres"] += 1
+        grupo["faltante"] = round(grupo["faltante"] + faltante, 2)
+        sobres.append({
+            "id": fila["id"],
+            "fecha_hora": fila["fecha_hora"],
+            "recibido_en": fila["recibido_en"],
+            "origen_tipo": fila["origen_tipo"],
+            "turno_id": fila["turno_id"],
+            "concepto": fila["concepto"],
+            "declarado": round(float(fila["monto_declarado"] or 0), 2),
+            "contado": round(float(fila["monto_contado"] or 0), 2),
+            "faltante": faltante,
+            "nota": fila["nota"] or "",
+            "usuario_id": uid,
+            "cajero": fila["cajero"],
+        })
+    cajeros = sorted(grupos.values(), key=lambda g: (-g["faltante"], g["cajero"]))
+    return {
+        "mes": mes,
+        "cajeros": cajeros,
+        "sobres": sobres,
+        "sin_contar": sin_contar,
+        "total_faltante": total,
+    }
 
 
 @router.get("/ventas_por_dia", dependencies=[Depends(VerificarRol(["ADMIN"]))])

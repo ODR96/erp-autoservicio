@@ -4,6 +4,7 @@ let cacheMix = [];
 let cacheClavos = [];
 let cacheDias = [];
 let cacheCierres = [];
+let cacheSobres = [];
 
 function mesActualAR() {
     const partes = new Intl.DateTimeFormat('en-CA', {
@@ -34,10 +35,15 @@ async function apiReportes(path) {
     const res = await fetch(`${obtenerBaseUrl()}${path}`, {
         headers: { Authorization: `Bearer ${token}` },
     });
-    if (res.status === 401) {
-        localStorage.clear();
+    if (res.status === 401 || res.status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('token_pos');
+        localStorage.removeItem('usuario_rol');
+        localStorage.removeItem('rol');
+        localStorage.removeItem('usuario_id');
+        localStorage.removeItem('usuario_nombre');
         window.location.href = 'index.html';
-        throw new Error('401');
+        throw new Error(String(res.status));
     }
     return res.json();
 }
@@ -333,6 +339,60 @@ async function verCierre(turnoId) {
     }
 }
 
+async function cargarSobres() {
+    const mes = mesElegido();
+    const resumen = document.getElementById('resumenSobres');
+    const porCajero = document.getElementById('tablaSobresCajeros');
+    const detalle = document.getElementById('tablaSobres');
+    porCajero.innerHTML = filaVacia(3, 'Cargando...');
+    detalle.innerHTML = filaVacia(7, 'Cargando...');
+    if (resumen) resumen.innerText = '—';
+    cacheSobres = [['Fecha', 'Cajero', 'Sobre', 'Declaro', 'Contaste', 'Falto', 'Nota']];
+    const data = await apiReportes(`/reportes/sobres?mes=${encodeURIComponent(mes)}`);
+    if (data.detail && !Array.isArray(data.sobres)) {
+        porCajero.innerHTML = filaVacia(3, data.detail);
+        detalle.innerHTML = filaVacia(7, data.detail);
+        return;
+    }
+    const cajeros = (data && data.cajeros) || [];
+    const sobres = (data && data.sobres) || [];
+    const total = Number(data.total_faltante) || 0;
+    const sinContar = Number(data.sin_contar) || 0;
+    if (resumen) {
+        const extra = sinContar ? ` · ${sinContar} de ese mes todavía sin contar` : '';
+        resumen.innerText = cajeros.length
+            ? `${cajeros.length} cajeros · faltante ${plata(total)}${extra}`
+            : `Sin faltantes en ese mes${extra}`;
+        resumen.className = `small fw-bold mb-2 ${total > 0 ? 'text-danger' : 'text-muted'}`;
+    }
+    porCajero.innerHTML = cajeros.length
+        ? cajeros.map((c) => `<tr>
+            <td class="fw-bold">${escHtml(c.cajero)}</td>
+            <td class="text-end">${c.sobres}</td>
+            <td class="text-end fw-bold text-danger">${plata(c.faltante)}</td>
+        </tr>`).join('')
+        : filaVacia(3, 'Ningún cajero tuvo faltante en un sobre de ese mes.');
+    if (!sobres.length) {
+        detalle.innerHTML = filaVacia(7, 'Ningún sobre de ese mes tuvo faltante.');
+        return;
+    }
+    detalle.innerHTML = sobres.map((s) => {
+        cacheSobres.push([
+            s.fecha_hora, s.cajero, s.concepto, Number(s.declarado).toFixed(2),
+            Number(s.contado).toFixed(2), Number(s.faltante).toFixed(2), s.nota || '',
+        ]);
+        return `<tr>
+            <td class="small">${escHtml(horaCorta(s.fecha_hora))}</td>
+            <td class="fw-bold">${escHtml(s.cajero)}</td>
+            <td class="small">${escHtml(s.concepto)}</td>
+            <td class="text-end">${plata(s.declarado)}</td>
+            <td class="text-end">${plata(s.contado)}</td>
+            <td class="text-end fw-bold text-danger">${plata(s.faltante)}</td>
+            <td class="small">${escHtml(s.nota)}</td>
+        </tr>`;
+    }).join('');
+}
+
 async function cargarReportes() {
     try {
         await Promise.all([
@@ -342,6 +402,7 @@ async function cargarReportes() {
             cargarClavos(),
             cargarDias(),
             cargarCierres(),
+            cargarSobres(),
         ]);
     } catch (e) {
         console.error(e);
@@ -366,6 +427,9 @@ function exportarCsvDias() {
 }
 function exportarCsvCierres() {
     bajarCsv(`cierres_${mesElegido()}.csv`, cacheCierres);
+}
+function exportarCsvSobres() {
+    bajarCsv(`sobres_${mesElegido()}.csv`, cacheSobres);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
