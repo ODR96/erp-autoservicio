@@ -47,6 +47,8 @@ def asegurar_tabla_configuracion():
     except: pass
     try: cursor.execute("ALTER TABLE configuracion_local ADD COLUMN apartado_mp_pct REAL DEFAULT 0")
     except: pass
+    try: cursor.execute("ALTER TABLE configuracion_local ADD COLUMN dias_aviso_conteo INTEGER DEFAULT 0")
+    except: pass
 
     cursor.execute("INSERT OR IGNORE INTO configuracion_local (id) VALUES (1)")
     conexion.commit()
@@ -159,6 +161,7 @@ def actualizar_configuracion(
     umbral_descuento_pct: float = Form(5),
     umbral_descuento_pesos: float = Form(0),
     apartado_mp_pct: float = Form(0),
+    dias_aviso_conteo: int = Form(0),
 ):
     if tope_maximo_descuento_sueldo_pct < 0 or tope_maximo_descuento_sueldo_pct > 100:
         return {"error": "El tope de descuento de sueldo debe ser un porcentaje entre 0 y 100."}
@@ -168,15 +171,17 @@ def actualizar_configuracion(
         return {"error": "El aviso de descuento en pesos no puede ser negativo."}
     if apartado_mp_pct < 0 or apartado_mp_pct > 100:
         return {"error": "El apartado de Mercado Pago tiene que ser un porcentaje entre 0 y 100."}
+    if dias_aviso_conteo < 0 or dias_aviso_conteo > 3650:
+        return {"error": "Los días de aviso del conteo tienen que estar entre 0 y 3650."}
 
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
         cursor.execute('''
             UPDATE configuracion_local 
-            SET nombre_negocio = ?, direccion = ?, telefono = ?, mensaje_ticket = ?, cuit = ?, condicion_iva = ?, impresora_por_defecto = ?, tope_maximo_descuento_sueldo_pct = ?, whatsapp_grupo_compras = ?, umbral_descuento_pct = ?, umbral_descuento_pesos = ?, apartado_mp_pct = ?
+            SET nombre_negocio = ?, direccion = ?, telefono = ?, mensaje_ticket = ?, cuit = ?, condicion_iva = ?, impresora_por_defecto = ?, tope_maximo_descuento_sueldo_pct = ?, whatsapp_grupo_compras = ?, umbral_descuento_pct = ?, umbral_descuento_pesos = ?, apartado_mp_pct = ?, dias_aviso_conteo = ?
             WHERE id = 1
-        ''', (nombre_negocio, direccion, telefono, mensaje_ticket, cuit, condicion_iva, impresora_por_defecto, tope_maximo_descuento_sueldo_pct, (whatsapp_grupo_compras or "").strip(), umbral_descuento_pct, umbral_descuento_pesos, apartado_mp_pct))
+        ''', (nombre_negocio, direccion, telefono, mensaje_ticket, cuit, condicion_iva, impresora_por_defecto, tope_maximo_descuento_sueldo_pct, (whatsapp_grupo_compras or "").strip(), umbral_descuento_pct, umbral_descuento_pesos, apartado_mp_pct, dias_aviso_conteo))
         conexion.commit()
         return {"mensaje": "¡Configuración del negocio guardada con éxito!"}
     except Exception as e:

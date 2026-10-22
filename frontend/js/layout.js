@@ -55,7 +55,13 @@ function urlLogoNegocio() {
     const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
     const rol = localStorage.getItem('usuario_rol');
 
-    if (!token) {
+    if (!token || !rol || !localStorage.getItem('usuario_id')) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('token_pos');
+        localStorage.removeItem('usuario_rol');
+        localStorage.removeItem('rol');
+        localStorage.removeItem('usuario_id');
+        localStorage.removeItem('usuario_nombre');
         window.location.href = "index.html";
         return;
     }
@@ -80,7 +86,7 @@ function urlLogoNegocio() {
 
 function inyectarLayout() {
     const nombre = localStorage.getItem('usuario_nombre') || 'Desconocido';
-    const rol = localStorage.getItem('usuario_rol') || 'ADMIN';
+    const rol = localStorage.getItem('usuario_rol') || '';
     const esAdmin = rol === 'ADMIN';
 
     const nombreLocal = nombreNegocio();

@@ -70,6 +70,8 @@ async function cargarConfiguracionActual() {
         document.getElementById('confUmbralDescuentoPct').value = config.umbral_descuento_pct ?? 5;
         document.getElementById('confUmbralDescuentoPesos').value = config.umbral_descuento_pesos ?? 0;
         document.getElementById('confApartadoMp').value = config.apartado_mp_pct ?? 0;
+        const diasConteo = document.getElementById('confDiasConteo');
+        if (diasConteo) diasConteo.value = config.dias_aviso_conteo ?? 0;
 
         if (config.ruta_logo) {
             document.getElementById('previewLogo').src = `${baseUrl}/static/logos/${config.ruta_logo}?t=${new Date().getTime()}`;
@@ -146,6 +148,7 @@ async function guardarConfiguracion(event) {
     formData.append('umbral_descuento_pct', document.getElementById('confUmbralDescuentoPct').value || 0);
     formData.append('umbral_descuento_pesos', document.getElementById('confUmbralDescuentoPesos').value || 0);
     formData.append('apartado_mp_pct', document.getElementById('confApartadoMp').value || 0);
+    formData.append('dias_aviso_conteo', document.getElementById('confDiasConteo')?.value || 0);
 
     try {
         const baseUrl = obtenerBaseUrl();

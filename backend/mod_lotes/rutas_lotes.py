@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date, datetime, timezone, timedelta
@@ -53,8 +53,26 @@ def asegurar_tabla_conteos():
     conexion.close()
 
 
+def asegurar_tabla_zonas_conteo():
+    conexion = obtener_conexion()
+    conexion.execute('''
+        CREATE TABLE IF NOT EXISTS conteo_zonas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            producto_id INTEGER NOT NULL,
+            zona TEXT NOT NULL,
+            cantidad REAL NOT NULL,
+            usuario_id INTEGER,
+            fecha_hora TEXT NOT NULL
+        )
+    ''')
+    conexion.execute("CREATE INDEX IF NOT EXISTS idx_conteo_zonas_prod ON conteo_zonas (producto_id)")
+    conexion.commit()
+    conexion.close()
+
+
 asegurar_tabla_mermas()
 asegurar_tabla_conteos()
+asegurar_tabla_zonas_conteo()
 
 # --- MODELOS DE DATOS ---
 class LoteNuevo(BaseModel):
@@ -349,9 +367,12 @@ class AjusteInventario(BaseModel):
 
 def _usuario_id(payload: dict) -> int:
     try:
-        return int(payload.get("sub") or 1)
+        uid = int((payload or {}).get("sub"))
     except (TypeError, ValueError):
-        return 1
+        uid = 0
+    if uid <= 0:
+        raise HTTPException(status_code=401, detail="Sesión inválida.")
+    return uid
 
 
 def _ahora_ar() -> str:
@@ -494,7 +515,7 @@ def listar_negativos_inventario():
 
 
 @router.get("/inventario/buscar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
-def buscar_producto_inventario(q: str = Query("", min_length=0)):
+def buscar_producto_inventario(q: str = Query("", min_length=0), payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
@@ -513,7 +534,7 @@ def buscar_producto_inventario(q: str = Query("", min_length=0)):
             cursor.execute(select_sql + " AND (p.id = ? OR p.codigo_barras = ?) LIMIT 20", (int(busqueda), busqueda))
             exactos = [dict(r) for r in cursor.fetchall()]
             if exactos:
-                return {"productos": exactos}
+                return {"productos": _sin_stock_si_no_es_admin(payload, exactos)}
 
         condiciones = []
         parametros = []
@@ -524,7 +545,7 @@ def buscar_producto_inventario(q: str = Query("", min_length=0)):
             select_sql + " AND " + " AND ".join(condiciones) + " LIMIT 20",
             tuple(parametros),
         )
-        return {"productos": [dict(r) for r in cursor.fetchall()]}
+        return {"productos": _sin_stock_si_no_es_admin(payload, [dict(r) for r in cursor.fetchall()])}
     finally:
         conexion.close()
 
@@ -547,6 +568,206 @@ def historial_conteos(limit: int = Query(40, ge=1, le=200)):
             (limit,),
         )
         return {"movimientos": [dict(r) for r in cursor.fetchall()]}
+    finally:
+        conexion.close()
+
+
+def _dias_aviso_conteo(cursor) -> int:
+    try:
+        fila = cursor.execute("SELECT dias_aviso_conteo FROM configuracion_local WHERE id = 1").fetchone()
+    except sqlite3.OperationalError:
+        return 0
+    if not fila or fila[0] is None:
+        return 0
+    try:
+        dias = int(fila[0])
+    except (TypeError, ValueError):
+        return 0
+    if dias < 0:
+        return 0
+    return min(dias, 3650)
+
+
+def _dias_desde(fecha_txt: str):
+    if not fecha_txt:
+        return None
+    try:
+        cuando = datetime.strptime(str(fecha_txt)[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return max(int((datetime.now(ZONA_AR).replace(tzinfo=None) - cuando).total_seconds() // 86400), 0)
+
+
+@router.get("/inventario/ciclo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def ciclo_conteo(categoria_id: Optional[int] = None, limite: int = Query(40, ge=1, le=100), payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
+    """Primero lo nunca contado, después lo más viejo. No modifica stock."""
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        aviso = _dias_aviso_conteo(cursor)
+        filtro = ""
+        params = []
+        if categoria_id:
+            filtro = " AND p.categoria_id = ? "
+            params.append(int(categoria_id))
+        cursor.execute(
+            f"""SELECT p.id, p.nombre, p.codigo_barras, p.unidad_medida, p.categoria_id,
+                      IFNULL(cat.nombre, '') AS categoria,
+                      COALESCE((SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id), 0) AS stock_total,
+                      (SELECT MAX(fecha_hora) FROM conteos_inventario c
+                       WHERE c.producto_id = p.id AND c.tipo = 'CONTEO') AS ultimo_conteo
+               FROM productos p
+               LEFT JOIN categorias_productos cat ON cat.id = p.categoria_id
+               WHERE p.activo = 1 {filtro}
+               ORDER BY ultimo_conteo IS NULL DESC, ultimo_conteo ASC, p.nombre ASC
+               LIMIT ?""",
+            tuple(params + [limite]),
+        )
+        filas = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            dias = _dias_desde(item.get("ultimo_conteo"))
+            item["dias"] = dias
+            item["nunca"] = item.get("ultimo_conteo") is None
+            item["vencido"] = bool(aviso) and (item["nunca"] or (dias is not None and dias >= aviso))
+            filas.append(item)
+        return {"dias_aviso": aviso, "productos": _sin_stock_si_no_es_admin(payload, filas)}
+    finally:
+        conexion.close()
+
+
+def _es_admin(payload: dict) -> bool:
+    return ((payload or {}).get("rol") or "").upper() == "ADMIN"
+
+
+def _sin_stock_si_no_es_admin(payload: dict, filas: list) -> list:
+    if _es_admin(payload):
+        return filas
+    for item in filas:
+        item.pop("stock_total", None)
+    return filas
+
+
+def _fmt_cant(n) -> str:
+    texto = f"{float(n):.3f}".rstrip("0").rstrip(".")
+    return texto or "0"
+
+
+def _obs_zonas(zonas) -> str:
+    return " · ".join(f"{z['zona']} {_fmt_cant(z['cantidad'])}" for z in zonas)[:200]
+
+
+def _es_admin(payload: dict) -> bool:
+    return ((payload or {}).get("rol") or "").upper() == "ADMIN"
+
+
+def _zonas_pendientes(cursor, producto_id: int):
+    cursor.execute(
+        "SELECT id, zona, cantidad, fecha_hora FROM conteo_zonas WHERE producto_id = ? ORDER BY id ASC",
+        (producto_id,),
+    )
+    hoy = _hoy_ar()
+    filas = []
+    for row in cursor.fetchall():
+        item = dict(row)
+        item["vieja"] = str(item.get("fecha_hora") or "")[:10] != hoy
+        filas.append(item)
+    return filas
+
+
+def _usuario_obligatorio(payload: dict) -> int:
+    try:
+        uid = int((payload or {}).get("sub"))
+    except (TypeError, ValueError):
+        uid = 0
+    if uid <= 0:
+        raise HTTPException(status_code=401, detail="Sesión inválida.")
+    return uid
+
+
+def _nombre_zona(texto: str) -> str:
+    limpio = " ".join((texto or "").split())
+    if not limpio or len(limpio) > 40:
+        raise HTTPException(status_code=400, detail="Escribí el nombre de la zona, hasta 40 letras.")
+    return limpio
+
+
+class ZonaConteo(BaseModel):
+    producto_id: int
+    zona: str
+    cantidad: float
+
+
+@router.get("/inventario/zonas/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def listar_zonas_conteo(producto_id: int):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    try:
+        zonas = _zonas_pendientes(conexion.cursor(), producto_id)
+        total = round(sum(float(z["cantidad"] or 0) for z in zonas), 4)
+        return {"zonas": zonas, "total": total}
+    finally:
+        conexion.close()
+
+
+@router.post("/inventario/zona", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def guardar_zona_conteo(body: ZonaConteo, payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
+    zona = _nombre_zona(body.zona)
+    if body.cantidad < 0:
+        raise HTTPException(status_code=400, detail="La cantidad no puede ser negativa.")
+    cantidad = round(float(body.cantidad), 4)
+    usuario_id = _usuario_obligatorio(payload)
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        existe = cursor.execute("SELECT id FROM productos WHERE id = ? AND activo = 1", (body.producto_id,)).fetchone()
+        if not existe:
+            raise HTTPException(status_code=404, detail="Ese producto no existe o está inactivo.")
+        cuantas = cursor.execute("SELECT COUNT(*) FROM conteo_zonas WHERE producto_id = ?", (body.producto_id,)).fetchone()[0]
+        misma = cursor.execute(
+            "SELECT id FROM conteo_zonas WHERE producto_id = ? AND lower(zona) = lower(?)",
+            (body.producto_id, zona),
+        ).fetchone()
+        if not misma and int(cuantas or 0) >= 12:
+            raise HTTPException(status_code=400, detail="Ese producto ya tiene 12 zonas. Confirmá o borrá una.")
+        if misma:
+            cursor.execute(
+                "UPDATE conteo_zonas SET cantidad = ?, usuario_id = ?, fecha_hora = ?, zona = ? WHERE id = ?",
+                (cantidad, usuario_id, _ahora_ar(), zona, misma["id"]),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO conteo_zonas (producto_id, zona, cantidad, usuario_id, fecha_hora) VALUES (?, ?, ?, ?, ?)",
+                (body.producto_id, zona, cantidad, usuario_id, _ahora_ar()),
+            )
+        conexion.commit()
+        zonas = _zonas_pendientes(cursor, body.producto_id)
+        return {"zonas": zonas, "total": round(sum(float(z["cantidad"] or 0) for z in zonas), 4)}
+    except HTTPException:
+        conexion.rollback()
+        raise
+    finally:
+        conexion.close()
+
+
+@router.delete("/inventario/zona/{zona_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def borrar_zona_conteo(zona_id: int):
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        fila = cursor.execute("SELECT producto_id FROM conteo_zonas WHERE id = ?", (zona_id,)).fetchone()
+        if not fila:
+            raise HTTPException(status_code=404, detail="Esa zona no está pendiente.")
+        cursor.execute("DELETE FROM conteo_zonas WHERE id = ?", (zona_id,))
+        conexion.commit()
+        zonas = _zonas_pendientes(cursor, fila["producto_id"])
+        return {"zonas": zonas, "total": round(sum(float(z["cantidad"] or 0) for z in zonas), 4)}
+    except HTTPException:
+        conexion.rollback()
+        raise
     finally:
         conexion.close()
 
@@ -593,16 +814,30 @@ def ajustar_inventario(datos: AjusteInventario, payload: dict = Depends(Verifica
                 "aviso_factura": True,
             }
 
-        if datos.cantidad_contada is None:
+        if datos.cantidad_contada is None and tipo != "CONTEO":
             return {"error": "Indicá cuánto hay en físico."}
-        target = float(datos.cantidad_contada)
+        zonas = []
+        if tipo == "CONTEO":
+            zonas = _zonas_pendientes(cursor, datos.producto_id)
+            viejas = [z["zona"] for z in zonas if z.get("vieja")]
+            if viejas:
+                return {"error": "Estas zonas son de otro día: " + ", ".join(viejas) + ". Volvé a contarlas."}
+        if zonas:
+            target = round(sum(float(z["cantidad"] or 0) for z in zonas), 4)
+        else:
+            if datos.cantidad_contada is None:
+                return {"error": "Indicá cuánto hay en físico."}
+            target = float(datos.cantidad_contada)
         if target < 0:
             return {"error": "El físico no puede ser negativo."}
 
         if abs(stock_antes - target) < 0.0001:
+            obs_igual = _obs_zonas(zonas) if zonas else (datos.observaciones or "Sin diferencia")
+            if zonas:
+                cursor.execute("DELETE FROM conteo_zonas WHERE producto_id = ?", (datos.producto_id,))
             _registrar_conteo(
                 cursor, datos.producto_id, stock_antes, target, tipo,
-                usuario_id, fecha, datos.observaciones or "Sin diferencia", 0.0,
+                usuario_id, fecha, obs_igual, 0.0,
             )
             conexion.commit()
             return {
@@ -632,9 +867,12 @@ def ajustar_inventario(datos: AjusteInventario, payload: dict = Depends(Verifica
             )
 
         stock_despues = _stock_neto(cursor, datos.producto_id)
+        obs = _obs_zonas(zonas) if zonas else datos.observaciones
+        if zonas:
+            cursor.execute("DELETE FROM conteo_zonas WHERE producto_id = ?", (datos.producto_id,))
         _registrar_conteo(
             cursor, datos.producto_id, stock_antes, target, tipo,
-            usuario_id, fecha, datos.observaciones, costo_perdido,
+            usuario_id, fecha, obs, costo_perdido,
         )
         conexion.commit()
         return {
@@ -647,6 +885,10 @@ def ajustar_inventario(datos: AjusteInventario, payload: dict = Depends(Verifica
             "costo_perdido": costo_perdido,
             "aviso_factura": stock_antes < 0,
         }
+    except HTTPException:
+        if conexion:
+            conexion.rollback()
+        raise
     except Exception as e:
         if conexion:
             conexion.rollback()
