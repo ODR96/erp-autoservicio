@@ -7,6 +7,8 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone, timedelta
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -375,7 +377,7 @@ def _cancelar_pendientes(cursor, pos_id):
 
 class CobroQr(BaseModel):
     monto: float
-    turno_id: int
+    turno_id: Optional[int] = None
 
 
 @router.get("/qr/caja", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
@@ -397,6 +399,14 @@ def crear_cobro_qr(datos: CobroQr):
         monto = round(float(datos.monto or 0), 2)
         if monto < 15:
             raise RuntimeError("Mercado Pago no acepta QR de menos de $15.")
+        turno_id = int(datos.turno_id) if datos.turno_id else None
+        if turno_id:
+            abierto = cursor.execute(
+                "SELECT id FROM turnos_caja WHERE id = ? AND estado_turno = 'ABIERTO'",
+                (turno_id,),
+            ).fetchone()
+            if not abierto:
+                raise RuntimeError("Ese turno no está abierto.")
         _, _, pos_id, _ = _cfg()
         caja = asegurar_caja()
         _cancelar_pendientes(cursor, pos_id)
@@ -430,7 +440,7 @@ def crear_cobro_qr(datos: CobroQr):
             (proveedor, mp_order_id, external_reference, monto, estado, turno_id, pos_external_id, creado_en)
             VALUES ('mercadopago', ?, ?, ?, 'pendiente', ?, ?, ?)
             """,
-            (order.get("id"), referencia, monto, datos.turno_id, pos_id, ahora),
+            (order.get("id"), referencia, monto, turno_id, pos_id, ahora),
         )
         cobro_id = cursor.lastrowid
         conexion.commit()

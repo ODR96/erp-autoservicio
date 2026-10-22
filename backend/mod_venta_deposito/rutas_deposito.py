@@ -114,8 +114,9 @@ _MEDIOS_PEDIDO = {
 }
 
 
-def liquidar_pedido_mayorista(cursor, pedido_id, pagos, origen, turno_id=None):
-    """Un solo cobro. CAJA deja el turno y el efectivo en el cajón. DEPOSITO no toca el cajón."""
+def liquidar_pedido_mayorista(cursor, pedido_id, pagos, origen, turno_id=None, cobro_externo_id=None):
+    """CAJA deja el turno y el efectivo en el cajón. DEPOSITO no toca el cajón.
+    Si hay pata QR, el cobro de Mercado Pago tiene que estar acreditado."""
     origen = (origen or "").upper()
     if origen not in ("CAJA", "DEPOSITO"):
         raise Exception("Origen de cobro inválido.")
@@ -243,6 +244,28 @@ def liquidar_pedido_mayorista(cursor, pedido_id, pagos, origen, turno_id=None):
         mover_tesoreria(cursor, "CAJA_FUERTE", efectivo_oficina, f"Efectivo de pedido depósito #{pedido_id}",
                         "VENTA_DEPOSITO", pedido_id, None)
 
+    from types import SimpleNamespace
+    from backend.mod_ventas.rutas_ventas import _atar_cobro_qr
+    from backend.mod_pagos.rutas_pagos import _comision_qr_para_saldo
+    _atar_cobro_qr(cursor, SimpleNamespace(
+        metodo_pago=metodo_header,
+        pagos_mixtos=[SimpleNamespace(metodo=p["metodo"], monto=p["monto"]) for p in patas],
+        cobro_externo_id=cobro_externo_id,
+    ), pedido_id, total)
+    monto_qr = round(sum(p["monto"] for p in patas if "QR" in p["metodo"]), 2)
+    if monto_qr > 0.05 and cobro_externo_id:
+        comision_qr = _comision_qr_para_saldo(cursor, cobro_externo_id, monto_qr)
+        if metodo_header == "MIXTO":
+            cursor.execute(
+                "UPDATE ventas_pagos_mixtos SET comision = ? WHERE venta_id = ? AND metodo_pago = 'QR'",
+                (comision_qr, pedido_id),
+            )
+        else:
+            cursor.execute(
+                "UPDATE ventas_cabecera SET comision_medio = ? WHERE id = ?",
+                (comision_qr, pedido_id),
+            )
+
     return {
         "mensaje": "Pedido cobrado. Queda listo para entregar.",
         "metodo": metodo_header,
@@ -330,8 +353,14 @@ def registrar_documento_mayorista(doc: NuevoDocumento):
         return {"error": mensaje_error}
 
 # --- 3. COBRAR EN EL DEPÓSITO (no entra al cajón del salón) ---
+class PataCobro(BaseModel):
+    metodo: str
+    monto: float
+
 class CobroEnDeposito(BaseModel):
-    metodo_pago: str
+    metodo_pago: str = ""
+    pagos_mixtos: Optional[List[PataCobro]] = None
+    cobro_externo_id: Optional[int] = None
 
 @router.put("/cobrar/{pedido_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def cobrar_pedido_en_deposito(pedido_id: int, pago: CobroEnDeposito):
@@ -343,11 +372,18 @@ def cobrar_pedido_en_deposito(pedido_id: int, pago: CobroEnDeposito):
         pedido = cursor.fetchone()
         if not pedido:
             raise Exception("El documento no existe.")
+        if pago.pagos_mixtos:
+            pagos = [{"metodo": p.metodo, "monto": p.monto} for p in pago.pagos_mixtos]
+        elif pago.metodo_pago:
+            pagos = [{"metodo": pago.metodo_pago, "monto": pedido["total_venta"]}]
+        else:
+            raise Exception("Elegí el medio.")
         resultado = liquidar_pedido_mayorista(
             cursor,
             pedido_id,
-            [{"metodo": pago.metodo_pago, "monto": pedido["total_venta"]}],
+            pagos,
             "DEPOSITO",
+            cobro_externo_id=pago.cobro_externo_id,
         )
         conexion.commit()
         return resultado

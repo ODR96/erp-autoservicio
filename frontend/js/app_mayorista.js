@@ -837,37 +837,170 @@ async function imprimirPicking(docId) {
     }
 }
 
+function plataMay(n) {
+    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(Number(n) || 0);
+}
+
+async function esperarQrDeposito(docId, monto) {
+    if (!navigator.onLine) {
+        await Swal.fire('Sin internet', 'El QR necesita conexión. Cobrá por otro medio.', 'warning');
+        return null;
+    }
+    if (monto < 15) {
+        await Swal.fire('QR mínimo', 'Mercado Pago no acepta QR de menos de $15.', 'warning');
+        return null;
+    }
+    const clave = `qrPedido_${docId}`;
+    let guardado = null;
+    try { guardado = JSON.parse(sessionStorage.getItem(clave) || 'null'); } catch (e) { guardado = null; }
+    if (guardado && Math.abs(Number(guardado.monto) - monto) > 0.05) {
+        await Swal.fire('Ese QR ya se pagó', `El cliente pagó ${plataMay(guardado.monto)} y el pedido no se cerró. Usá ese mismo monto.`, 'warning');
+        return null;
+    }
+    if (guardado && guardado.cobroId) return guardado.cobroId;
+
+    const confirm = await Swal.fire({
+        title: 'Cobrar con QR',
+        html: `<div style="font-size:2rem;font-weight:800">${plataMay(monto)}</div>
+            <div class="mt-2">Se carga este monto en el QR impreso. El cliente no tiene que leer la pantalla.</div>`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#198754',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Cargar monto al QR',
+        cancelButtonText: 'Volver'
+    });
+    if (!confirm.isConfirmed) return null;
+
+    Swal.fire({ title: 'Cargando el monto en el QR...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    const res = await fetch(`${obtenerBaseUrl()}/pagos/qr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monto })
+    });
+    const data = await res.json().catch(() => ({}));
+    const detalle = data.error || (typeof data.detail === 'string' ? data.detail : '');
+    if (!res.ok || detalle) throw new Error(detalle || 'No se pudo cargar el QR.');
+    const cobroId = data.cobro_id;
+    const img = data.image
+        ? `<img alt="QR de la caja" src="${escMay(data.image)}" style="width:180px;height:180px;object-fit:contain;background:#fff;padding:8px;border-radius:8px">`
+        : '<div class="small text-danger">No hay imagen del QR. Usá el sticker impreso.</div>';
+    let cierre = 'esperando';
+    await Swal.fire({
+        title: 'Esperando el pago',
+        html: `<div style="font-size:2rem;font-weight:800">${plataMay(monto)}</div>
+            <div class="mt-2">Que pague con el QR impreso. Si se va, cancelá: si no, el siguiente paga este monto.</div>
+            <details class="mt-3"><summary class="small text-muted">Mostrar el QR en pantalla</summary><div class="mt-2">${img}</div></details>`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: 'Cancelar: no pagó',
+        cancelButtonColor: '#dc3545',
+        didOpen: () => {
+            const timer = setInterval(async () => {
+                if (!Swal.isVisible()) { clearInterval(timer); return; }
+                try {
+                    const stRes = await fetch(`${obtenerBaseUrl()}/pagos/qr/${cobroId}`);
+                    const st = await stRes.json();
+                    if (st.estado === 'aprobado') { cierre = 'aprobado'; clearInterval(timer); Swal.close(); }
+                    else if (st.estado && st.estado !== 'pendiente') { cierre = st.estado; clearInterval(timer); Swal.close(); }
+                } catch (e) { /* el próximo intento */ }
+            }, 2000);
+        }
+    });
+    if (cierre === 'esperando') cierre = 'cancelar';
+    if (cierre !== 'aprobado') {
+        await fetch(`${obtenerBaseUrl()}/pagos/qr/${cobroId}/cancelar`, { method: 'POST' });
+        await Swal.fire(cierre === 'vencido' ? 'Se venció el cobro' : 'Cobro cancelado', 'El QR quedó libre.', cierre === 'vencido' ? 'warning' : 'info');
+        return null;
+    }
+    sessionStorage.setItem(clave, JSON.stringify({ cobroId, monto }));
+    return cobroId;
+}
+
 async function cobrarPedidoDeposito(docId) {
-    const { value: metodo } = await Swal.fire({
+    let total = 0;
+    try {
+        const resDoc = await fetch(`${obtenerBaseUrl()}/deposito/documento/${docId}`);
+        const doc = await resDoc.json();
+        if (doc.error) throw new Error(doc.error);
+        total = Number(doc.cabecera && doc.cabecera.total_venta) || 0;
+    } catch (e) {
+        Swal.fire('Error', e.message || 'No se pudo leer el pedido.', 'error');
+        return;
+    }
+    if (total <= 0) {
+        Swal.fire('Pedido', 'Ese pedido no tiene un total para cobrar.', 'warning');
+        return;
+    }
+    const { value: partes } = await Swal.fire({
         title: `Cobrar pedido #${docId}`,
-        html: '<div class="small text-muted">El efectivo de acá no entra al cajón del salón. El QR no se manda a Mercado Pago.</div>',
-        input: 'select',
-        inputOptions: {
-            'EFECTIVO': 'Efectivo en depósito',
-            'TARJETA DEBITO': 'Tarjeta débito',
-            'TARJETA CREDITO': 'Tarjeta crédito',
-            'TRANSFERENCIA': 'Transferencia',
-            'QR': 'QR manual',
-            'CTA_CTE': 'Fiado (cuenta corriente)'
-        },
-        inputPlaceholder: 'Medio de pago',
+        html: `
+            <div class="small text-muted mb-2">El efectivo de acá no entra al cajón del salón. El QR se cobra por Mercado Pago.</div>
+            <div class="mb-2 text-start"><label class="form-label fw-bold small">Efectivo en depósito</label><input id="depEfe" type="number" min="0" class="form-control" value="0"></div>
+            <div class="mb-2 text-start"><label class="form-label fw-bold small">Tarjeta débito</label><input id="depDeb" type="number" min="0" class="form-control" value="0"></div>
+            <div class="mb-2 text-start"><label class="form-label fw-bold small">Tarjeta crédito</label><input id="depCre" type="number" min="0" class="form-control" value="0"></div>
+            <div class="mb-2 text-start"><label class="form-label fw-bold small">Transferencia</label><input id="depTra" type="number" min="0" class="form-control" value="0"></div>
+            <div class="mb-2 text-start"><label class="form-label fw-bold small">QR Mercado Pago</label><input id="depQr" type="number" min="0" class="form-control" value="0"></div>
+            <div class="mb-2 text-start"><label class="form-label fw-bold small">Fiado</label><input id="depCta" type="number" min="0" class="form-control" value="0"></div>
+            <div class="mt-2">Total del pedido: <b>${plataMay(total)}</b></div>
+        `,
+        focusConfirm: false,
         showCancelButton: true,
         confirmButtonText: 'Cobrar',
         confirmButtonColor: '#198754',
-        inputValidator: (value) => {
-            if (!value) return 'Elegí el medio.';
+        preConfirm: () => {
+            const leer = (id) => Math.round((parseFloat(document.getElementById(id).value) || 0) * 100) / 100;
+            const pagos = [
+                { metodo: 'EFECTIVO', monto: leer('depEfe') },
+                { metodo: 'TARJETA DEBITO', monto: leer('depDeb') },
+                { metodo: 'TARJETA CREDITO', monto: leer('depCre') },
+                { metodo: 'TRANSFERENCIA', monto: leer('depTra') },
+                { metodo: 'QR', monto: leer('depQr') },
+                { metodo: 'CTA_CTE', monto: leer('depCta') }
+            ].filter((p) => p.monto > 0);
+            if (pagos.some((p) => p.monto < 0)) {
+                Swal.showValidationMessage('Ningún monto puede ser negativo.');
+                return false;
+            }
+            const suma = Math.round(pagos.reduce((a, p) => a + p.monto, 0) * 100) / 100;
+            if (Math.abs(suma - total) > 0.05) {
+                Swal.showValidationMessage(`La suma da ${plataMay(suma)} y el pedido es ${plataMay(total)}.`);
+                return false;
+            }
+            const qr = pagos.find((p) => p.metodo === 'QR');
+            if (qr && qr.monto < 15) {
+                Swal.showValidationMessage('Mercado Pago no acepta QR de menos de $15.');
+                return false;
+            }
+            return pagos;
         }
     });
-    if (!metodo) return;
-    Swal.fire({ title: 'Cobrando...', didOpen: () => Swal.showLoading() });
+    if (!partes) return;
+    const qr = partes.find((p) => p.metodo === 'QR');
+    let cobroId = null;
+    if (qr) {
+        try {
+            cobroId = await esperarQrDeposito(docId, qr.monto);
+        } catch (e) {
+            Swal.fire('No se pudo cargar el QR', e.message || 'Reintentá o sacá la pata QR.', 'error');
+            return;
+        }
+        if (!cobroId) return;
+    }
+    Swal.fire({ title: 'Cobrando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     try {
         const res = await fetch(`${obtenerBaseUrl()}/deposito/cobrar/${docId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ metodo_pago: metodo })
+            body: JSON.stringify({
+                pagos_mixtos: partes,
+                cobro_externo_id: cobroId
+            })
         });
         const data = await res.json();
         if (data.error) throw new Error(String(data.error).replace(/^CUENTA_BLOQUEADA:\s*/, ''));
+        sessionStorage.removeItem(`qrPedido_${docId}`);
         await Swal.fire('Cobrado', data.mensaje || 'Queda listo para entregar.', 'success');
         cargarMonitorPedidos();
         imprimirRemitoA5(docId);

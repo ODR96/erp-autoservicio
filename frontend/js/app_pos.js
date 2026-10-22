@@ -3545,8 +3545,9 @@ async function abrirCobroPedidoMayorista() {
                 'EFECTIVO': 'Efectivo Exacto',
                 'TARJETA': 'Tarjeta (Débito/Crédito)',
                 'TRANSFERENCIA': 'Transferencia Bancaria',
+                'QR': 'QR Mercado Pago',
                 'CTA_CTE': 'Fiado (Cuenta Corriente entera)',
-                'MIXTO': '🧮 Pago Mixto / Calcular Vuelto' // <-- NUEVA ESTRELLA
+                'MIXTO': 'Pago mixto'
             },
             inputPlaceholder: 'Seleccione Método de Pago',
             showCancelButton: true,
@@ -3576,6 +3577,10 @@ async function abrirCobroPedidoMayorista() {
                         <label class="form-label fw-bold small">Transferencia ($)</label>
                         <input id="mixTra" type="number" class="form-control" value="0" min="0" onfocus="this.select()">
                     </div>
+                    <div class="mb-3 text-start">
+                        <label class="form-label fw-bold small">QR Mercado Pago ($)</label>
+                        <input id="mixQr" type="number" class="form-control" value="0" min="0" onfocus="this.select()">
+                    </div>
                     <div class="text-start mb-2">
                         <label class="form-label fw-bold small text-danger">Fiado / Cta Cte ($)</label>
                         <input id="mixCta" type="number" class="form-control border-danger" value="0" min="0" onfocus="this.select()">
@@ -3594,8 +3599,13 @@ async function abrirCobroPedidoMayorista() {
                     let efe = parseFloat(document.getElementById('mixEfe').value) || 0;
                     const tar = parseFloat(document.getElementById('mixTar').value) || 0;
                     const tra = parseFloat(document.getElementById('mixTra').value) || 0;
+                    const qr = parseFloat(document.getElementById('mixQr').value) || 0;
                     const cta = parseFloat(document.getElementById('mixCta').value) || 0;
-                    const suma = efe + tar + tra + cta;
+                    const suma = efe + tar + tra + qr + cta;
+                    if (qr > 0.009 && qr < 15) {
+                        Swal.showValidationMessage('Mercado Pago no acepta QR de menos de $15.');
+                        return false;
+                    }
 
                     if (suma < data.total_venta) {
                         Swal.showValidationMessage(`Faltan $${(data.total_venta - suma).toFixed(2)} para cubrir el pedido.`);
@@ -3617,6 +3627,7 @@ async function abrirCobroPedidoMayorista() {
                             { metodo: 'EFECTIVO', monto: efe },
                             { metodo: 'TARJETA', monto: tar },
                             { metodo: 'TRANSFERENCIA', monto: tra },
+                            { metodo: 'QR', monto: qr },
                             { metodo: 'CTA_CTE', monto: cta }
                         ],
                         vuelto: vuelto
@@ -3632,6 +3643,19 @@ async function abrirCobroPedidoMayorista() {
             }
         }
 
+        let cobroPedidoId = null;
+        const pataQr = metodoPago === 'QR'
+            ? data.total_venta
+            : (pagosMixtosData.find(p => p.metodo === 'QR') || {}).monto || 0;
+        if (pataQr > 0.009) {
+            try {
+                cobroPedidoId = await esperarPagoQr(pataQr, { titulo: 'QR del pedido' });
+            } catch (e) {
+                return Swal.fire('No se pudo cargar el QR', e.message || 'Reintentá o sacá la pata QR.', 'error');
+            }
+            if (!cobroPedidoId) return;
+        }
+
         // PROCEDEMOS A GUARDAR EN LA BASE DE DATOS
         Swal.fire({ title: 'Guardando en caja...', didOpen: () => Swal.showLoading() });
 
@@ -3643,7 +3667,8 @@ async function abrirCobroPedidoMayorista() {
                 monto_total: data.total_venta,
                 metodo_pago: metodoPago,
                 pagos_mixtos: pagosMixtosData.length > 0 ? pagosMixtosData : null,
-                turno_id: turnoActualId
+                turno_id: turnoActualId,
+                cobro_externo_id: cobroPedidoId
             })
         });
 

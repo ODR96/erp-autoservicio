@@ -902,6 +902,7 @@ class CobroPedido(BaseModel):
     pagos_mixtos: Optional[List[PagoMixtoCaja]] = None
     observaciones: Optional[str] = ""
     turno_id: int
+    cobro_externo_id: Optional[int] = None
 
 @router.post("/cobrar_pedido", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def cobrar_pedido_mayorista(cobro: CobroPedido):
@@ -919,7 +920,9 @@ def cobrar_pedido_mayorista(cobro: CobroPedido):
             if not pedido:
                 raise Exception("El documento no existe.")
             pagos = [{"metodo": cobro.metodo_pago, "monto": pedido["total_venta"]}]
-        resultado = liquidar_pedido_mayorista(cursor, cobro.pedido_id, pagos, "CAJA", cobro.turno_id)
+        resultado = liquidar_pedido_mayorista(
+            cursor, cobro.pedido_id, pagos, "CAJA", cobro.turno_id, cobro.cobro_externo_id,
+        )
         conexion.commit()
         return resultado
     except Exception as e:
