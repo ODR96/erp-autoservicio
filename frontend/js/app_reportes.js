@@ -358,12 +358,18 @@ async function cargarSobres() {
     const sobres = (data && data.sobres) || [];
     const total = Number(data.total_faltante) || 0;
     const sinContar = Number(data.sin_contar) || 0;
+    const anteriores = Number(data.sin_contar_anteriores) || 0;
     if (resumen) {
-        const extra = sinContar ? ` · ${sinContar} de ese mes todavía sin contar` : '';
-        resumen.innerText = cajeros.length
-            ? `${cajeros.length} cajeros · faltante ${plata(total)}${extra}`
-            : `Sin faltantes en ese mes${extra}`;
-        resumen.className = `small fw-bold mb-2 ${total > 0 ? 'text-danger' : 'text-muted'}`;
+        const avisos = [];
+        if (sinContar === 1) avisos.push('1 de ese mes todavía sin contar');
+        else if (sinContar > 1) avisos.push(`${sinContar} de ese mes todavía sin contar`);
+        if (anteriores === 1) avisos.push('Queda 1 sobre de un mes anterior sin contar. Está en Tesorería, Por recibir');
+        else if (anteriores > 1) avisos.push(`Quedan ${anteriores} sobres de meses anteriores sin contar. Están en Tesorería, Por recibir`);
+        const base = cajeros.length
+            ? `${cajeros.length} cajeros · faltante ${plata(total)}`
+            : 'Sin faltantes en ese mes';
+        resumen.innerText = avisos.length ? `${base}. ${avisos.join('. ')}` : base;
+        resumen.className = `small fw-bold mb-2 ${(total > 0 || sinContar > 0 || anteriores > 0) ? 'text-danger' : 'text-muted'}`;
     }
     porCajero.innerHTML = cajeros.length
         ? cajeros.map((c) => `<tr>

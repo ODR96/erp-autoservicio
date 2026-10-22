@@ -860,7 +860,7 @@ def listar_faltantes_sobres(mes: str = None, sesion: dict = Depends(VerificarRol
     """
     _exigir_admin_activo(sesion)
     mes = _mes_pedido(mes)
-    vacio = {"mes": mes, "cajeros": [], "sobres": [], "sin_contar": 0, "total_faltante": 0.0}
+    vacio = {"mes": mes, "cajeros": [], "sobres": [], "sin_contar": 0, "sin_contar_anteriores": 0, "total_faltante": 0.0}
     conexion = obtener_conexion()
     conexion.row_factory = sqlite3.Row
     try:
@@ -877,14 +877,17 @@ def listar_faltantes_sobres(mes: str = None, sesion: dict = Depends(VerificarRol
               AND strftime('%Y-%m', p.fecha_hora) = ?
             ORDER BY cajero, p.fecha_hora, p.id
         ''', (mes,)).fetchall()
-        sin_contar = conexion.execute('''
-            SELECT COUNT(*)
-            FROM tesoreria_pendientes
-            WHERE estado = 'PENDIENTE'
-              AND cuenta = 'CAJA_FUERTE'
-              AND origen_tipo IN ('CIERRE_TURNO', 'SANGRIA')
-              AND strftime('%Y-%m', fecha_hora) = ?
-        ''', (mes,)).fetchone()[0] or 0
+        def _pendientes(corte, comparacion):
+            return conexion.execute(f'''
+                SELECT COUNT(*)
+                FROM tesoreria_pendientes
+                WHERE estado = 'PENDIENTE'
+                  AND cuenta = 'CAJA_FUERTE'
+                  AND origen_tipo IN ('CIERRE_TURNO', 'SANGRIA')
+                  AND strftime('%Y-%m', fecha_hora) {comparacion} ?
+            ''', (corte,)).fetchone()[0] or 0
+        sin_contar = _pendientes(mes, "=")
+        sin_contar_anteriores = _pendientes(mes, "<")
     except sqlite3.OperationalError as e:
         if "no such table" in str(e).lower():
             return vacio
@@ -925,6 +928,7 @@ def listar_faltantes_sobres(mes: str = None, sesion: dict = Depends(VerificarRol
         "cajeros": cajeros,
         "sobres": sobres,
         "sin_contar": sin_contar,
+        "sin_contar_anteriores": sin_contar_anteriores,
         "total_faltante": total,
     }
 
