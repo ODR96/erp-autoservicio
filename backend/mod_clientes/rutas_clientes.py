@@ -742,8 +742,120 @@ def ver_historial_cliente(cliente_id: int):
         return {"error": mensaje_error}
     finally:
         conexion.close()
-        
-        # --- 5. RECARGOS Y AJUSTES POR INFLACIÓN ---
+
+
+_TOPE_RENGLONES_DEUDA = 25
+
+
+def _fecha_corta(valor):
+    texto = str(valor or "").strip()
+    if len(texto) >= 10 and texto[4] == "-" and texto[7] == "-":
+        return f"{texto[8:10]}/{texto[5:7]}/{texto[0:4]}"
+    return texto[:10] or "-"
+
+
+def _etiqueta_deuda(detalle):
+    ticket = _ticket_detalle(detalle)
+    if ticket:
+        return f"Ticket #{ticket}"
+    texto = " ".join((detalle or "").split())
+    if not texto:
+        return "Deuda"
+    if len(texto) > 40:
+        return texto[:37] + "..."
+    return texto
+
+
+def _cargos_abiertos(cursor, cliente_id):
+    """Lo que sigue debiendo. Un pago ya imputado no vuelve a aparecer."""
+    cursor.execute(
+        """
+        SELECT fecha_hora, IFNULL(detalle, '') AS detalle, monto, IFNULL(monto_saldado, 0) AS monto_saldado
+        FROM movimientos_clientes
+        WHERE cliente_id = ? AND UPPER(tipo_movimiento) IN ('CARGO', 'RECARGO')
+        ORDER BY fecha_hora ASC, id ASC
+        """,
+        (cliente_id,),
+    )
+    abiertos = []
+    for fila in cursor.fetchall():
+        restante = round(float(fila["monto"] or 0) - float(fila["monto_saldado"] or 0), 2)
+        if restante <= 0.009:
+            continue
+        abiertos.append({
+            "fecha": fila["fecha_hora"],
+            "detalle": fila["detalle"],
+            "restante": restante,
+        })
+    return abiertos
+
+
+def _texto_deuda_whatsapp(negocio, cliente, saldo, abiertos):
+    lineas = [
+        negocio or "Venta",
+        "Estado de cuenta",
+        f"Cliente: {cliente or '-'}",
+        "",
+    ]
+    for item in abiertos[:_TOPE_RENGLONES_DEUDA]:
+        lineas.append(f"{_fecha_corta(item['fecha'])} {_etiqueta_deuda(item['detalle'])}  ${item['restante']:,.2f}")
+    ocultos = len(abiertos) - _TOPE_RENGLONES_DEUDA
+    if ocultos > 0:
+        lineas.append(f"y {ocultos} más")
+    lineas.append("")
+    lineas.append(f"Total: ${float(saldo):,.2f}")
+    return "\n".join(lineas)
+
+
+def _nombre_negocio_clientes():
+    conexion = obtener_conexion()
+    try:
+        fila = conexion.execute("SELECT nombre_negocio FROM configuracion_local WHERE id = 1").fetchone()
+        nombre = (fila[0] if fila else "") or ""
+        return " ".join(str(nombre).split()) or "Venta"
+    except Exception:
+        return "Venta"
+    finally:
+        conexion.close()
+
+
+@router.post("/{cliente_id}/deuda/whatsapp", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def mandar_deuda_whatsapp(cliente_id: int):
+    """Manda lo que sigue abierto y el saldo. No reescribe la cuenta ni repite los pagos."""
+    if cliente_id <= 0:
+        return {"error": "Ese cliente no existe."}
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    try:
+        cliente = conexion.execute(
+            "SELECT id, nombre_completo, telefono_whatsapp, IFNULL(saldo_actual_deudor, 0) AS saldo FROM clientes WHERE id = ?",
+            (cliente_id,),
+        ).fetchone()
+        if not cliente:
+            return {"error": "Ese cliente no existe."}
+        saldo = round(float(cliente["saldo"] or 0), 2)
+        if saldo <= 0.009:
+            return {"error": "No tiene deuda para mandar."}
+        telefono = (cliente["telefono_whatsapp"] or "").strip()
+        if not telefono:
+            return {"error": "Ese cliente no tiene WhatsApp cargado."}
+        abiertos = _cargos_abiertos(conexion.cursor(), cliente_id)
+        texto = _texto_deuda_whatsapp(
+            _nombre_negocio_clientes(),
+            cliente["nombre_completo"],
+            saldo,
+            abiertos,
+        )
+    finally:
+        conexion.close()
+    from backend.whatsapp_puente import avisar_ticket_cliente
+    envio = avisar_ticket_cliente(telefono, texto)
+    if not envio.get("ok"):
+        return {"error": envio.get("detalle") or "El puente de WhatsApp no tomó el mensaje."}
+    return {"ok": True, "mensaje": "Pedido al WhatsApp del cliente. Si no llega en un minuto, el bot no está arriba."}
+
+
+# --- 5. RECARGOS Y AJUSTES POR INFLACIÓN ---
 class AjusteDeuda(BaseModel):
     monto: float
     motivo: str

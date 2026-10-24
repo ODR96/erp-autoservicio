@@ -564,6 +564,31 @@ async function verDetalleTicketAdmin(ventaId) {
     }
 }
 
+async function mandarDeudaWhatsapp() {
+    if (!clienteSeleccionadoId) {
+        Swal.fire('Cliente', 'Elegí un cliente primero.', 'warning');
+        return;
+    }
+    const confirma = await Swal.fire({
+        title: 'Mandar la deuda',
+        text: 'Se manda lo que sigue abierto y el saldo. Los pagos ya descontados no se repiten.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Mandar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#25D366'
+    });
+    if (!confirma.isConfirmed) return;
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/clientes/${clienteSeleccionadoId}/deuda/whatsapp`, { method: 'POST' });
+        const data = await res.json();
+        if (data.error || data.detail) throw new Error(data.error || data.detail);
+        Swal.fire('WhatsApp', data.mensaje || 'Pedido al WhatsApp del cliente.', 'success');
+    } catch (e) {
+        Swal.fire('WhatsApp', e.message || 'No se pudo pedir el envío.', 'error');
+    }
+}
+
 async function mandarTicketWhatsappAdmin(ventaId) {
     try {
         const res = await fetch(`${obtenerBaseUrl()}/ventas/ticket/${ventaId}/whatsapp`, { method: 'POST' });
