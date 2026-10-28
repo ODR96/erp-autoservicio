@@ -230,6 +230,7 @@ def obtener_alertas_dashboard():
             FROM productos p
             WHERE stock_actual <= p.stock_minimo_alerta 
             AND p.activo = 1
+            AND IFNULL(p.controla_stock, 1) = 1
             AND p.id NOT IN (SELECT producto_padre_id FROM productos_combos)
         ''')
         alertas_stock = [dict(row) for row in cursor.fetchall()]
@@ -242,11 +243,27 @@ def obtener_alertas_dashboard():
             WHERE l.cantidad_disponible > 0 
             AND l.estado_lote = 'Activo' 
             AND l.fecha_vencimiento <= date(?, '+' || IFNULL(p.dias_alerta_vencimiento, 30) || ' days')
+            AND IFNULL(p.controla_stock, 1) = 1
             AND p.id NOT IN (SELECT producto_padre_id FROM productos_combos)
             ORDER BY l.fecha_vencimiento ASC
         ''', (_hoy_ar_iso(),))
         alertas_vencimiento = [dict(row) for row in cursor.fetchall()]
-        return {"alertas_stock_critico": alertas_stock, "alertas_vencimientos": alertas_vencimiento}
+        cursor.execute('''
+            SELECT COUNT(DISTINCT p.id)
+            FROM lotes_stock l
+            JOIN productos p ON p.id = l.producto_id
+            WHERE l.numero_lote_proveedor = 'VENTA_SIN_STOCK'
+              AND l.estado_lote = 'Activo'
+              AND l.cantidad_disponible < 0
+              AND IFNULL(p.controla_stock, 1) = 1
+              AND p.activo = 1
+        ''')
+        pendientes = cursor.fetchone()[0] or 0
+        return {
+            "alertas_stock_critico": alertas_stock,
+            "alertas_vencimientos": alertas_vencimiento,
+            "pendientes_regularizar": pendientes,
+        }
     finally:
         conexion.close()
 

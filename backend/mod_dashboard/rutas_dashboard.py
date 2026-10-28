@@ -19,7 +19,7 @@ def obtener_datos_dashboard():
     hoy = dict(cursor.fetchone())
     
     # 2. Stock Crítico
-    cursor.execute("SELECT p.nombre, p.stock_minimo_alerta, IFNULL(SUM(l.cantidad_disponible), 0) as stock_real FROM productos p LEFT JOIN lotes_stock l ON p.id = l.producto_id WHERE p.activo = 1 GROUP BY p.id HAVING stock_real <= p.stock_minimo_alerta LIMIT 5")
+    cursor.execute("SELECT p.nombre, p.stock_minimo_alerta, IFNULL(SUM(l.cantidad_disponible), 0) as stock_real FROM productos p LEFT JOIN lotes_stock l ON p.id = l.producto_id WHERE p.activo = 1 AND IFNULL(p.controla_stock, 1) = 1 GROUP BY p.id HAVING stock_real <= p.stock_minimo_alerta LIMIT 5")
     stock_critico = [dict(row) for row in cursor.fetchall()]
     
     # 3. Mapa de Calor

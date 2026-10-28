@@ -35,16 +35,61 @@ function cambiarPestanaInventario(id) {
     pestanaInventario = id;
     document.getElementById('tab-negativos').classList.toggle('d-none', id !== 'negativos');
     document.getElementById('tab-conteo').classList.toggle('d-none', id !== 'conteo');
+    document.getElementById('tab-sinstock').classList.toggle('d-none', id !== 'sinstock');
     document.getElementById('btn-tab-negativos').classList.toggle('active', id === 'negativos');
     document.getElementById('btn-tab-conteo').classList.toggle('active', id === 'conteo');
+    document.getElementById('btn-tab-sinstock').classList.toggle('active', id === 'sinstock');
+    if (id === 'sinstock') cargarSinStock();
     if (id === 'conteo') {
         cargarCicloConteo();
         cargarHistorialConteo();
         const inp = document.getElementById('inputBuscarConteo');
         if (inp) inp.focus();
-    } else {
+    } else if (id === 'negativos') {
         cargarNegativos();
     }
+}
+
+function pintarBadgeSinStock(n) {
+    const badge = document.getElementById('badgeSinStock');
+    if (!badge) return;
+    const cant = Number(n) || 0;
+    badge.textContent = String(cant);
+    badge.classList.toggle('d-none', cant <= 0);
+}
+
+async function cargarSinStock() {
+    const tbody = document.getElementById('tablaSinStock');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Cargando...</td></tr>';
+    const res = await apiFetch(`${obtenerBaseUrl()}/lotes/inventario/sin_stock`);
+    const data = await leerJson(res);
+    const lista = data.productos || [];
+    pintarBadgeSinStock(data.cantidad);
+    if (!lista.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No hay ventas sin stock pendientes.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = lista.map((p) => `<tr>
+        <td class="small">${htmlTxt(p.codigo_barras || '')}</td>
+        <td class="fw-bold">${htmlTxt(p.nombre)}</td>
+        <td class="text-end"><span class="badge bg-warning text-dark">${fmtCant(p.unidades)} ${htmlTxt(unidadDe(p))}</span></td>
+        <td class="text-end">${Number(p.costo_sin_iva || 0).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
+        <td class="small">${htmlTxt(String(p.desde || '').slice(0, 10))}</td>
+        <td class="text-end text-nowrap">
+            <a class="btn btn-sm btn-outline-primary fw-bold" href="admin_proveedores.html?producto=${Number(p.id)}">Cargar factura</a>
+            <button type="button" class="btn btn-sm btn-outline-secondary fw-bold" onclick="contarDesdeCola(${Number(p.id)})">Ajustar físico</button>
+        </td>
+    </tr>`).join('');
+}
+
+async function contarDesdeCola(id) {
+    cambiarPestanaInventario('conteo');
+    const res = await apiFetch(`${obtenerBaseUrl()}/lotes/inventario/buscar?q=${encodeURIComponent(String(id))}`);
+    const data = await leerJson(res);
+    const p = (data.productos || []).find((x) => Number(x.id) === Number(id)) || (data.productos || [])[0];
+    if (!p) return;
+    mostrarFichaConteo(p);
 }
 
 async function leerJson(res) {
@@ -404,6 +449,7 @@ async function enviarAjuste(body, recargarNegativos) {
             cargarHistorialConteo();
             cargarCicloConteo();
         }
+        cargarSinStock();
     } catch (e) {
         Swal.fire('Error', e.message, 'error');
     }
@@ -446,6 +492,7 @@ async function cargarHistorialConteo() {
 
 document.addEventListener('DOMContentLoaded', () => {
     cargarNegativos();
+    cargarSinStock();
     const inp = document.getElementById('inputBuscarConteo');
     if (inp) {
         inp.addEventListener('keydown', (e) => {

@@ -169,6 +169,11 @@ def dar_baja_manual(datos: BajaManual, payload: dict = Depends(VerificarRol(["AD
         if not resultado:
             conexion.close()
             return {"error": "Ese lote no existe."}
+        cursor.execute("SELECT IFNULL(controla_stock, 1) FROM productos WHERE id = ?", (resultado[1],))
+        fila_ctrl = cursor.fetchone()
+        if fila_ctrl and int(fila_ctrl[0] or 0) == 0:
+            conexion.close()
+            return {"error": "Ese producto no controla stock. La merma se carga por importe o por cantidad, sin lote."}
             
         stock_actual = resultado[0]
         producto_id = resultado[1]
@@ -236,8 +241,66 @@ def dar_baja_manual(datos: BajaManual, payload: dict = Depends(VerificarRol(["AD
             return {"error": "Ocurrió un error interno al procesar la solicitud."}
             
         return {"error": mensaje_error}
-    
-    
+
+
+class MermaSinLote(BaseModel):
+    producto_id: int
+    cantidad: float = 0
+    importe: float = 0
+    motivo: str
+    observaciones: Optional[str] = ""
+
+
+@router.post("/merma_sin_lote")
+def merma_sin_lote(datos: MermaSinLote, payload: dict = Depends(VerificarRol(["ADMIN", "ENCARGADO"]))):
+    """Pérdida de un producto que no lleva lotes. Entra en las mermas del mes."""
+    usuario_id = _usuario_id(payload)
+    cantidad = round(float(datos.cantidad or 0), 4)
+    importe = round(float(datos.importe or 0), 2)
+    motivo = " ".join((datos.motivo or "").split())
+    if len(motivo) < 3:
+        return {"error": "Escribí el motivo."}
+    if cantidad > 0.0001 and importe > 0.009:
+        return {"error": "Cargá la cantidad o el importe, no los dos."}
+    if cantidad <= 0.0001 and importe <= 0.009:
+        return {"error": "Cargá la cantidad o el importe."}
+    if cantidad < 0 or importe < 0:
+        return {"error": "La merma no puede ser negativa."}
+
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        prod = cursor.execute(
+            "SELECT id, IFNULL(controla_stock, 1) AS controla_stock, IFNULL(costo_sin_iva, 0) AS costo_sin_iva FROM productos WHERE id = ? AND activo = 1",
+            (datos.producto_id,),
+        ).fetchone()
+        if not prod:
+            return {"error": "Ese producto no existe o está inactivo."}
+        if int(prod["controla_stock"] or 0) != 0:
+            return {"error": "Ese producto controla stock. La merma sale de un lote."}
+        if importe > 0.009:
+            costo = importe
+            cant_guardar = 0
+        else:
+            costo = round(cantidad * float(prod["costo_sin_iva"] or 0), 2)
+            cant_guardar = cantidad
+        fecha = _ahora_ar()
+        cursor.execute(
+            """INSERT INTO registro_mermas
+               (fecha_hora, producto_id, lote_id, cantidad, motivo, costo_perdido, usuario_id, observaciones)
+               VALUES (?, ?, NULL, ?, ?, ?, ?, ?)""",
+            (fecha, datos.producto_id, cant_guardar, motivo, costo, usuario_id, (datos.observaciones or None)),
+        )
+        conexion.commit()
+        return {"mensaje": "Merma registrada.", "costo_perdido": costo}
+    except Exception as e:
+        conexion.rollback()
+        return {"error": str(e)}
+    finally:
+        conexion.close()
+
+
 class DescuentoStock(BaseModel):
     producto_id: int
     cantidad_vendida: float
@@ -504,12 +567,40 @@ def listar_negativos_inventario():
                       SUM(CASE WHEN l.cantidad_disponible < 0 THEN l.cantidad_disponible ELSE 0 END) as deuda
                FROM productos p
                JOIN lotes_stock l ON l.producto_id = p.id
-               WHERE p.activo = 1
+               WHERE p.activo = 1 AND IFNULL(p.controla_stock, 1) = 1
                GROUP BY p.id
                HAVING stock_total < 0
                ORDER BY stock_total ASC, p.nombre ASC"""
         )
         return {"productos": [dict(r) for r in cursor.fetchall()]}
+    finally:
+        conexion.close()
+
+
+@router.get("/inventario/sin_stock", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def listar_venta_sin_stock():
+    """Lotes VENTA_SIN_STOCK que todavía están en negativo. No incluye quien no controla stock."""
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    try:
+        filas = conexion.execute(
+            """
+            SELECT p.id, p.codigo_barras, p.nombre, p.unidad_medida,
+                   IFNULL(p.costo_sin_iva, 0) AS costo_sin_iva,
+                   ROUND(SUM(-l.cantidad_disponible), 4) AS unidades,
+                   MIN(l.fecha_ingreso) AS desde
+            FROM lotes_stock l
+            JOIN productos p ON p.id = l.producto_id
+            WHERE l.numero_lote_proveedor = 'VENTA_SIN_STOCK'
+              AND l.estado_lote = 'Activo'
+              AND l.cantidad_disponible < 0
+              AND IFNULL(p.controla_stock, 1) = 1
+              AND p.activo = 1
+            GROUP BY p.id
+            ORDER BY desde ASC, p.nombre ASC
+            """
+        ).fetchall()
+        return {"cantidad": len(filas), "productos": [dict(r) for r in filas]}
     finally:
         conexion.close()
 
@@ -619,7 +710,7 @@ def ciclo_conteo(categoria_id: Optional[int] = None, limite: int = Query(40, ge=
                        WHERE c.producto_id = p.id AND c.tipo = 'CONTEO') AS ultimo_conteo
                FROM productos p
                LEFT JOIN categorias_productos cat ON cat.id = p.categoria_id
-               WHERE p.activo = 1 {filtro}
+               WHERE p.activo = 1 AND IFNULL(p.controla_stock, 1) = 1 {filtro}
                ORDER BY ultimo_conteo IS NULL DESC, ultimo_conteo ASC, p.nombre ASC
                LIMIT ?""",
             tuple(params + [limite]),
@@ -782,10 +873,15 @@ def ajustar_inventario(datos: AjusteInventario, payload: dict = Depends(Verifica
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     try:
-        cursor.execute("SELECT id, nombre FROM productos WHERE id = ? AND activo = 1", (datos.producto_id,))
+        cursor.execute(
+            "SELECT id, nombre, IFNULL(controla_stock, 1) AS controla_stock FROM productos WHERE id = ? AND activo = 1",
+            (datos.producto_id,),
+        )
         prod = cursor.fetchone()
         if not prod:
             return {"error": "Ese producto no existe o está inactivo."}
+        if int(prod["controla_stock"] or 0) == 0:
+            return {"error": "Ese producto no controla stock. No se empareja por conteo."}
 
         stock_antes = _stock_neto(cursor, datos.producto_id)
         usuario_id = _usuario_id(payload)

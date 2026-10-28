@@ -13,6 +13,25 @@ router = APIRouter()
 ZONA_AR = timezone(timedelta(hours=-3))
 
 
+def asegurar_columna_controla_stock(cursor=None):
+    """1 = lotes FIFO. 0 = se vende al costo de la ficha, sin stock."""
+    propia = cursor is None
+    conexion = None
+    if propia:
+        conexion = obtener_conexion()
+        cursor = conexion.cursor()
+    try:
+        cursor.execute("ALTER TABLE productos ADD COLUMN controla_stock INTEGER DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
+    if propia and conexion:
+        conexion.commit()
+        conexion.close()
+
+
+asegurar_columna_controla_stock()
+
+
 def compensar_deuda_stock(cursor, producto_id, fecha_hoy_ar=None):
     """Come lotes positivos contra VENTA_SIN_STOCK. Queda en la transacción del caller."""
     if not fecha_hoy_ar:
@@ -78,6 +97,7 @@ class ProductoNuevo(BaseModel):
     fecha_vencimiento: str = "2099-12-31"
     costo_real_ingreso: float = 0.0
     unidades_por_bulto: int = 1
+    controla_stock: bool = True
     
 class ProductoActualizar(BaseModel):
     codigo_barras: str
@@ -93,6 +113,7 @@ class ProductoActualizar(BaseModel):
     componentes_combo: list = []
     reglas_mayoristas: list = []
     unidades_por_bulto: int = 1
+    controla_stock: bool = True
     
 class CategoriaPOS(BaseModel):
     nombre: str
@@ -112,9 +133,9 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
                 return {"error": "El código ya existe."}
 
         cursor.execute('''
-            INSERT INTO productos (codigo_barras, nombre, categoria_id, proveedor_habitual_id, costo_sin_iva, porcentaje_iva, precio_venta_final, stock_minimo_alerta, dias_alerta_vencimiento, unidad_medida, activo, unidades_por_bulto)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-        ''', (producto.codigo_barras, producto.nombre, producto.categoria_id, producto.proveedor_habitual_id, producto.costo_sin_iva, producto.porcentaje_iva, producto.precio_venta_final, producto.stock_minimo_alerta, producto.dias_alerta_vencimiento, producto.unidad_medida, producto.unidades_por_bulto))
+            INSERT INTO productos (codigo_barras, nombre, categoria_id, proveedor_habitual_id, costo_sin_iva, porcentaje_iva, precio_venta_final, stock_minimo_alerta, dias_alerta_vencimiento, unidad_medida, activo, unidades_por_bulto, controla_stock)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        ''', (producto.codigo_barras, producto.nombre, producto.categoria_id, producto.proveedor_habitual_id, producto.costo_sin_iva, producto.porcentaje_iva, producto.precio_venta_final, producto.stock_minimo_alerta, producto.dias_alerta_vencimiento, producto.unidad_medida, producto.unidades_por_bulto, 1 if producto.controla_stock else 0))
         
         nuevo_id = cursor.lastrowid 
         if producto.cantidad_inicial > 0:
@@ -294,6 +315,7 @@ def listar_todos_los_productos(
 
         if alerta_stock:
             query_base += """
+                AND IFNULL(p.controla_stock, 1) = 1
                 AND (SELECT COUNT(*) FROM productos_combos WHERE producto_padre_id = p.id) = 0
                 AND IFNULL((SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo'), 0) <= IFNULL(p.stock_minimo_alerta, 0)
             """
@@ -321,7 +343,7 @@ def listar_todos_los_productos(
         query_final = f'''
             SELECT 
                 p.id, p.codigo_barras, p.nombre, p.categoria_id, p.unidad_medida, p.proveedor_habitual_id,
-                p.costo_sin_iva, p.porcentaje_iva, p.precio_venta_final, p.dias_alerta_vencimiento, p.stock_minimo_alerta, p.unidades_por_bulto,
+                p.costo_sin_iva, p.porcentaje_iva, p.precio_venta_final, p.dias_alerta_vencimiento, p.stock_minimo_alerta, p.unidades_por_bulto, IFNULL(p.controla_stock, 1) as controla_stock,
                 (SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo') as stock_total,
                 (SELECT COUNT(id) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible != 0) as cantidad_lotes,            
                 (SELECT precio_oferta_unitario FROM promociones_volumen WHERE producto_id = p.id ORDER BY cantidad_minima ASC LIMIT 1) as precio_promo,
@@ -365,10 +387,10 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
         cursor.execute('''
             UPDATE productos 
             SET codigo_barras = ?, nombre = ?, categoria_id = ?, proveedor_habitual_id = ?, 
-                costo_sin_iva = ?, porcentaje_iva = ?, precio_venta_final = ?, stock_minimo_alerta = ?, dias_alerta_vencimiento = ?, unidad_medida = ?, unidades_por_bulto = ?
+                costo_sin_iva = ?, porcentaje_iva = ?, precio_venta_final = ?, stock_minimo_alerta = ?, dias_alerta_vencimiento = ?, unidad_medida = ?, unidades_por_bulto = ?, controla_stock = ?
             WHERE id = ?
         ''', (datos.codigo_barras, datos.nombre, datos.categoria_id, datos.proveedor_habitual_id, 
-              datos.costo_sin_iva, datos.porcentaje_iva, datos.precio_venta_final, datos.stock_minimo_alerta, datos.dias_alerta_vencimiento, datos.unidad_medida, datos.unidades_por_bulto, producto_id))
+              datos.costo_sin_iva, datos.porcentaje_iva, datos.precio_venta_final, datos.stock_minimo_alerta, datos.dias_alerta_vencimiento, datos.unidad_medida, datos.unidades_por_bulto, 1 if datos.controla_stock else 0, producto_id))
         
         cursor.execute("DELETE FROM productos_combos WHERE producto_padre_id = ?", (producto_id,))
         for comp in datos.componentes_combo:

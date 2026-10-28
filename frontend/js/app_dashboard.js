@@ -222,6 +222,12 @@ async function cargarAlertasYVencimientos() {
         listaStock.innerHTML = '';
         if (!data.error && data.alertas_stock_critico) {
             document.getElementById('dash-total-critico').innerText = data.alertas_stock_critico.length;
+            const pend = document.getElementById('dash-pendientes-stock');
+            const nPend = Number(data.pendientes_regularizar) || 0;
+            if (pend) {
+                pend.textContent = nPend ? `${nPend} sin stock por regularizar` : '';
+                pend.classList.toggle('d-none', nPend <= 0);
+            }
             if (data.alertas_stock_critico.length === 0) {
                 listaStock.innerHTML = '<tr><td colspan="2" class="text-center text-success py-4 fw-bold"><i class="bi bi-check-circle fs-4 d-block mb-2"></i> Stock impecable</td></tr>';
             } else {

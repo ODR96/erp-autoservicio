@@ -219,9 +219,16 @@ def costo_y_descuento_linea(
     for hijo_id, cant in piezas:
         if cant <= 0:
             continue
-        cursor.execute("SELECT IFNULL(costo_sin_iva, 0) FROM productos WHERE id = ?", (hijo_id,))
+        cursor.execute(
+            "SELECT IFNULL(costo_sin_iva, 0), IFNULL(controla_stock, 1) FROM productos WHERE id = ?",
+            (hijo_id,),
+        )
         fila_hijo = cursor.fetchone()
         costo_hijo = fila_hijo[0] if fila_hijo else costo_fallback
+        controla = int(fila_hijo[1] or 0) if fila_hijo else 1
+        if controla == 0:
+            costo_total += float(cant) * float(costo_hijo or 0)
+            continue
         costo_total += descontar_stock_fifo(
             cursor, hijo_id, cant, venta_id, cajero_nombre, fecha_iso, costo_hijo, usuario_id=usuario_id, **fifo
         )

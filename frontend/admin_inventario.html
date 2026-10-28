@@ -24,7 +24,9 @@
             <div class="content-area">
                 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
                     <div>
-                        <h3 class="fw-bold mb-1"><i class="bi bi-clipboard-check text-primary"></i> Inventario</h3>
+                        <h3 class="fw-bold mb-1"><i class="bi bi-clipboard-check text-primary"></i> Inventario
+                            <span class="badge bg-warning text-dark d-none" id="badgeSinStock">0</span>
+                        </h3>
                         <p class="text-muted small mb-0">Empareja el libro con el piso. No toca precios ni el catálogo. Factura vieja después de ajustar = duplicás stock.</p>
                     </div>
                 </div>
@@ -34,6 +36,11 @@
                         <li class="nav-item">
                             <button type="button" class="nav-link active fw-bold" id="btn-tab-negativos" onclick="cambiarPestanaInventario('negativos')">
                                 <i class="bi bi-dash-circle"></i> Negativos
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button type="button" class="nav-link fw-bold" id="btn-tab-sinstock" onclick="cambiarPestanaInventario('sinstock')">
+                                <i class="bi bi-inbox"></i> Por regularizar
                             </button>
                         </li>
                         <li class="nav-item">
@@ -63,6 +70,25 @@
                                     </tr>
                                 </thead>
                                 <tbody id="tablaNegativosBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="tab-sinstock" class="d-none">
+                        <p class="small text-muted">Ventas hechas sin stock. La factura que entra las compensa. El costo del ticket no se toca.</p>
+                        <div class="table-responsive border rounded">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Código</th>
+                                        <th>Producto</th>
+                                        <th class="text-end">Sin stock</th>
+                                        <th class="text-end">Costo ficha</th>
+                                        <th>Desde</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tablaSinStock"></tbody>
                             </table>
                         </div>
                     </div>
@@ -123,6 +149,6 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="js/layout.js?v=1.0.51"></script>
-    <script src="js/app_inventario.js?v=1.0.4"></script>
+    <script src="js/app_inventario.js?v=1.0.5"></script>
 </body>
 </html>

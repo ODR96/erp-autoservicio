@@ -3014,4 +3014,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     asegurarFechaFactura();
     await cargarProveedores();
     await iniciarBorradoresFactura();
+    const precarga = new URLSearchParams(window.location.search).get('producto');
+    if (!precarga) return;
+    try {
+        document.querySelectorAll('#proveedoresTabs .nav-link').forEach((el) => el.classList.remove('active'));
+        document.querySelectorAll('.tab-pane').forEach((el) => el.classList.remove('active'));
+        document.querySelector('#proveedoresTabs button[onclick*="ingreso"]')?.classList.add('active');
+        document.getElementById('tab-prov-ingreso')?.classList.add('active');
+        if (typeof cambiarModoIngreso === 'function') cambiarModoIngreso('stock');
+        const res = await fetch(`${obtenerBaseUrl()}/productos/ver/${encodeURIComponent(precarga)}`);
+        const prod = await res.json();
+        if (prod && prod.id && !prod.error) agregarProductoAFactura(prod);
+    } catch (e) {
+        console.error(e);
+    }
 });

@@ -368,6 +368,16 @@ function cambiarPestana(id, evento = null) {
     if (id === 'combos') cargarListadoCombos(); 
 }
 
+function aplicarControlaStock() {
+    const on = document.getElementById('chkControlaStock')?.checked !== false;
+    const boton = document.querySelector(`#abmTabs button[onclick="cambiarPestanaAbm('lotes')"]`);
+    const item = boton ? boton.closest('li') : null;
+    if (item) item.classList.toggle('d-none', !on);
+    if (!on && document.getElementById('tab-abm-lotes')?.style.display === 'block') {
+        cambiarPestanaAbm('precios');
+    }
+}
+
 function cambiarPestanaAbm(id) {
     document.querySelectorAll('#abmTabs .nav-link').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('#abmTabsContent .tab-pane-abm').forEach(el => el.style.display = 'none');
@@ -418,7 +428,10 @@ document.querySelector('[data-bs-target="#modalNuevoProducto"]').addEventListene
         if (campoNuevoIva.selectedIndex === -1) {
             campoNuevoIva.value = '21'; 
         }
-    document.getElementById('inputAlertaStock').value = '5'; 
+    document.getElementById('inputAlertaStock').value = '5';
+    const chkStock = document.getElementById('chkControlaStock');
+    if (chkStock) chkStock.checked = true;
+    aplicarControlaStock(); 
     document.getElementById('inputDiasAlerta').value = '10';
     
     reglasMayoristas = []; dibujarTablaReglas();
@@ -791,6 +804,9 @@ async function abrirEditarProducto(id, pestana = 'precios') {
             document.getElementById('inputMargen').value = 0;
         }
         document.getElementById('inputAlertaStock').value = p.stock_minimo_alerta || 5;
+        const chkStock = document.getElementById('chkControlaStock');
+        if (chkStock) chkStock.checked = Number(p.controla_stock ?? 1) !== 0;
+        aplicarControlaStock();
         document.getElementById('inputDiasAlerta').value = p.dias_alerta_vencimiento || 10;
         
         const tieneVenc = p.dias_alerta_vencimiento > 0;
@@ -909,7 +925,8 @@ async function guardarProductoCompleto() {
         costo_sin_iva: parseFloat(document.getElementById('inputCosto').value) || 0, 
         porcentaje_iva: parseFloat(document.getElementById('inputIva').value) || 0,
         precio_venta_final: parseFloat(document.getElementById('inputPrecioVenta').value) || 0, 
-        stock_minimo_alerta: alertaStock, 
+        stock_minimo_alerta: alertaStock,
+        controla_stock: document.getElementById('chkControlaStock') ? document.getElementById('chkControlaStock').checked : true, 
         dias_alerta_vencimiento: diasAlerta, 
         unidad_medida: document.getElementById('selectUnidadMedida').value, 
         unidades_por_bulto: parseInt(document.getElementById('inputUnidadesBulto').value) || 1,
@@ -1008,13 +1025,22 @@ async function restaurarProducto(id, n) { if ((await Swal.fire({ title: '¿Resta
 // SISTEMA DE MERMAS (RECUPERADO)
 // ==========================================
 let lotesMermaActuales = [];
+let mermaSinLote = null;
 
 function actualizarCostoMermaEstimado() {
     const caja = document.getElementById('mermaCostoEstimado');
     if (!caja) return;
-    const loteId = parseInt(document.getElementById('mermaSelectLote').value);
     const cantidad = parseFloat(document.getElementById('mermaCantidad').value) || 0;
     const motivo = document.getElementById('mermaMotivo').value || '';
+    if (mermaSinLote) {
+        const importe = parseFloat(document.getElementById('mermaImporte').value) || 0;
+        const perdido = importe > 0 ? importe : Math.max(0, cantidad) * (Number(mermaSinLote.costo_sin_iva) || 0);
+        caja.textContent = `Pérdida estimada: $ ${perdido.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        caja.classList.remove('text-muted');
+        caja.classList.add('text-danger');
+        return;
+    }
+    const loteId = parseInt(document.getElementById('mermaSelectLote').value);
     const lote = lotesMermaActuales.find(l => Number(l.lote_id) === loteId);
     const costoUnit = lote ? (Number(lote.costo) || 0) : 0;
 
@@ -1037,8 +1063,20 @@ async function abrirModalMerma(id, nombre) {
         const prod = await res.json();
 
         document.getElementById('mermaNombreProducto').innerText = nombre;
+        const sinLote = Number(prod.controla_stock ?? 1) === 0;
+        mermaSinLote = sinLote ? { id, costo_sin_iva: Number(prod.costo_sin_iva) || 0 } : null;
+        document.getElementById('mermaBloqueLote')?.classList.toggle('d-none', sinLote);
+        document.getElementById('mermaBloqueImporte')?.classList.toggle('d-none', !sinLote);
         const selectLote = document.getElementById('mermaSelectLote');
         selectLote.innerHTML = '';
+        if (sinLote) {
+            document.getElementById('mermaCantidad').value = '';
+            document.getElementById('mermaImporte').value = '';
+            document.getElementById('mermaObservaciones').value = '';
+            actualizarCostoMermaEstimado();
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('modalMerma')).show();
+            return;
+        }
 
         if (!prod.lotes || prod.lotes.length === 0) {
             return Swal.fire('Sin stock', 'Este producto no tiene lotes con stock para descontar.', 'info');
@@ -1061,8 +1099,30 @@ async function abrirModalMerma(id, nombre) {
 }
 
 async function confirmarMerma() {
-    const loteId = parseInt(document.getElementById('mermaSelectLote').value);
     const cantidad = parseFloat(document.getElementById('mermaCantidad').value);
+    if (mermaSinLote) {
+        const importe = parseFloat(document.getElementById('mermaImporte').value) || 0;
+        const motivo = document.getElementById('mermaMotivo').value;
+        const obs = document.getElementById('mermaObservaciones').value;
+        if (!(importe > 0) && !(cantidad > 0)) return Swal.fire('Merma', 'Cargá la cantidad o el importe.', 'warning');
+        if (importe > 0 && cantidad > 0) return Swal.fire('Merma', 'Cargá la cantidad o el importe, no los dos.', 'warning');
+        const res = await apiFetch(`${obtenerBaseUrl()}/lotes/merma_sin_lote`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                producto_id: mermaSinLote.id,
+                cantidad: importe > 0 ? 0 : cantidad,
+                importe: importe > 0 ? importe : 0,
+                motivo,
+                observaciones: obs
+            })
+        });
+        const data = await res.json();
+        if (data.error) return Swal.fire('Merma', data.error, 'error');
+        bootstrap.Modal.getInstance(document.getElementById('modalMerma'))?.hide();
+        return Swal.fire('Merma', data.mensaje || 'Quedó en las mermas del mes.', 'success');
+    }
+    const loteId = parseInt(document.getElementById('mermaSelectLote').value);
     const motivo = document.getElementById('mermaMotivo').value;
     const obs = document.getElementById('mermaObservaciones').value;
 
