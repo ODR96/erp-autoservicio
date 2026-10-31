@@ -31,7 +31,47 @@ let productoConteo = null;
 let negativosPorId = {};
 let busquedaPorId = {};
 
-function cambiarPestanaInventario(id) {
+function esPantallaChica() {
+    return window.matchMedia('(max-width: 767.98px)').matches;
+}
+
+function enfocarBuscador() {
+    const barra = document.getElementById('barraBuscarConteo');
+    const inp = document.getElementById('inputBuscarConteo');
+    if (barra) barra.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // En el celular el teclado no se abre solo: tapa lo que acabás de contar.
+    if (inp && !esPantallaChica()) inp.focus({ preventScroll: true });
+}
+
+function irAFicha() {
+    const ficha = document.getElementById('fichaConteo');
+    if (!ficha || ficha.classList.contains('d-none')) return;
+    requestAnimationFrame(() => {
+        ficha.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const inp = document.getElementById('inputCantidadConteo');
+        if (inp) inp.focus({ preventScroll: true });
+    });
+}
+
+function alternarCiclo() {
+    const bloque = document.getElementById('bloqueCiclo');
+    const icono = document.getElementById('iconoCiclo');
+    if (!bloque) return;
+    const abrir = bloque.classList.contains('d-none');
+    bloque.classList.toggle('d-none', !abrir);
+    if (icono) {
+        icono.classList.toggle('bi-chevron-down', !abrir);
+        icono.classList.toggle('bi-chevron-up', abrir);
+    }
+    if (abrir) cargarCicloConteo();
+}
+
+function cicloAbierto() {
+    const bloque = document.getElementById('bloqueCiclo');
+    return !!bloque && !bloque.classList.contains('d-none');
+}
+
+function cambiarPestanaInventario(id, sinFoco) {
     pestanaInventario = id;
     document.getElementById('tab-negativos').classList.toggle('d-none', id !== 'negativos');
     document.getElementById('tab-conteo').classList.toggle('d-none', id !== 'conteo');
@@ -41,10 +81,10 @@ function cambiarPestanaInventario(id) {
     document.getElementById('btn-tab-sinstock').classList.toggle('active', id === 'sinstock');
     if (id === 'sinstock') cargarSinStock();
     if (id === 'conteo') {
-        cargarCicloConteo();
+        if (cicloAbierto()) cargarCicloConteo();
         cargarHistorialConteo();
         const inp = document.getElementById('inputBuscarConteo');
-        if (inp) inp.focus();
+        if (inp && !sinFoco && !esPantallaChica()) inp.focus({ preventScroll: true });
     } else if (id === 'negativos') {
         cargarNegativos();
     }
@@ -84,7 +124,7 @@ async function cargarSinStock() {
 }
 
 async function contarDesdeCola(id) {
-    cambiarPestanaInventario('conteo');
+    cambiarPestanaInventario('conteo', true);
     const res = await apiFetch(`${obtenerBaseUrl()}/lotes/inventario/buscar?q=${encodeURIComponent(String(id))}`);
     const data = await leerJson(res);
     const p = (data.productos || []).find((x) => Number(x.id) === Number(id)) || (data.productos || [])[0];
@@ -267,7 +307,6 @@ async function buscarParaConteo() {
         if (lista.length === 1 && String(lista[0].codigo_barras || '') === q) {
             caja.innerHTML = '';
             mostrarFichaConteo(lista[0]);
-            document.getElementById('inputBuscarConteo').select();
             return;
         }
         const items = lista.map((p) => {
@@ -309,7 +348,7 @@ function mostrarFichaConteo(p) {
                        ${stock < 0 ? '<div class="small text-danger mt-2">Está en negativo. Este conteo también limpia la deuda.</div>' : ''}`
                     : '<div class="small text-muted">Contá sin mirar el sistema. El resultado se ve al confirmar.</div>'}
             </div>
-            <div class="d-flex flex-column gap-2" style="min-width: 220px;">
+            <div class="d-flex flex-column gap-2 inv-ficha-col">
                 <label class="form-label fw-bold small mb-0">¿Cuánto hay en total?</label>
                 <input type="number" min="0" step="0.01" class="form-control form-control-lg text-center fw-bold" id="inputCantidadConteo" placeholder="Un solo número">
                 <div class="small text-muted">O sumá zonas. El stock no se toca hasta confirmar.</div>
@@ -320,11 +359,10 @@ function mostrarFichaConteo(p) {
                 </div>
                 <div id="listaZonasConteo"></div>
                 <div id="totalZonasConteo" class="fw-bold small"></div>
-                <button type="button" class="btn btn-primary fw-bold" onclick="confirmarConteo()">Emparejar al físico</button>
+                <button type="button" class="btn btn-primary fw-bold inv-confirmar" onclick="confirmarConteo()">Emparejar al físico</button>
             </div>
         </div>`;
-    const inp = document.getElementById('inputCantidadConteo');
-    if (inp) inp.focus();
+    irAFicha();
     refrescarZonasConteo();
 }
 
@@ -445,9 +483,9 @@ async function enviarAjuste(body, recargarNegativos) {
             productoConteo = null;
             document.getElementById('fichaConteo').classList.add('d-none');
             document.getElementById('inputBuscarConteo').value = '';
-            document.getElementById('inputBuscarConteo').focus();
+            enfocarBuscador();
             cargarHistorialConteo();
-            cargarCicloConteo();
+            if (cicloAbierto()) cargarCicloConteo();
         }
         cargarSinStock();
     } catch (e) {
