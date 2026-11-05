@@ -725,9 +725,9 @@ def crear_oferta_urgente(oferta: LanzarOferta):
         
         # C. Lo mandamos a la COLA DE IMPRESIÓN (para el cartel de góndola)
         cursor.execute('''
-            INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias)
-            VALUES (?, 'OFERTA_A4', 2)
-        ''', (oferta.producto_id,))
+            INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, precio_antes)
+            VALUES (?, 'Cartel_A4', 2, 0, ?)
+        ''', (oferta.producto_id, prod[0]))
         
         conexion.commit()
         conexion.close()

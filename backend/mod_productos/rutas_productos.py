@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 import sqlite3
 from datetime import datetime, timezone, timedelta, date
@@ -751,6 +751,30 @@ def eliminar_categoria(cat_id: int):
         if conexion:
             conexion.close()
 
+# "Cenefa" y "OFERTA_A4" son filas viejas: el frente las sigue leyendo, pero no entran nuevas.
+FORMATOS_CARTEL = ("Cenefa_Normal", "Cenefa_Doble", "Cartel_A4")
+COPIAS_MAX_CARTEL = 50
+
+
+def asegurar_columna_precio_antes_cola(cursor=None):
+    """Precio tachado ("antes X, ahora Y") de cada cartel de la cola. NULL = sin tachado."""
+    propia = cursor is None
+    conexion = None
+    if propia:
+        conexion = obtener_conexion()
+        cursor = conexion.cursor()
+    try:
+        cursor.execute("ALTER TABLE cola_impresion_etiquetas ADD COLUMN precio_antes REAL")
+    except sqlite3.OperationalError:
+        pass
+    if propia and conexion:
+        conexion.commit()
+        conexion.close()
+
+
+asegurar_columna_precio_antes_cola()
+
+
 class EtiquetaNueva(BaseModel):
     producto_id: int
     tipo_cartel: str
@@ -758,16 +782,29 @@ class EtiquetaNueva(BaseModel):
     texto_personalizado: str = "" 
     plantilla: str = "Clasica"      
     color_tema: str = "#1a365d"
+    precio_antes: Optional[float] = None
 
 @router.post("/etiquetas/encolar", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def encolar_etiqueta(datos: EtiquetaNueva):
+    if datos.tipo_cartel not in FORMATOS_CARTEL:
+        raise HTTPException(status_code=400, detail="Formato de cartel inválido.")
+    if datos.cantidad_copias < 1 or datos.cantidad_copias > COPIAS_MAX_CARTEL:
+        raise HTTPException(status_code=400, detail=f"Las copias van de 1 a {COPIAS_MAX_CARTEL}.")
+    precio_antes = datos.precio_antes
+    if precio_antes is not None and precio_antes <= 0:
+        precio_antes = None
+    texto = (datos.texto_personalizado or "").strip()[:60]
+
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:
+        cursor.execute("SELECT 1 FROM productos WHERE id = ?", (datos.producto_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="El producto no existe.")
         cursor.execute('''
-            INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, texto_personalizado, plantilla, color_tema) 
-            VALUES (?, ?, ?, 0, ?, ?, ?)
-        ''', (datos.producto_id, datos.tipo_cartel, datos.cantidad_copias, datos.texto_personalizado, datos.plantilla, datos.color_tema))
+            INSERT INTO cola_impresion_etiquetas (producto_id, tipo_cartel, cantidad_copias, impreso, texto_personalizado, plantilla, color_tema, precio_antes) 
+            VALUES (?, ?, ?, 0, ?, ?, ?, ?)
+        ''', (datos.producto_id, datos.tipo_cartel, datos.cantidad_copias, texto, datos.plantilla, datos.color_tema, precio_antes))
         conexion.commit()
         return {"mensaje": "Etiqueta encolada con diseño guardado"}
     finally:
@@ -783,10 +820,11 @@ def listar_cola_impresion():
         cursor.execute('''
             SELECT c.id as cola_id, p.id as producto_id, p.nombre, p.precio_venta_final, p.codigo_barras, 
                    c.tipo_cartel as formato, c.cantidad_copias as cantidad, c.texto_personalizado,
-                   c.plantilla, c.color_tema
+                   c.plantilla, c.color_tema, c.precio_antes
             FROM cola_impresion_etiquetas c
             JOIN productos p ON c.producto_id = p.id
             WHERE c.impreso = 0
+            ORDER BY c.id ASC
         ''')
         cola = cursor.fetchall()
         return {"cola": [dict(c) for c in cola]}
@@ -1060,7 +1098,7 @@ def descargar_catalogo_offline():
 class EncoladoMasivo(BaseModel):
     tipo_filtro: str = "categoria"  # categoria | proveedor | todos
     filtro_id: int = 0
-    tipo_cartel: str = "Cenefa"
+    tipo_cartel: str = "Cenefa_Normal"
     plantilla: str = "Clasica"
     color_tema: str = "#000000"
     palabra_clave: str = ""
@@ -1114,6 +1152,8 @@ def previsualizar_encolado_masivo(
 
 @router.post("/etiquetas/encolar_masivo", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def encolar_etiquetas_masivo(datos: EncoladoMasivo):
+    if datos.tipo_cartel not in FORMATOS_CARTEL:
+        return {"error": "Formato de cartel inválido."}
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     try:

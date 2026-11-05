@@ -21,13 +21,29 @@ async function apiFetch(recurso, config = {}) {
     return respuesta;
 }
 
+/** Lee el JSON y corta con el mensaje del servidor ({detail} o {error}). */
+async function leerRespuesta(res, porDefecto) {
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* cuerpo vacío o no JSON */ }
+    if (!res.ok || data.error) {
+        const detalle = typeof data.detail === 'string' ? data.detail : '';
+        throw new Error(data.error || detalle || porDefecto);
+    }
+    return data;
+}
+
+const COPIAS_MAX = 50;
+
 // --- 1. ARRANQUE Y CARGA DE DATOS ---
 document.addEventListener("DOMContentLoaded", async () => {
     try {
-        const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        const res = await fetch(`${obtenerBaseUrl()}/productos/sincronizar_catalogo`, { headers: { 'Authorization': `Bearer ${token}` } });
-        const data = await res.json();
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/sincronizar_catalogo`);
+        const data = await leerRespuesta(res, 'No se pudo leer el catálogo.');
         catalogoLocal = data.productos || [];
+    } catch (e) {
+        Swal.fire('Error', `${e.message} El buscador queda vacío; recargá la página.`, 'error');
+    }
+    try {
         await refrescarConfigCarteleria();
         await cargarCategoriasCarteleria();
         await cargarColaDesdeDB();
@@ -40,19 +56,35 @@ document.addEventListener("DOMContentLoaded", async () => {
                 }
             });
         }
-    } catch (e) { console.error("Error cargando catálogo", e); }
+    } catch (e) { console.error("Error cargando cola o rubros", e); }
+
+    document.addEventListener('click', (e) => {
+        const panel = document.getElementById('panelBuscador');
+        if (panel && !panel.contains(e.target)) cerrarResultadosBusqueda();
+    });
+    window.addEventListener('beforeunload', (e) => {
+        if (colaImpresion.some((c) => c.esLibre)) { e.preventDefault(); e.returnValue = ''; }
+    });
 });
+
+/** Filas viejas: "Cenefa" se vuelve doble si el producto tiene promo; cualquier otro texto es A4. */
+function formatoDesdeDB(tipo, pReal) {
+    if (tipo === 'Cenefa_Normal' || tipo === 'Cenefa_Doble' || tipo === 'Cartel_A4') return tipo;
+    if (tipo === 'Cenefa') return (pReal && pReal.cant_promo) ? 'Cenefa_Doble' : 'Cenefa_Normal';
+    return 'Cartel_A4';
+}
 
 async function cargarColaDesdeDB() {
     try {
-        const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        const res = await fetch(`${obtenerBaseUrl()}/productos/etiquetas/listar`, { headers: { 'Authorization': `Bearer ${token}` } });
-        const data = await res.json();
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/listar`);
+        const data = await leerRespuesta(res, 'No se pudo leer la cola de impresión.');
         const itemsDB = (data.cola || []).map(c => {
+            const pReal = catalogoLocal.find(p => p.id === c.producto_id);
             return {
-                id_db: c.cola_id, formato: c.formato === 'Cenefa' ? 'Cenefa_Normal' : 'Cartel_A4', copias: c.cantidad,
+                id_db: c.cola_id, formato: formatoDesdeDB(c.formato, pReal), copias: c.cantidad,
                 textoExtra: c.texto_personalizado || '', esLibre: false, nombre: c.nombre, precio: c.precio_venta_final,
-                codigo_barras: c.codigo_barras, producto_id: c.producto_id
+                codigo_barras: c.codigo_barras, producto_id: c.producto_id,
+                precio_falso: Number(c.precio_antes) > 0 ? Number(c.precio_antes) : null
             };
         });
 
@@ -61,9 +93,7 @@ async function cargarColaDesdeDB() {
             if (pReal) {
                 item.uxb = pReal.unidades_por_bulto || 1; // Guardamos el bulto
                 
-                // Si tiene promo, activamos la cenefa doble
                 if (pReal.cant_promo) {
-                    item.formato = item.formato === 'Cenefa_Normal' ? 'Cenefa_Doble' : item.formato;
                     item.precioMayo = pReal.precio_promo; 
                     item.cantMayo = pReal.cant_promo;
                 }
@@ -80,7 +110,9 @@ async function cargarColaDesdeDB() {
         colaImpresion = colaImpresion.filter(c => c.esLibre); 
         colaImpresion = [...itemsDB, ...colaImpresion];
         dibujarCola();
-    } catch (e) { console.error("Error cargando cola DB", e); }
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    }
 }
 
 async function refrescarConfigCarteleria() {
@@ -137,7 +169,7 @@ function toggleModoLibre() {
 function buscarProductoEtiqueta(busqueda) {
     const contenedor = document.getElementById('resultadosEtiqueta');
     indiceBusqueda = -1; 
-    if (busqueda.length < 2) { contenedor.classList.add('d-none'); itemsBusquedaActuales = []; return; }
+    if (busqueda.length < 2) { cerrarResultadosBusqueda(); return; }
 
     let palabras = busqueda.toLowerCase().split(" ").filter(p => p !== "");
     const filtrados = catalogoLocal.filter(p => {
@@ -145,14 +177,25 @@ function buscarProductoEtiqueta(busqueda) {
     }).slice(0, 8);
     
     itemsBusquedaActuales = filtrados;
-    contenedor.innerHTML = '';
-    filtrados.forEach((p, idx) => {
-        contenedor.innerHTML += `<button type="button" id="btn-busq-${idx}" class="list-group-item list-group-item-action small py-2" onmouseenter="indiceBusqueda = ${idx}; resaltarBusqueda();" onclick="seleccionarProd(${p.id})"><b>${p.codigo_barras || 'S/C'}</b> - ${p.nombre}</button>`;
-    });
+    if (filtrados.length === 0) {
+        contenedor.innerHTML = '<div class="list-group-item small py-2 text-muted">Sin resultados.</div>';
+    } else {
+        contenedor.innerHTML = filtrados.map((p, idx) =>
+            `<button type="button" id="btn-busq-${idx}" class="list-group-item list-group-item-action small py-2" onmouseenter="indiceBusqueda = ${idx}; resaltarBusqueda();" onclick="seleccionarProd(${Number(p.id)})"><b>${htmlTxtCartel(p.codigo_barras || 'S/C')}</b> - ${htmlTxtCartel(p.nombre)}</button>`
+        ).join('');
+    }
     contenedor.classList.remove('d-none');
 }
 
+function cerrarResultadosBusqueda() {
+    const contenedor = document.getElementById('resultadosEtiqueta');
+    if (contenedor) contenedor.classList.add('d-none');
+    itemsBusquedaActuales = [];
+    indiceBusqueda = -1;
+}
+
 document.getElementById('inputBuscarEtiqueta').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { cerrarResultadosBusqueda(); return; }
     if (itemsBusquedaActuales.length === 0) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); if (indiceBusqueda < itemsBusquedaActuales.length - 1) indiceBusqueda++; resaltarBusqueda(); } 
     else if (e.key === 'ArrowUp') { e.preventDefault(); if (indiceBusqueda > 0) indiceBusqueda--; resaltarBusqueda(); } 
@@ -166,8 +209,9 @@ function resaltarBusqueda() {
 
 function seleccionarProd(id) {
     productoSeleccionado = catalogoLocal.find(p => p.id === id);
+    if (!productoSeleccionado) return;
     document.getElementById('inputBuscarEtiqueta').value = productoSeleccionado.nombre;
-    document.getElementById('resultadosEtiqueta').classList.add('d-none');
+    cerrarResultadosBusqueda();
     if (productoSeleccionado.cant_promo) document.getElementById('selectFormato').value = 'Cenefa_Doble';
     else document.getElementById('selectFormato').value = 'Cenefa_Normal';
     actualizarPreview();
@@ -209,7 +253,7 @@ function actualizarPreview() {
 
     // LÓGICA DE UXB PARA VISTA PREVIA (Solo visible en Cenefa Doble)
     let previewPrecioBulto = esMayorista ? (precioMayo * uxb) : (precio * uxb);
-    let htmlUxB_preview = (uxb > 1 && formato === "Cenefa_Doble") ? `<div style="background:white; color:${colorInstitucional}; font-size:6px; font-weight:bold; padding:1px 4px; border-radius:3px; margin-top:2px;">UxB: ${uxb} | Caja: $${previewPrecioBulto.toLocaleString('es-AR', {minimumFractionDigits:2})}</div>` : '';
+    let htmlUxB_preview = (uxb > 1 && formato === "Cenefa_Doble") ? `<div style="background:white; color:${colorInstitucional}; font-size:6px; font-weight:bold; padding:1px 4px; border-radius:3px; margin-top:2px;">UxB: ${uxb} | Caja: $${fmtPrecioCartel(previewPrecioBulto)}</div>` : '';
 
     if (formato === "Cenefa_Normal") {
         html = `<div style="width: 150px; height: 70px; border: 1px solid #ccc; background: white; display:flex; flex-direction:column; align-items:center; position:relative;">
@@ -222,8 +266,8 @@ function actualizarPreview() {
         let mitadDerecha = esMayorista 
             ? `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
                 <span style="background:#dc3545; border-radius:5px; padding:1px 4px; font-size:5px; margin-bottom:2px;">OFERTA MAYORISTA</span>
-                <span style="font-size:14px; font-weight:bold;">$${precioMayo}</span>
-                <span style="font-size:6px;">Llevando ${cantMayo} o más</span>
+                <span style="font-size:14px; font-weight:bold;">$${fmtPrecioCartel(precioMayo)}</span>
+                <span style="font-size:6px;">Llevando ${htmlTxtCartel(cantMayo)} o más</span>
                 ${htmlUxB_preview}
                </div>` 
             : `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
@@ -233,7 +277,7 @@ function actualizarPreview() {
             
         html = `<div style="width: 250px; height: 60px; border: 1px solid #333; display:flex; background:white;">
                     <div style="width:50%; padding:5px; text-align:center; display:flex; flex-direction:column; justify-content:center;">
-                        ${textoExtra ? `<div style="font-size:6px; color:#dc3545; font-weight:bold;">${textoExtra}</div>` : '<div style="font-size:6px; color:#666; font-weight:bold;">PRECIO NORMAL</div>'}
+                        ${textoExtra ? `<div style="font-size:6px; color:#dc3545; font-weight:bold;">${htmlTxtCartel(textoExtra)}</div>` : '<div style="font-size:6px; color:#666; font-weight:bold;">PRECIO NORMAL</div>'}
                         <div style="font-size:8px; font-weight:bold;">${htmlTxtCartel(nombre)}</div>
                         <div style="font-size:12px; font-weight:bold; text-align:center;">${htmlPrecioAntesAhora(precio, precioAntes, { antes: '6px', ahora: '12px' })}</div>
                     </div>
@@ -260,9 +304,14 @@ const procesarFotoBase64 = file => new Promise((resolve, reject) => {
 async function agregarACola() {
     const esLibre = document.getElementById('switchModoLibre').checked;
     const formato = document.getElementById('selectFormato').value;
-    const copias = parseInt(document.getElementById('inputCopias').value);
-    const textoExtra = document.getElementById('inputTextoExtra').value;
-    const pf = parseFloat(document.getElementById('inputPrecioFalso').value) || null;
+    const copiasTxt = String(document.getElementById('inputCopias').value || '').trim();
+    const copias = Number(copiasTxt);
+    if (!/^\d+$/.test(copiasTxt) || copias < 1 || copias > COPIAS_MAX) {
+        return Swal.fire('Aviso', `Las copias van de 1 a ${COPIAS_MAX}.`, 'warning');
+    }
+    const textoExtra = document.getElementById('inputTextoExtra').value.trim();
+    const pfNum = parseFloat(document.getElementById('inputPrecioFalso').value);
+    const pf = Number.isFinite(pfNum) && pfNum > 0 ? pfNum : null;
     
     let item = { id: Date.now(), formato, copias, textoExtra, esLibre, uxb: 1, precio_falso: pf };
 
@@ -296,27 +345,21 @@ async function agregarACola() {
 
     if (!esLibre && productoSeleccionado) {
         try {
-            const tipoDb = formato.startsWith('Cenefa') ? 'Cenefa' : 'Cartel_A4';
             const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     producto_id: productoSeleccionado.id,
-                    tipo_cartel: tipoDb,
-                    cantidad_copias: copias || 1,
-                    texto_personalizado: textoExtra || '',
+                    tipo_cartel: formato,
+                    cantidad_copias: copias,
+                    texto_personalizado: textoExtra,
                     plantilla: 'Clasica',
-                    color_tema: '#1a365d'
+                    color_tema: '#1a365d',
+                    precio_antes: pf
                 })
             });
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
+            await leerRespuesta(res, 'No se pudo guardar en la cola.');
             await cargarColaDesdeDB();
-            if (pf) {
-                const ultimo = [...colaImpresion].reverse().find((c) => c.producto_id === productoSeleccionado.id && !c.esLibre);
-                if (ultimo) ultimo.precio_falso = pf;
-                dibujarCola();
-            }
             Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Agregado a la cola', showConfirmButton: false, timer: 1000 });
             return;
         } catch (e) {
@@ -325,24 +368,41 @@ async function agregarACola() {
     }
 
     colaImpresion.push(item); dibujarCola();
-    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Agregado a la cola', showConfirmButton: false, timer: 1000 });
+    Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Agregado. Es manual: se pierde si recargás la página.', showConfirmButton: false, timer: 2500 });
 }
 
 async function vaciarCola() { 
+    if (colaImpresion.length === 0) return Swal.fire('Aviso', 'La cola ya está vacía.', 'info');
+    const ok = await Swal.fire({
+        title: `¿Vaciar la cola?`,
+        text: `Se borran ${colaImpresion.length} carteles sin imprimir.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, vaciar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#dc3545',
+        reverseButtons: true
+    });
+    if (!ok.isConfirmed) return;
     try { 
-        const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        await fetch(`${obtenerBaseUrl()}/productos/etiquetas/vaciar`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }); 
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/vaciar`, { method: 'DELETE' }); 
+        await leerRespuesta(res, 'No se pudo vaciar la cola.');
         colaImpresion = []; dibujarCola(); 
-    } catch (e) { } 
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
+    } 
 }
 
 async function borrarItemCola(idx) { 
     const item = colaImpresion[idx];
+    if (!item) return;
     if (!item.esLibre && item.id_db) { 
         try { 
-            const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-            await fetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${item.id_db}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }); 
-        } catch(e){} 
+            const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${item.id_db}`, { method: 'DELETE' }); 
+            await leerRespuesta(res, 'No se pudo borrar el cartel.');
+        } catch (e) {
+            return Swal.fire('Error', e.message, 'error');
+        } 
     }
     colaImpresion.splice(idx, 1); dibujarCola(); 
 }
@@ -424,7 +484,7 @@ function imprimirTodo(filtroSeleccionado) {
         
         let uxb = item.uxb || 1;
         let precioBultoNum = item.cantMayo ? (item.precioMayo * uxb) : (item.precio * uxb);
-        let htmlUxB_print = (uxb > 1 && item.formato === "Cenefa_Doble") ? `<div class="bg-print" style="background:white; color:${colorInstitucional}; font-size:10px; font-weight:bold; padding:2px 8px; border-radius:4px; margin-top:2px;">UxB: ${uxb} | Caja: $${precioBultoNum.toLocaleString('es-AR', {minimumFractionDigits:2})}</div>` : '';
+        let htmlUxB_print = (uxb > 1 && item.formato === "Cenefa_Doble") ? `<div class="bg-print" style="background:white; color:${colorInstitucional}; font-size:10px; font-weight:bold; padding:2px 8px; border-radius:4px; margin-top:2px;">UxB: ${uxb} | Caja: $${fmtPrecioCartel(precioBultoNum)}</div>` : '';
 
         let bultoHTML = item.txtBulto ? `<div style="font-size:12px; color:red; font-weight:bold; margin-bottom:2px; text-align:center;">${item.txtBulto}</div>` : '';
 
@@ -448,7 +508,7 @@ function imprimirTodo(filtroSeleccionado) {
                 let mitadDer = item.cantMayo 
                     ? `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; justify-content:center; align-items:center; padding: 2mm;">
                            <div class="bg-print" style="background:#dc3545; color:white; font-size:11px; font-weight:bold; text-transform:uppercase; padding: 2px 10px; border-radius: 10px; margin-bottom: 1mm; letter-spacing: 1px;">OFERTA MAYORISTA</div>
-                           <div style="font-size:45px; font-weight:900; line-height:1;">$${parseFloat(item.precioMayo).toLocaleString('es-AR', {minimumFractionDigits:2})}</div>
+                           <div style="font-size:45px; font-weight:900; line-height:1;">$${fmtPrecioCartel(item.precioMayo)}</div>
                            <div style="font-size:10px; font-weight:bold; color: rgba(255,255,255,0.9); margin-top: 1mm; margin-bottom: 1mm;">Llevando ${item.cantMayo} un. o más</div>
                            ${htmlUxB_print}
                        </div>`
@@ -502,7 +562,7 @@ function imprimirTodo(filtroSeleccionado) {
                             
                             <div style="font-size: ${fontSizePrecio}; font-weight: 900; color: #198754; line-height: 0.9; text-shadow: 4px 4px 0px rgba(0,0,0,0.1); margin-top: ${tieneFoto ? 'auto' : '0'}; text-align:center;">${bloquePrecioA4}</div>
                             
-                            ${item.cantMayo ? `<div class="bg-print" style="margin-top:10mm; background:${colorInstitucional}; color:white; padding: 8mm; border-radius:15px; width:90%;"><div style="font-size:25px; font-weight:bold;">OFERTA MAYORISTA LLEVANDO ${item.cantMayo} UNIDADES</div><div style="font-size:60px; font-weight:900; margin-top:2mm;">$${item.precioMayo} c/u</div></div>` : ''}
+                            ${item.cantMayo ? `<div class="bg-print" style="margin-top:10mm; background:${colorInstitucional}; color:white; padding: 8mm; border-radius:15px; width:90%;"><div style="font-size:25px; font-weight:bold;">OFERTA MAYORISTA LLEVANDO ${item.cantMayo} UNIDADES</div><div style="font-size:60px; font-weight:900; margin-top:2mm;">$${fmtPrecioCartel(item.precioMayo)} c/u</div></div>` : ''}
                         </div>
                     </div>
                 `;
@@ -587,8 +647,7 @@ async function encolarMasivoCarteleria() {
             palabra_clave: body.palabra_clave
         });
         const prevRes = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/previsualizar_masivo?${qs}`);
-        const prev = await prevRes.json();
-        if (prev.error) throw new Error(prev.error);
+        const prev = await leerRespuesta(prevRes, 'No se pudo contar los productos.');
         if (!prev.cantidad) {
             return Swal.fire('Nada para encolar', 'No hay productos activos con ese filtro.', 'info');
         }
@@ -597,7 +656,7 @@ async function encolarMasivoCarteleria() {
         const extra = prev.cantidad > (prev.ejemplos || []).length ? '…' : '';
         const ok = await Swal.fire({
             title: `¿Encolar ${prev.cantidad} carteles?`,
-            html: `<div class="text-start small">${ejemplos}${extra}</div>`,
+            html: `<div class="text-start small">${htmlTxtCartel(ejemplos)}${extra}</div>`,
             icon: 'question',
             showCancelButton: true,
             confirmButtonText: 'Sí, a la cola',
@@ -613,8 +672,7 @@ async function encolarMasivoCarteleria() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        const data = await leerRespuesta(res, 'No se pudo encolar.');
 
         await cargarColaDesdeDB();
         Swal.fire('Listo', data.mensaje, 'success');
@@ -626,28 +684,39 @@ async function encolarMasivoCarteleria() {
 async function quitarImpresosDeCola(impresos) {
     const impresosSet = new Set(impresos);
     colaImpresion = colaImpresion.filter((c) => !(c.esLibre && impresosSet.has(c)));
+    let fallidos = 0;
     for (const item of impresos) {
         if (item.id_db) {
             try {
-                await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${item.id_db}`, { method: 'DELETE' });
-            } catch (e) { /* sigue con el resto */ }
+                const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/eliminar/${item.id_db}`, { method: 'DELETE' });
+                if (!res.ok) fallidos++;
+            } catch (e) { fallidos++; }
         }
     }
     await cargarColaDesdeDB();
+    if (fallidos) {
+        Swal.fire('Aviso', `${fallidos} carteles ya impresos siguen en la cola porque no se pudieron quitar. Borralos a mano.`, 'warning');
+    }
 }
 
 async function cargarCategoriasCarteleria() {
+    const select = document.getElementById('selectMasivoCarteleria');
+    if (!select) return;
+    select.innerHTML = '<option value="">Todos los rubros</option>';
     try {
-        const token = localStorage.getItem('token') || localStorage.getItem('token_pos');
-        const res = await fetch(`${obtenerBaseUrl()}/productos/categorias`, { headers: { 'Authorization': `Bearer ${token}` } });
-        const data = await res.json();
-        
-        const select = document.getElementById('selectMasivoCarteleria');
-        if (select) {
-            select.innerHTML = '<option value="">Todos los rubros</option>';
-            (data.categorias || []).forEach(c => {
-                select.innerHTML += `<option value="${c.id}">${c.nombre}</option>`;
-            });
-        }
-    } catch (e) { console.error("Error cargando categorías", e); }
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/categorias`);
+        const data = await leerRespuesta(res, 'No se pudieron leer los rubros.');
+        (data.categorias || []).forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = String(c.id);
+            opt.textContent = c.nombre;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.error("Error cargando categorías", e);
+        const opt = document.createElement('option');
+        opt.disabled = true;
+        opt.textContent = 'No se pudieron leer los rubros';
+        select.appendChild(opt);
+    }
 }
