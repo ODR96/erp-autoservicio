@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles 
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware 
 from contextlib import asynccontextmanager
 import os
@@ -65,7 +65,16 @@ async def lifespan(app: FastAPI):
     yield
 
 # --- 2. CREAMOS LA APP ---
-app = FastAPI(title="ERP Autoservicio 20 de Junio", lifespan=lifespan)
+# Documentación automática (/docs, /redoc, /openapi.json): lista todas las rutas, así que en producción
+# queda cerrada. Para verla en desarrollo: ERP_EXPONER_DOCS=1 en el .env local.
+_exponer_docs = os.environ.get("ERP_EXPONER_DOCS", "").strip().lower() in ("1", "true", "si", "sí")
+app = FastAPI(
+    title="ERP Autoservicio 20 de Junio",
+    lifespan=lifespan,
+    docs_url="/docs" if _exponer_docs else None,
+    redoc_url="/redoc" if _exponer_docs else None,
+    openapi_url="/openapi.json" if _exponer_docs else None,
+)
 
 # Creamos el limitador que identifica a los usuarios por su dirección IP
 # Detrás de Nginx todos llegarían como 127.0.0.1. Solo confiamos X-Forwarded-For
@@ -118,6 +127,7 @@ app.include_router(router_rrhh, prefix="/rrhh", tags=["RRHH: Sueldos, Asistencia
 app.include_router(router_pagos, prefix="/pagos", tags=["Cobros Mercado Pago"])
 app.include_router(router_tesoreria, prefix="/tesoreria", tags=["Tesorería: Caja fuerte y arqueos"])
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def leer_raiz():
-    return {"mensaje": "¡Motor ERP 20 de Junio funcionando al 100% en Contabo!"}
+    # Entrar a la IP sola lleva al login. 302 (no 301) para que el navegador no recuerde el salto.
+    return RedirectResponse(url="/frontend/index.html", status_code=302)

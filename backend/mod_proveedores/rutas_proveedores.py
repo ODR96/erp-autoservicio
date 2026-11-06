@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, UploadFile, File
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Any
 from datetime import datetime, timezone, timedelta
 import sqlite3
@@ -9,6 +9,7 @@ import re
 import json
 import uuid
 import base64
+import hmac
 import urllib.request
 import urllib.error
 from backend.database import obtener_conexion, RAIZ_PROYECTO
@@ -78,13 +79,13 @@ class ConfirmarBorrador(BaseModel):
     compra_id: Optional[int] = None
 
 class FotoWhatsappIn(BaseModel):
-    chat_id: str
-    caption: str = ""
-    foto_b64: str
-    mime: str = "image/jpeg"
-    filename: str = "whatsapp.jpg"
+    chat_id: str = Field(..., max_length=120)
+    caption: str = Field("", max_length=2000)
+    foto_b64: str = Field(..., max_length=11_500_000)  # ~8 MB ya decodificados (tope real en _adjuntar_bytes)
+    mime: str = Field("image/jpeg", max_length=100)
+    filename: str = Field("whatsapp.jpg", max_length=200)
     proveedor_id: Optional[int] = None
-    numero_factura: str = ""
+    numero_factura: str = Field("", max_length=80)
 
 
 def _hoy_ar() -> str:
@@ -141,6 +142,23 @@ VENTANA_WHATSAPP_SEG = 2 * 60 * 60
 
 def _ahora_ar_dt() -> str:
     return datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
+
+
+# Texto que viene de afuera (OCR de una foto, WhatsApp): nunca es de confianza.
+# Defensa en profundidad: la pantalla igual escapa todo al dibujarlo.
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f\u2028\u2029]")
+_NUMERO_FACTURA_NO_PERMITIDO_RE = re.compile(r"[^A-Za-z0-9 \-./_#°º]")
+
+
+def _texto_externo(valor, maxlen: int) -> str:
+    s = _CONTROL_RE.sub(" ", str(valor or ""))
+    s = s.replace("<", "").replace(">", "").replace("`", "")
+    return " ".join(s.split())[:maxlen]
+
+
+def _numero_factura_externo(valor) -> str:
+    s = _NUMERO_FACTURA_NO_PERMITIDO_RE.sub("", str(valor or ""))
+    return " ".join(s.split())[:40]
 
 
 def _parse_json_list(raw) -> list:
@@ -370,7 +388,7 @@ def _adjuntar_bytes(cursor, borrador_id: int, data: bytes, mime: str, filename: 
         fh.write(data)
     meta = {
         "id": foto_id,
-        "filename": os.path.basename(filename or f"foto{ext}")[:120],
+        "filename": _texto_externo(os.path.basename(filename or f"foto{ext}"), 120) or f"foto{ext}",
         "mime": mime_ok,
         "origen": origen,
         "bytes": len(data),
@@ -390,14 +408,17 @@ def _ruta_archivo_foto(borrador_id: int, foto: dict) -> str:
 
 
 def _exigir_loopback_whatsapp(request: Request):
+    """Doble control: origen loopback Y token del puente. Sin token configurado no se abre (falla cerrado)."""
     host = (request.client.host if request.client else "") or ""
     if host not in ("127.0.0.1", "::1"):
         raise HTTPException(status_code=403, detail="Solo el bot local puede adjuntar fotos de WhatsApp.")
     esperado = (os.getenv("WHATSAPP_BRIDGE_TOKEN") or os.getenv("PUENTE_TOKEN") or "").strip()
-    if esperado:
-        token = (request.headers.get("X-ERP-Token") or "").strip()
-        if token != esperado:
-            raise HTTPException(status_code=401, detail="Token de puente inválido.")
+    if not esperado:
+        print("SEGURIDAD: falta WHATSAPP_BRIDGE_TOKEN/PUENTE_TOKEN en el servidor; se rechaza la foto de WhatsApp.")
+        raise HTTPException(status_code=503, detail="Puente de WhatsApp sin token configurado en el servidor.")
+    token = (request.headers.get("X-ERP-Token") or "").strip()
+    if not hmac.compare_digest(token.encode("utf-8"), esperado.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Token de puente inválido.")
 
 
 def _insertar_borrador(cursor, origen: str, usuario_id: int, origen_chat: str = "", caption: str = "",
@@ -1118,8 +1139,8 @@ def _item_desde_producto_row(prod: dict, cantidad: float, costo: float, modo: st
 
 
 def _item_huerfano_ocr(linea: dict) -> dict:
-    nombre = (linea.get("nombre") or linea.get("codigo") or "Ítem del papel").strip()[:120]
-    codigo = (linea.get("codigo") or "").strip()
+    nombre = _texto_externo(linea.get("nombre") or linea.get("codigo") or "", 120) or "Ítem del papel"
+    codigo = _texto_externo(linea.get("codigo") or "", 40)
     modo = "CAJA" if str(linea.get("unidad") or "").upper() == "CAJA" else "UN"
     cant = float(linea.get("cantidad") or 1)
     if cant <= 0:
@@ -1294,9 +1315,10 @@ def _aplicar_parseo_ocr(cursor, fila, parsed: dict) -> dict:
     cab_sets = ["items_json = ?", "updated_at = ?", "modo = ?"]
     cab_vals = [json.dumps(nuevos, ensure_ascii=False), _ahora_ar_dt(), "stock"]
 
-    if not fila["numero_factura"] and (parsed.get("numero_factura") or "").strip():
+    numero_ocr = _numero_factura_externo(parsed.get("numero_factura"))
+    if not fila["numero_factura"] and numero_ocr:
         cab_sets.append("numero_factura = ?")
-        cab_vals.append(str(parsed.get("numero_factura")).strip()[:80])
+        cab_vals.append(numero_ocr)
     if not fila["proveedor_id"] and parsed.get("proveedor"):
         pid = _match_proveedor_ocr(cursor, parsed.get("proveedor"))
         if pid:
@@ -1368,7 +1390,7 @@ def borrador_desde_whatsapp(body: FotoWhatsappIn, request: Request):
     cursor = conexion.cursor()
     try:
         _asegurar_tablas_borrador(cursor)
-        chat = (body.chat_id or "").strip()[:120]
+        chat = _texto_externo(body.chat_id, 120)
         if not chat:
             raise HTTPException(status_code=400, detail="Falta chat_id.")
         try:
@@ -1376,9 +1398,10 @@ def borrador_desde_whatsapp(body: FotoWhatsappIn, request: Request):
         except Exception:
             raise HTTPException(status_code=400, detail="foto_b64 inválida.")
 
-        caption = body.caption or ""
+        caption_cruda = body.caption or ""
+        caption = _texto_externo(caption_cruda, 500)
         borrador_id = None
-        m_id = re.search(r"#(\d{1,10})", caption)
+        m_id = re.search(r"#(\d{1,10})", caption_cruda)
         if m_id:
             candidato = int(m_id.group(1))
             fila = _fila_borrador(cursor, candidato)
@@ -1407,7 +1430,7 @@ def borrador_desde_whatsapp(body: FotoWhatsappIn, request: Request):
                 origen_chat=chat,
                 caption=caption,
                 proveedor_id=body.proveedor_id,
-                numero_factura=body.numero_factura,
+                numero_factura=_numero_factura_externo(body.numero_factura),
             )
 
         meta = _adjuntar_bytes(
@@ -1421,7 +1444,7 @@ def borrador_desde_whatsapp(body: FotoWhatsappIn, request: Request):
         if caption:
             cursor.execute(
                 "UPDATE compras_borradores SET caption = ?, updated_at = ? WHERE id = ?",
-                (caption[:500], _ahora_ar_dt(), borrador_id),
+                (caption, _ahora_ar_dt(), borrador_id),
             )
         conexion.commit()
         ocr = {"estado": "omitido"}

@@ -85,22 +85,22 @@ function dibujarTablaDirectorio(lista) {
         // LA MAGIA: El botoncito de la nota (Si es que tiene una)
         let iconoNota = '';
         if (p.observaciones && p.observaciones.trim() !== "") {
-            let notaLimpia = p.observaciones.replace(/"/g, "'"); 
+            let notaLimpia = escapeHtmlFactura(p.observaciones);
             iconoNota = `<i class="bi bi-info-circle-fill text-primary ms-2" data-bs-toggle="tooltip" data-bs-placement="top" title="${notaLimpia}" style="cursor:help; font-size: 1.1rem;"></i>`;
         }
 
         let botones = esActivo 
-            ? `<button class="btn btn-sm btn-outline-info py-0 me-1" title="Ver Historial" onclick="verHistorialProveedor(${p.id}, '${p.nombre_comercial}')"><i class="bi bi-clock-history"></i></button>
-            <button class="btn btn-sm btn-outline-primary py-0" onclick="abrirEditarProveedor(${p.id})"><i class="bi bi-pencil"></i></button>
-               <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="darDeBajaProveedor(${p.id}, '${p.nombre_comercial}')"><i class="bi bi-trash"></i></button>`
+            ? `<button class="btn btn-sm btn-outline-info py-0 me-1" title="Ver Historial" onclick="verHistorialProveedor(${Number(p.id)}, ${jsArg(p.nombre_comercial)})"><i class="bi bi-clock-history"></i></button>
+            <button class="btn btn-sm btn-outline-primary py-0" onclick="abrirEditarProveedor(${Number(p.id)})"><i class="bi bi-pencil"></i></button>
+               <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="darDeBajaProveedor(${Number(p.id)}, ${jsArg(p.nombre_comercial)})"><i class="bi bi-trash"></i></button>`
             : `<button class="btn btn-sm btn-success py-0 fw-bold" onclick="reactivarProveedor(${p.id})"><i class="bi bi-arrow-counterclockwise"></i> Restaurar</button>`;
 
         tbody.innerHTML += `
             <tr class="${claseFila}">
                 <td class="text-muted fw-bold align-middle col-hide-xs">#${p.id}</td>
-                <td class="fw-bold text-start align-middle">${p.nombre_comercial} ${iconoNota} ${!esActivo ? '<span class="badge bg-secondary ms-2">INACTIVO</span>' : ''}</td>
-                <td class="align-middle col-hide-xs">${p.cuit || '-'}</td>
-                <td class="align-middle"><i class="bi bi-whatsapp text-success"></i> ${p.telefono_vendedor || '-'}</td>
+                <td class="fw-bold text-start align-middle">${escapeHtmlFactura(p.nombre_comercial)} ${iconoNota} ${!esActivo ? '<span class="badge bg-secondary ms-2">INACTIVO</span>' : ''}</td>
+                <td class="align-middle col-hide-xs">${escapeHtmlFactura(p.cuit || '-')}</td>
+                <td class="align-middle"><i class="bi bi-whatsapp text-success"></i> ${escapeHtmlFactura(p.telefono_vendedor || '-')}</td>
                 <td class="fw-bold align-middle ${saldo > 0 ? 'text-danger' : 'text-success'}">$ ${saldo.toFixed(2)}</td>
                 <td class="align-middle">${botones}</td>
             </tr>`;
@@ -161,7 +161,7 @@ async function guardarProveedor() {
 }
 
 async function darDeBajaProveedor(id, nombre) {
-    const res = await Swal.fire({ title: `¿Dar de baja a ${nombre}?`, text: "No podrás cargarle más facturas hasta restaurarlo.", icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', confirmButtonText: 'Sí, desactivar' });
+    const res = await Swal.fire({ title: `¿Dar de baja a ${escapeHtmlFactura(nombre)}?`, text: "No podrás cargarle más facturas hasta restaurarlo.", icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', confirmButtonText: 'Sí, desactivar' });
     if (res.isConfirmed) {
         await fetch(`${obtenerBaseUrl()}/proveedores/baja/${id}`, { method: 'DELETE' });
         cargarProveedores();
@@ -179,7 +179,7 @@ function llenarSelectoresProveedores() {
         const previo = selIngreso.value;
         selIngreso.innerHTML = '<option value="">-- Seleccionar Proveedor --</option>';
         proveedoresGlobales.filter(p => p.activo !== 0).forEach(p => {
-            selIngreso.innerHTML += `<option value="${p.id}">${p.nombre_comercial}</option>`;
+            selIngreso.innerHTML += `<option value="${Number(p.id)}">${escapeHtmlFactura(p.nombre_comercial)}</option>`;
         });
         if (previo) selIngreso.value = previo;
     }
@@ -208,7 +208,14 @@ function escapeHtmlFactura(valor) {
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// Argumento de texto para un onclick="fn(${jsArg(x)})": literal JS entre comillas dobles,
+// escapado para atributo HTML. Un apóstrofe o una etiqueta en el dato no rompe ni ejecuta nada.
+function jsArg(valor) {
+    return escapeHtmlFactura(JSON.stringify(String(valor ?? '')));
 }
 
 function detalleApi(data) {
@@ -1671,10 +1678,10 @@ async function confirmarIngresoMercaderia() {
     if (facturaActualItems.length === 0) return Swal.fire('Error', 'No hay productos en la factura.', 'warning');
     const huerfano = facturaActualItems.find(it => !it.producto_id);
     if (huerfano) {
-        return Swal.fire('Sin catálogo', `Vinculá o dales alta a «${huerfano.nombre || 'la línea'}» antes de guardar. El OCR no crea productos solo.`, 'warning');
+        return Swal.fire('Sin catálogo', `Vinculá o dales alta a «${escapeHtmlFactura(huerfano.nombre || 'la línea')}» antes de guardar. El OCR no crea productos solo.`, 'warning');
     }
     const itemMalo = facturaActualItems.find(it => !(cantidadStockItem(it) > 0));
-    if (itemMalo) return Swal.fire('Atención', `Revisá la cantidad de ${itemMalo.nombre}.`, 'warning');
+    if (itemMalo) return Swal.fire('Atención', `Revisá la cantidad de ${escapeHtmlFactura(itemMalo.nombre)}.`, 'warning');
 
     const cargosExtraIngresados = parseFloat(document.getElementById('inputCargosExtra').value) || 0;
     const totalEstimado = totalCalculadoFactura();
@@ -1801,8 +1808,8 @@ function dibujarListaCtaCte() {
         let colorDeuda = saldo > 0 ? 'text-danger fw-bold' : 'text-success';
 
         contenedor.innerHTML += `
-            <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="seleccionarProvParaPago(${p.id}, '${p.nombre_comercial}', ${saldo})">
-                <span class="fw-bold">${p.nombre_comercial}</span>
+            <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="seleccionarProvParaPago(${Number(p.id)}, ${jsArg(p.nombre_comercial)}, ${Number(saldo) || 0})">
+                <span class="fw-bold">${escapeHtmlFactura(p.nombre_comercial)}</span>
                 <span class="${colorDeuda}">$ ${saldo.toFixed(2)}</span>
             </button>
         `;
@@ -1883,16 +1890,13 @@ async function verHistorialPagos() {
             html += '<tr><td colspan="5" class="text-center text-muted py-3">No hay pagos registrados.</td></tr>';
         } else {
             data.pagos.forEach(p => {
-                // Escapamos comillas para que no se rompa el botón si alguien escribe "Cheque de Juan's"
-                let obsEscapada = (p.observaciones || '').replace(/'/g, "\\'");
-                
                 html += `<tr>
-                    <td class="text-muted small">${p.fecha_pago}</td>
-                    <td class="fw-bold"><span class="badge bg-secondary">${p.metodo_pago}</span></td>
-                    <td class="text-end fw-bold text-success">$${p.monto.toFixed(2)}</td>
-                    <td class="small">${p.observaciones || '-'}</td>
+                    <td class="text-muted small">${escapeHtmlFactura(p.fecha_pago)}</td>
+                    <td class="fw-bold"><span class="badge bg-secondary">${escapeHtmlFactura(p.metodo_pago)}</span></td>
+                    <td class="text-end fw-bold text-success">$${Number(p.monto).toFixed(2)}</td>
+                    <td class="small">${escapeHtmlFactura(p.observaciones || '-')}</td>
                     <td class="text-center">
-                        <button class="btn btn-sm btn-outline-dark" onclick="imprimirComprobantePago('${nombre}', '${p.fecha_pago}', ${p.monto}, '${p.metodo_pago}', '${obsEscapada}')" title="Imprimir Recibo">
+                        <button class="btn btn-sm btn-outline-dark" onclick="imprimirComprobantePago(${jsArg(nombre)}, ${jsArg(p.fecha_pago)}, ${Number(p.monto) || 0}, ${jsArg(p.metodo_pago)}, ${jsArg(p.observaciones || '')})" title="Imprimir Recibo">
                             <i class="bi bi-printer"></i>
                         </button>
                     </td>
@@ -1901,7 +1905,7 @@ async function verHistorialPagos() {
         }
         html += '</tbody></table></div>';
 
-        Swal.fire({ title: `<i class="bi bi-cash-coin text-success"></i> Pagos a: ${nombre}`, html: html, width: '750px', showCloseButton: true, showConfirmButton: false });
+        Swal.fire({ title: `<i class="bi bi-cash-coin text-success"></i> Pagos a: ${escapeHtmlFactura(nombre)}`, html: html, width: '750px', showCloseButton: true, showConfirmButton: false });
     } catch (e) {
         Swal.fire('Error', 'No se pudo cargar el historial de pagos.', 'error');
     }
@@ -1919,7 +1923,7 @@ async function verHistorialProveedor(id, nombre) {
         // EL PARCHE: Agregamos el botón de Excel acá arriba y le ponemos el ID a la tabla
         let html = `
         <div class="text-end mb-2">
-            <button class="btn btn-sm btn-success fw-bold shadow-sm" onclick="exportarComprasAExcel('${nombre}')">
+            <button class="btn btn-sm btn-success fw-bold shadow-sm" onclick="exportarComprasAExcel(${jsArg(nombre)})">
                 <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
             </button>
         </div>
@@ -1931,19 +1935,19 @@ async function verHistorialProveedor(id, nombre) {
             html += '<tr><td colspan="4" class="text-center text-muted py-3">No hay compras registradas.</td></tr>';
         } else {
             data.historial.forEach(c => {
-                let badge = c.condicion_pago.includes('Contado') ? 'bg-success' : 'bg-warning text-dark';
+                let badge = String(c.condicion_pago || '').includes('Contado') ? 'bg-success' : 'bg-warning text-dark';
                 html += `<tr>
-                    <td class="text-muted small">${c.fecha_compra}</td>
-                    <td class="fw-bold"><a href="#" onclick="verDetalleFactura(${c.id}, '${c.numero_factura}', ${id}, '${nombre}')" class="text-decoration-none">${c.numero_factura} <i class="bi bi-box-arrow-up-right small"></i></a></td>
-                    <td><span class="badge ${badge}">${c.condicion_pago}</span></td>
-                    <td class="text-end fw-bold">$${c.total_factura.toFixed(2)}</td>
+                    <td class="text-muted small">${escapeHtmlFactura(c.fecha_compra)}</td>
+                    <td class="fw-bold"><a href="#" onclick="verDetalleFactura(${Number(c.id)}, ${jsArg(c.numero_factura)}, ${Number(id)}, ${jsArg(nombre)})" class="text-decoration-none">${escapeHtmlFactura(c.numero_factura)} <i class="bi bi-box-arrow-up-right small"></i></a></td>
+                    <td><span class="badge ${badge}">${escapeHtmlFactura(c.condicion_pago)}</span></td>
+                    <td class="text-end fw-bold">$${Number(c.total_factura).toFixed(2)}</td>
                 </tr>`;
             });
         }
         html += '</tbody></table></div>';
 
         Swal.fire({
-            title: `<i class="bi bi-clock-history text-primary"></i> Historial: ${nombre}`,
+            title: `<i class="bi bi-clock-history text-primary"></i> Historial: ${escapeHtmlFactura(nombre)}`,
             html: html,
             width: '600px',
             showCloseButton: true,
@@ -1967,7 +1971,7 @@ async function verDetalleFactura(compraId, numFactura, proveedorId, nombreProvee
         let subtotalProductos = 0;
         data.detalle.forEach(d => {
             subtotalProductos += d.subtotal;
-            html += `<tr><td class="fw-bold">${d.cantidad_comprada}</td><td class="text-start">${d.descripcion_historica}</td><td class="text-muted">$${d.costo_unitario.toFixed(2)}</td><td class="fw-bold text-primary">$${d.subtotal.toFixed(2)}</td></tr>`;
+            html += `<tr><td class="fw-bold">${Number(d.cantidad_comprada)}</td><td class="text-start">${escapeHtmlFactura(d.descripcion_historica)}</td><td class="text-muted">$${Number(d.costo_unitario).toFixed(2)}</td><td class="fw-bold text-primary">$${Number(d.subtotal).toFixed(2)}</td></tr>`;
         });
         
         html += `</tbody></table></div>`;
@@ -1982,7 +1986,7 @@ async function verDetalleFactura(compraId, numFactura, proveedorId, nombreProvee
         `;
 
         const resultado = await Swal.fire({
-            title: `<i class="bi bi-receipt"></i> Factura: ${numFactura}`,
+            title: `<i class="bi bi-receipt"></i> Factura: ${escapeHtmlFactura(numFactura)}`,
             html: html,
             width: '750px',
             showCloseButton: true,
@@ -2010,14 +2014,14 @@ function imprimirTicketDetalle(items, numFactura, proveedor, total) {
     const fecha = new Date().toLocaleDateString();
     let tablaHtml = '';
     items.forEach(i => {
-        tablaHtml += `<tr><td>${i.cantidad_comprada}</td><td>${i.descripcion_historica}</td><td>$${i.costo_unitario.toFixed(2)}</td><td>$${i.subtotal.toFixed(2)}</td></tr>`;
+        tablaHtml += `<tr><td>${Number(i.cantidad_comprada)}</td><td>${escapeHtmlFactura(i.descripcion_historica)}</td><td>$${Number(i.costo_unitario).toFixed(2)}</td><td>$${Number(i.subtotal).toFixed(2)}</td></tr>`;
     });
 
     const win = window.open('', '_blank');
     win.document.write(`
         <html>
         <head>
-            <title>Factura ${numFactura}</title>
+            <title>Factura ${escapeHtmlFactura(numFactura)}</title>
             <style>
                 body { font-family: 'Courier New', Courier, monospace; padding: 20px; font-size: 14px; }
                 .header { text-align: center; border-bottom: 2px solid #000; margin-bottom: 10px; padding-bottom: 10px; }
@@ -2031,7 +2035,7 @@ function imprimirTicketDetalle(items, numFactura, proveedor, total) {
                 <h1 style="margin:0;">AUTOSERVICIO 20 DE JUNIO</h1>
                 <p style="margin:2px;">Calle 20 de Junio - El Colorado, Formosa</p>
                 <hr>
-                <p><b>PROVEEDOR:</b> ${proveedor} | <b>FACTURA:</b> ${numFactura}</p>
+                <p><b>PROVEEDOR:</b> ${escapeHtmlFactura(proveedor)} | <b>FACTURA:</b> ${escapeHtmlFactura(numFactura)}</p>
                 <p><b>FECHA DE IMPRESIÓN:</b> ${fecha}</p>
             </div>
             <table>
@@ -2087,10 +2091,10 @@ function imprimirComprobantePago(proveedor, fecha, monto, metodo, obs) {
             <h2>AUTOSERVICIO 20 DE JUNIO</h2>
             <h3>COMPROBANTE DE PAGO</h3>
             <div class="line"></div>
-            <p><b>PROVEEDOR:</b> ${proveedor}</p>
-            <p><b>FECHA:</b> ${fecha}</p>
-            <p><b>MÉTODO:</b> ${metodo}</p>
-            <p><b>DETALLE:</b> ${obs || 'Pago a cuenta'}</p>
+            <p><b>PROVEEDOR:</b> ${escapeHtmlFactura(proveedor)}</p>
+            <p><b>FECHA:</b> ${escapeHtmlFactura(fecha)}</p>
+            <p><b>MÉTODO:</b> ${escapeHtmlFactura(metodo)}</p>
+            <p><b>DETALLE:</b> ${escapeHtmlFactura(obs || 'Pago a cuenta')}</p>
             
             <div class="monto">TOTAL PAGADO: $${parseFloat(monto).toFixed(2)}</div>
             

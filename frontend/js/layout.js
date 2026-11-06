@@ -1,7 +1,7 @@
 // ========================================================
 // CONFIGURACIÓN GLOBAL
 // ========================================================
-const APP_VERSION = "v1.0.40"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
+const APP_VERSION = "v1.0.41"; // Modificá este número antes de cada compilación (y el ?v= de los <script> en los .html)
 
 function obtenerBaseUrl() {
     const protocolo = window.location.protocol;
@@ -84,12 +84,20 @@ function urlLogoNegocio() {
     }
 })();
 
-function inyectarLayout() {
-    const nombre = localStorage.getItem('usuario_nombre') || 'Desconocido';
-    const rol = localStorage.getItem('usuario_rol') || '';
-    const esAdmin = rol === 'ADMIN';
+// Nombre, rol y negocio salen de localStorage/config: se escapan antes de entrar a innerHTML/outerHTML.
+function escaparTextoLayout(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
 
-    const nombreLocal = nombreNegocio();
+function inyectarLayout() {
+    const nombre = escaparTextoLayout(localStorage.getItem('usuario_nombre') || 'Desconocido');
+    const rolCrudo = localStorage.getItem('usuario_rol') || '';
+    const rol = escaparTextoLayout(rolCrudo);
+    const esAdmin = rolCrudo === 'ADMIN';
+
+    const nombreLocal = escaparTextoLayout(nombreNegocio());
 
     // Se agrega flexbox (d-flex flex-column) para mandar el footer al fondo
     const sidebarHTML = `
