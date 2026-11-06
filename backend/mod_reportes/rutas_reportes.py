@@ -688,9 +688,12 @@ class LanzarOferta(BaseModel):
     producto_id: int
     porcentaje_descuento: float # Ej: 20 para un 20% OFF
     motivo: str # "Vencimiento Cercano" o "Baja Rotación"
+    dias: int = 7 # Cuántos días dura, contando hoy
 
 @router.post("/lanzar_oferta", dependencies=[Depends(VerificarRol(["ADMIN"]))])
 def crear_oferta_urgente(oferta: LanzarOferta):
+    from backend.mod_productos.rutas_productos import asegurar_columnas_promociones
+    asegurar_columnas_promociones()
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     
@@ -704,6 +707,10 @@ def crear_oferta_urgente(oferta: LanzarOferta):
         if not prod:
             raise Exception("El producto no existe.")
 
+        if not (0 < oferta.porcentaje_descuento < 100):
+            raise Exception("El descuento va de 1 a 99 %.")
+        if oferta.dias < 1 or oferta.dias > 60:
+            raise Exception("La oferta dura de 1 a 60 días.")
         nuevo_precio = round(prod[0] * (1 - (oferta.porcentaje_descuento / 100)), 2)
         iva = float(prod[3] if prod[3] is not None else 21)
         if iva < 0:
@@ -713,15 +720,21 @@ def crear_oferta_urgente(oferta: LanzarOferta):
             raise Exception(
                 f"El precio quedaría en ${nuevo_precio:.2f}, por debajo del costo con IVA (${costo_con_iva:.2f})."
             )
-        nuevo_nombre = f"OFERTA {prod[1]}"
-        
-        # B. Actualizamos el producto para que la caja lo cobre barato YA
-        cursor.execute('''
-            UPDATE productos 
-            SET precio_venta_final = ?, 
-                nombre = ? 
-            WHERE id = ?
-        ''', (nuevo_precio, nuevo_nombre, oferta.producto_id))
+        # B. Promo de cantidad 1 con fecha: la ficha no se toca y al vencer la caja vuelve sola al precio de lista.
+        hoy = datetime.now(ZONA_AR).date()
+        hasta = hoy + timedelta(days=oferta.dias - 1)
+        cursor.execute(
+            "DELETE FROM promociones_volumen WHERE producto_id = ? AND origen = 'LIQUIDAR'",
+            (oferta.producto_id,),
+        )
+        cursor.execute(
+            '''
+            INSERT INTO promociones_volumen
+                (producto_id, cantidad_minima, precio_oferta_unitario, tipo, fecha_desde, fecha_hasta, origen, cartel_retirado)
+            VALUES (?, 1, ?, 'VOLUMEN', ?, ?, 'LIQUIDAR', 0)
+            ''',
+            (oferta.producto_id, nuevo_precio, hoy.isoformat(), hasta.isoformat()),
+        )
         
         # C. Lo mandamos a la COLA DE IMPRESIÓN (para el cartel de góndola)
         cursor.execute('''
@@ -731,7 +744,12 @@ def crear_oferta_urgente(oferta: LanzarOferta):
         
         conexion.commit()
         conexion.close()
-        return {"mensaje": f"¡Oferta lanzada! El {prod[1]} ahora cuesta ${nuevo_precio}. Imprimí los carteles ahora."}
+        return {
+            "mensaje": (
+                f"{prod[1]} queda a ${nuevo_precio:.2f} hasta el {hasta.strftime('%d/%m')}. "
+                "Después vuelve solo al precio de lista. El cartel A4 quedó en la cola."
+            )
+        }
         
     except Exception as e:
             if conexion:

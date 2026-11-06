@@ -800,6 +800,72 @@ function procesarResultadosBusqueda(productos, queryOriginal) {
     }
 }
 
+// ===== PROMOS: una sola cuenta para la pantalla, la venta y el remito =====
+function fechaHoyARPos() {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+}
+
+function esPesablePos(p) {
+    return (p.unidad_medida || '').toLowerCase().includes('kg') || String(p.tipo_venta || '').toUpperCase() === 'PESO';
+}
+
+/** Reglas que valen hoy (Argentina). El catálogo offline trae también las que arrancan más adelante. */
+function reglasVigentesPos(p) {
+    const hoy = fechaHoyARPos();
+    return (p.reglas_mayoristas || []).filter((r) =>
+        (!r.fecha_desde || r.fecha_desde <= hoy) && (!r.fecha_hasta || r.fecha_hasta >= hoy)
+    );
+}
+
+const redondearCent = (n) => Math.round(n * 100) / 100;
+
+/**
+ * Devuelve los renglones que se cobran: [{cantidad, precio}] y una etiqueta para la pantalla.
+ * Volumen: todas las unidades al precio de la regla. Pack: packs completos + sobrante a lista.
+ * Si hay las dos, gana la más barata para el cliente. Precio manual: manda el manual.
+ */
+function lineasDePrecio(p) {
+    const lista = Number(p.precio_venta_final) || 0;
+    const cant = Number(p.cantidad) || 0;
+    const base = { lineas: [{ cantidad: cant, precio: lista }], etiqueta: '', total: redondearCent(lista * cant) };
+    if (p.precio_modificado_manual || cant <= 0) return base;
+
+    const reglas = reglasVigentesPos(p);
+    let mejor = base;
+
+    const volumen = reglas
+        .filter((r) => (r.tipo || 'VOLUMEN') === 'VOLUMEN' && cant >= Number(r.cantidad_minima))
+        .sort((a, b) => b.cantidad_minima - a.cantidad_minima)[0];
+    if (volumen) {
+        const precio = Number(volumen.precio_oferta_unitario);
+        const total = redondearCent(precio * cant);
+        if (total < mejor.total) {
+            const etiqueta = Number(volumen.cantidad_minima) <= 1 ? 'Oferta aplicada' : `Promo x${volumen.cantidad_minima} aplicada`;
+            mejor = { lineas: [{ cantidad: cant, precio }], etiqueta, total };
+        }
+    }
+
+    if (!esPesablePos(p) && Number.isInteger(cant)) {
+        reglas.filter((r) => r.tipo === 'PACK' && Number(r.precio_pack) > 0).forEach((r) => {
+            const n = Number(r.cantidad_minima);
+            if (!Number.isInteger(n) || n < 2 || cant < n) return;
+            const packs = Math.floor(cant / n);
+            const sueltas = cant - packs * n;
+            // Para abajo: el pack nunca sale más caro que el cartel.
+            const precioPackUnit = Math.floor((Number(r.precio_pack) / n) * 100) / 100;
+            const lineas = [{ cantidad: packs * n, precio: precioPackUnit }];
+            if (sueltas > 0) lineas.push({ cantidad: sueltas, precio: lista });
+            const total = redondearCent(lineas.reduce((s, l) => s + l.precio * l.cantidad, 0));
+            if (total < mejor.total) {
+                const nombrePack = Number(r.precio_pack) === redondearCent(lista * (n - 1)) ? `${n}x${n - 1}` : `${n} por $${Number(r.precio_pack).toFixed(2)}`;
+                const etiqueta = `Pack ${nombrePack} ×${packs}` + (sueltas ? ` + ${sueltas} suelta${sueltas > 1 ? 's' : ''}` : '');
+                mejor = { lineas, etiqueta, total };
+            }
+        });
+    }
+    return mejor;
+}
+
 function agregarAlCarrito(p) {
     // 1. Detectamos si el producto se vende por peso
     // (Ajustá 'PESO' o 'Kg' según cómo lo hayas escrito en tu base de datos)
@@ -989,19 +1055,13 @@ function actualizarTabla() {
     document.getElementById('visorCantidadArticulos').innerText = `(${cantidadTotalArticulos} Artículos)`;
 
     carrito.forEach((p, i) => {
-        let precioF = p.precio_venta_final;
-        let badgePromo = "";
+        const calc = lineasDePrecio(p);
+        const precioF = calc.lineas.length === 1 ? calc.lineas[0].precio : Number(p.precio_venta_final) || 0;
+        const badgePromo = calc.etiqueta
+            ? `<br><span class="badge bg-warning text-dark mt-1" style="font-size:0.65rem;">${escHtmlPos(calc.etiqueta)}</span>`
+            : '';
 
-        if (p.reglas_mayoristas && p.reglas_mayoristas.length > 0 && !p.precio_modificado_manual) {
-            let reglas = p.reglas_mayoristas.sort((a, b) => b.cantidad_minima - a.cantidad_minima);
-            let regla = reglas.find(r => p.cantidad >= r.cantidad_minima);
-            if (regla) {
-                precioF = regla.precio_oferta_unitario;
-                badgePromo = `<br><span class="badge bg-warning text-dark mt-1" style="font-size:0.65rem;">Promo x${regla.cantidad_minima} aplicada</span>`;
-            }
-        }
-
-        const sub = precioF * p.cantidad; subtotalVenta += sub;
+        const sub = calc.total; subtotalVenta += sub;
         const unidad = (p.unidad_medida || "Un").toLowerCase().includes("kg") || p.tipo_venta === 'PESO' ? "Kg" : "un.";
 
         tbody.innerHTML += `
@@ -1211,25 +1271,19 @@ function calcularVuelto() {
 // ===== NUEVO MOTOR: ENVIAR VENTA A PYTHON =====
 // 1. ADAPTAMOS EL MOTOR PRINCIPAL PARA RECIBIR LA LISTA MIXTA
 async function procesarVentaBackend(metodoPago, montoEntregado, arrayPagosMixtos = null, autorizadoPor = null, extras = null) {
-    const itemsVenta = carrito.map(p => {
-        let precioCalculado = p.precio_venta_final;
-        if (p.reglas_mayoristas && p.reglas_mayoristas.length > 0) {
-            let reglas = [...p.reglas_mayoristas].sort((a, b) => b.cantidad_minima - a.cantidad_minima);
-            let regla = reglas.find(r => p.cantidad >= r.cantidad_minima);
-            if (regla) precioCalculado = regla.precio_oferta_unitario;
-        }
-
+    const itemsVenta = carrito.flatMap(p => {
         let idLimpio = parseInt(p.id);
         if (isNaN(idLimpio) || idLimpio > 999999999) {
             idLimpio = 0;
         }
 
-        return {
+        // Un pack con sobrante viaja en dos renglones: el ticket muestra el pack aparte.
+        return lineasDePrecio(p).lineas.map((l) => ({
             producto_id: idLimpio, // <-- MANDAMOS EL NÚMERO LIMPIO
-            cantidad: p.cantidad,
-            precio_unitario: precioCalculado,
+            cantidad: l.cantidad,
+            precio_unitario: l.precio,
             nombre_fantasma: p.nombre
-        };
+        }));
     });
 
     let descuentoRecargoTotal = 0;
@@ -3248,16 +3302,16 @@ function imprimirRemitoFiado(cliente, total, articulos) {
             `;
         // Bucle de productos con la unidad (Kg / un.)
         articulos.forEach(p => {
-            let precioF = p.precio_venta_final;
-            if (p.cant_promo && p.cantidad >= p.cant_promo) precioF = p.precio_promo;
+            const calc = lineasDePrecio(p);
 
             let unidad = (p.unidad_medida || "un").toLowerCase().includes("kg") || p.tipo_venta === 'PESO' ? "Kg" : "un.";
+            const detallePromo = calc.etiqueta ? `<br><span style="font-size:10px;">${escHtmlPos(calc.etiqueta)}</span>` : '';
 
             htmlCuerpo += `
                     <tr>
                         <td class="left">${p.cantidad} <span style="font-size:10px;">${unidad}</span></td>
-                        <td class="left">${p.nombre}</td>
-                        <td class="right">$${(precioF * p.cantidad).toFixed(2)}</td>
+                        <td class="left">${escHtmlPos(p.nombre)}${detallePromo}</td>
+                        <td class="right">$${calc.total.toFixed(2)}</td>
                     </tr>`;
         });
 

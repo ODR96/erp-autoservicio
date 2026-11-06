@@ -32,6 +32,151 @@ def asegurar_columna_controla_stock(cursor=None):
 asegurar_columna_controla_stock()
 
 
+# --- PROMOCIONES: VOLUMEN ("llevando N o más, $X c/u") y PACK ("N por $X", 2x1, 3x2) ---
+TIPOS_PROMO = ("VOLUMEN", "PACK")
+DIAS_PROMOS_VENCIDAS = 14
+
+
+def asegurar_columnas_promociones(cursor=None):
+    """Fechas vacías = sin vencimiento. Las vencidas quedan como historial."""
+    propia = cursor is None
+    conexion = None
+    if propia:
+        conexion = obtener_conexion()
+        cursor = conexion.cursor()
+    for ddl in (
+        "ALTER TABLE promociones_volumen ADD COLUMN tipo TEXT DEFAULT 'VOLUMEN'",
+        "ALTER TABLE promociones_volumen ADD COLUMN fecha_desde TEXT",
+        "ALTER TABLE promociones_volumen ADD COLUMN fecha_hasta TEXT",
+        "ALTER TABLE promociones_volumen ADD COLUMN precio_pack REAL",
+        "ALTER TABLE promociones_volumen ADD COLUMN origen TEXT",
+        "ALTER TABLE promociones_volumen ADD COLUMN cartel_retirado INTEGER DEFAULT 0",
+    ):
+        try:
+            cursor.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
+    if propia and conexion:
+        conexion.commit()
+        conexion.close()
+
+
+asegurar_columnas_promociones()
+
+
+def hoy_ar() -> str:
+    return datetime.now(ZONA_AR).strftime("%Y-%m-%d")
+
+
+def _fecha_promo(valor, campo: str):
+    texto = (valor or "").strip() if isinstance(valor, str) else ""
+    if not texto:
+        return None
+    try:
+        return date.fromisoformat(texto).isoformat()
+    except ValueError:
+        raise ValueError(f"La fecha '{campo}' de una promo no es válida.")
+
+
+def normalizar_reglas_promo(reglas: list, precio_lista: float) -> list:
+    """Valida lo que manda la ficha. Acepta el formato viejo {cantidad, precio}."""
+    limpias = []
+    for r in reglas or []:
+        if not isinstance(r, dict):
+            raise ValueError("Regla de promo inválida.")
+        tipo = str(r.get("tipo") or "VOLUMEN").upper()
+        if tipo not in TIPOS_PROMO:
+            raise ValueError("Tipo de promo inválido.")
+        try:
+            cantidad = float(r.get("cantidad") or 0)
+        except (TypeError, ValueError):
+            raise ValueError("La cantidad de una promo no es válida.")
+        desde = _fecha_promo(r.get("desde"), "desde")
+        hasta = _fecha_promo(r.get("hasta"), "hasta")
+        if desde and hasta and hasta < desde:
+            raise ValueError("En una promo, el 'hasta' es anterior al 'desde'.")
+        origen = (str(r.get("origen") or "").strip().upper() or None)
+        if origen not in (None, "LIQUIDAR"):
+            origen = None
+        retirado = 1 if r.get("cartel_retirado") else 0
+
+        if tipo == "VOLUMEN":
+            try:
+                precio = float(r.get("precio") or 0)
+            except (TypeError, ValueError):
+                raise ValueError("El precio de una promo no es válido.")
+            if cantidad <= 0 or precio <= 0:
+                raise ValueError("Una promo de volumen necesita cantidad y precio mayores a 0.")
+            limpias.append({
+                "tipo": "VOLUMEN", "cantidad": cantidad, "precio": round(precio, 2), "precio_pack": None,
+                "desde": desde, "hasta": hasta, "origen": origen, "cartel_retirado": retirado,
+            })
+        else:
+            try:
+                precio_pack = float(r.get("precio_pack") or 0)
+            except (TypeError, ValueError):
+                raise ValueError("El precio del pack no es válido.")
+            if cantidad < 2 or int(cantidad) != cantidad:
+                raise ValueError("Un pack lleva 2 unidades o más, en número entero.")
+            if precio_pack <= 0:
+                raise ValueError("El precio del pack tiene que ser mayor a 0.")
+            if precio_lista > 0 and precio_pack >= round(precio_lista * cantidad, 2):
+                raise ValueError(
+                    f"El pack de {int(cantidad)} a ${precio_pack:.2f} no es más barato que comprarlos sueltos."
+                )
+            limpias.append({
+                "tipo": "PACK", "cantidad": int(cantidad), "precio": round(precio_pack / cantidad, 2),
+                "precio_pack": round(precio_pack, 2),
+                "desde": desde, "hasta": hasta, "origen": origen, "cartel_retirado": retirado,
+            })
+    return limpias
+
+
+def guardar_reglas_promo(cursor, producto_id: int, reglas_limpias: list):
+    cursor.execute("DELETE FROM promociones_volumen WHERE producto_id = ?", (producto_id,))
+    for r in reglas_limpias:
+        cursor.execute(
+            """
+            INSERT INTO promociones_volumen
+                (producto_id, cantidad_minima, precio_oferta_unitario, tipo, fecha_desde, fecha_hasta,
+                 precio_pack, origen, cartel_retirado)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (producto_id, r["cantidad"], r["precio"], r["tipo"], r["desde"], r["hasta"],
+             r["precio_pack"], r["origen"], r["cartel_retirado"]),
+        )
+
+
+# Lo que recibe la caja: lo no vencido (también lo que arranca más adelante, para la caja sin conexión).
+SQL_PROMO_NO_VENCIDA = "(IFNULL(fecha_hasta, '') = '' OR fecha_hasta >= ?)"
+SQL_PROMO_VIGENTE_HOY = (
+    "(IFNULL(fecha_desde, '') = '' OR fecha_desde <= ?) AND (IFNULL(fecha_hasta, '') = '' OR fecha_hasta >= ?)"
+)
+
+
+def regla_para_caja(fila) -> dict:
+    return {
+        "cantidad_minima": fila["cantidad_minima"],
+        "precio_oferta_unitario": fila["precio_oferta_unitario"],
+        "tipo": fila["tipo"] or "VOLUMEN",
+        "precio_pack": fila["precio_pack"],
+        "fecha_desde": fila["fecha_desde"] or None,
+        "fecha_hasta": fila["fecha_hasta"] or None,
+    }
+
+
+def reglas_para_caja(cursor, producto_id: int) -> list:
+    cursor.execute(
+        f"""
+        SELECT cantidad_minima, precio_oferta_unitario, tipo, precio_pack, fecha_desde, fecha_hasta
+        FROM promociones_volumen WHERE producto_id = ? AND {SQL_PROMO_NO_VENCIDA}
+        ORDER BY cantidad_minima ASC
+        """,
+        (producto_id, hoy_ar()),
+    )
+    return [regla_para_caja(r) for r in cursor.fetchall()]
+
+
 def compensar_deuda_stock(cursor, producto_id, fecha_hoy_ar=None):
     """Come lotes positivos contra VENTA_SIN_STOCK. Queda en la transacción del caller."""
     if not fecha_hoy_ar:
@@ -146,8 +291,7 @@ def crear_producto(producto: ProductoNuevo, background_tasks: BackgroundTasks):
             
         for comp in producto.componentes_combo:
             cursor.execute("INSERT INTO productos_combos (producto_padre_id, producto_hijo_id, cantidad_hijo) VALUES (?, ?, ?)", (nuevo_id, comp['id'], comp['cantidad']))
-        for r in producto.reglas_mayoristas:
-            cursor.execute("INSERT INTO promociones_volumen (producto_id, cantidad_minima, precio_oferta_unitario) VALUES (?, ?, ?)", (nuevo_id, r['cantidad'], r['precio']))
+        guardar_reglas_promo(cursor, nuevo_id, normalizar_reglas_promo(producto.reglas_mayoristas, producto.precio_venta_final))
             
         # ACÁ BORRAMOS LA INYECCIÓN AUTOMÁTICA DE LA ETIQUETA
 
@@ -346,8 +490,9 @@ def listar_todos_los_productos(
                 p.costo_sin_iva, p.porcentaje_iva, p.precio_venta_final, p.dias_alerta_vencimiento, p.stock_minimo_alerta, p.unidades_por_bulto, IFNULL(p.controla_stock, 1) as controla_stock,
                 (SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo') as stock_total,
                 (SELECT COUNT(id) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible != 0) as cantidad_lotes,            
-                (SELECT precio_oferta_unitario FROM promociones_volumen WHERE producto_id = p.id ORDER BY cantidad_minima ASC LIMIT 1) as precio_promo,
-                (SELECT cantidad_minima FROM promociones_volumen WHERE producto_id = p.id ORDER BY cantidad_minima ASC LIMIT 1) as cant_promo,
+                (SELECT precio_oferta_unitario FROM promociones_volumen WHERE producto_id = p.id AND IFNULL(tipo, 'VOLUMEN') = 'VOLUMEN' AND {SQL_PROMO_VIGENTE_HOY} ORDER BY cantidad_minima ASC LIMIT 1) as precio_promo,
+                (SELECT cantidad_minima FROM promociones_volumen WHERE producto_id = p.id AND IFNULL(tipo, 'VOLUMEN') = 'VOLUMEN' AND {SQL_PROMO_VIGENTE_HOY} ORDER BY cantidad_minima ASC LIMIT 1) as cant_promo,
+                (SELECT COUNT(*) FROM promociones_volumen WHERE producto_id = p.id AND tipo = 'PACK' AND {SQL_PROMO_VIGENTE_HOY}) as packs_vigentes,
                 (SELECT MIN(fecha_vencimiento) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo' AND cantidad_disponible > 0) as prox_vencimiento,
                 (SELECT COUNT(*) FROM productos_combos WHERE producto_padre_id = p.id) as es_combo
             {query_base}
@@ -355,8 +500,10 @@ def listar_todos_los_productos(
             LIMIT ? OFFSET ?
         '''
         parametros.extend([limit, offset])
+        hoy = hoy_ar()
+        params_promos = [hoy] * 6  # tres subconsultas de promo vigente, dos fechas cada una
         
-        cursor.execute(query_final, tuple(parametros))
+        cursor.execute(query_final, tuple(params_promos + parametros))
         productos = [dict(prod) for prod in cursor.fetchall()]
 
         return {
@@ -396,9 +543,7 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
         for comp in datos.componentes_combo:
             cursor.execute("INSERT INTO productos_combos (producto_padre_id, producto_hijo_id, cantidad_hijo) VALUES (?, ?, ?)", (producto_id, comp['id'], comp['cantidad']))
             
-        cursor.execute("DELETE FROM promociones_volumen WHERE producto_id = ?", (producto_id,))
-        for r in datos.reglas_mayoristas:
-            cursor.execute("INSERT INTO promociones_volumen (producto_id, cantidad_minima, precio_oferta_unitario) VALUES (?, ?, ?)", (producto_id, r['cantidad'], r['precio']))
+        guardar_reglas_promo(cursor, producto_id, normalizar_reglas_promo(datos.reglas_mayoristas, datos.precio_venta_final))
             
         conexion.commit()
         return {"mensaje": "Actualizado correctamente."}
@@ -424,8 +569,17 @@ def ver_producto_por_id(producto_id: int):
         
         resultado = dict(producto)
         
-        cursor.execute("SELECT cantidad_minima as cantidad, precio_oferta_unitario as precio FROM promociones_volumen WHERE producto_id = ?", (producto_id,))
+        cursor.execute(
+            """
+            SELECT cantidad_minima as cantidad, precio_oferta_unitario as precio, IFNULL(tipo, 'VOLUMEN') as tipo,
+                   precio_pack, fecha_desde as desde, fecha_hasta as hasta, origen, IFNULL(cartel_retirado, 0) as cartel_retirado
+            FROM promociones_volumen WHERE producto_id = ?
+            ORDER BY IFNULL(fecha_hasta, '9999-12-31') DESC, cantidad_minima ASC
+            """,
+            (producto_id,),
+        )
         resultado["reglas_mayoristas"] = [dict(r) for r in cursor.fetchall()]
+        resultado["hoy_ar"] = hoy_ar()
 
         compensar_deuda_stock(cursor, producto_id)
         conexion.commit() 
@@ -516,8 +670,7 @@ def buscar_producto(q: Optional[str] = None, termino: Optional[str] = None, quer
             productos_listos = []
             for p in lista_cruda:
                 p_dict = dict(p)
-                cursor.execute("SELECT cantidad_minima, precio_oferta_unitario FROM promociones_volumen WHERE producto_id = ?", (p_dict['id'],))
-                p_dict['reglas_mayoristas'] = [dict(r) for r in cursor.fetchall()]
+                p_dict['reglas_mayoristas'] = reglas_para_caja(cursor, p_dict['id'])
                 
                 cursor.execute("SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = ? AND estado_lote = 'Activo' AND cantidad_disponible > 0", (p_dict['id'],))
                 stock_real = cursor.fetchone()[0]
@@ -568,8 +721,7 @@ def obtener_por_codigo(codigo_barras: str):
         if prod: 
             p_dict = dict(prod)
             
-            cursor.execute("SELECT cantidad_minima, precio_oferta_unitario FROM promociones_volumen WHERE producto_id = ?", (p_dict['id'],))
-            p_dict['reglas_mayoristas'] = [dict(r) for r in cursor.fetchall()]
+            p_dict['reglas_mayoristas'] = reglas_para_caja(cursor, p_dict['id'])
             
             cursor.execute("SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = ? AND estado_lote = 'Activo' AND cantidad_disponible > 0", (p_dict['id'],))
             stock_real = cursor.fetchone()[0]
@@ -750,6 +902,49 @@ def eliminar_categoria(cat_id: int):
     finally:
         if conexion:
             conexion.close()
+
+@router.get("/promos/vencidas", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def listar_promos_vencidas():
+    """Promos que vencieron hace poco y cuyo cartel nadie marcó como sacado de la góndola."""
+    hoy = hoy_ar()
+    desde = (datetime.now(ZONA_AR).date() - timedelta(days=DIAS_PROMOS_VENCIDAS)).isoformat()
+    conexion = obtener_conexion()
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT pv.id, pv.producto_id, p.nombre, p.precio_venta_final, IFNULL(pv.tipo, 'VOLUMEN') as tipo, pv.cantidad_minima,
+                   pv.precio_oferta_unitario, pv.precio_pack, pv.fecha_hasta
+            FROM promociones_volumen pv
+            JOIN productos p ON p.id = pv.producto_id
+            WHERE IFNULL(pv.fecha_hasta, '') <> '' AND pv.fecha_hasta < ? AND pv.fecha_hasta >= ?
+              AND IFNULL(pv.cartel_retirado, 0) = 0 AND p.activo = 1
+            ORDER BY pv.fecha_hasta DESC, p.nombre ASC
+            """,
+            (hoy, desde),
+        )
+        return {"promos": [dict(r) for r in cursor.fetchall()]}
+    finally:
+        conexion.close()
+
+
+@router.post("/promos/{promo_id}/cartel_retirado", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def marcar_cartel_retirado(promo_id: int):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+    try:
+        cursor.execute(
+            "UPDATE promociones_volumen SET cartel_retirado = 1 WHERE id = ? AND IFNULL(fecha_hasta, '') <> '' AND fecha_hasta < ?",
+            (promo_id, hoy_ar()),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Esa promo no existe o todavía no venció.")
+        conexion.commit()
+        return {"mensaje": "Listo"}
+    finally:
+        conexion.close()
+
 
 # "Cenefa" y "OFERTA_A4" son filas viejas: el frente las sigue leyendo, pero no entran nuevas.
 FORMATOS_CARTEL = ("Cenefa_Normal", "Cenefa_Doble", "Cartel_A4")
@@ -1067,6 +1262,7 @@ def descargar_catalogo_offline():
         # 1. Traemos SOLO la info necesaria para cobrar (nada de costos ni lotes pesados)
         cursor.execute('''
             SELECT p.id, p.codigo_barras, p.nombre, p.precio_venta_final, p.unidad_medida, p.categoria_id, p.tipo_venta,
+            IFNULL(p.unidades_por_bulto, 1) as unidades_por_bulto,
             (SELECT SUM(cantidad_disponible) FROM lotes_stock WHERE producto_id = p.id AND estado_lote = 'Activo') as stock_actual
             FROM productos p
             WHERE p.activo = 1
@@ -1074,15 +1270,20 @@ def descargar_catalogo_offline():
         productos = [dict(p) for p in cursor.fetchall()]
         
         # 2. Buscamos todas las promociones juntas (mucho más rápido que buscar una por una)
-        cursor.execute("SELECT producto_id, cantidad_minima, precio_oferta_unitario as precio FROM promociones_volumen")
+        cursor.execute(
+            f"""
+            SELECT producto_id, cantidad_minima, precio_oferta_unitario, tipo, precio_pack, fecha_desde, fecha_hasta
+            FROM promociones_volumen WHERE {SQL_PROMO_NO_VENCIDA}
+            ORDER BY cantidad_minima ASC
+            """,
+            (hoy_ar(),),
+        )
         promos_raw = cursor.fetchall()
         
         # Armamos un diccionario rápido de promos
         promos_dict = {}
         for pr in promos_raw:
-            pid = pr['producto_id']
-            if pid not in promos_dict: promos_dict[pid] = []
-            promos_dict[pid].append({"cantidad_minima": pr['cantidad_minima'], "precio_oferta_unitario": pr['precio']})
+            promos_dict.setdefault(pr['producto_id'], []).append(regla_para_caja(pr))
         
         # 3. Le pegamos las promos a cada producto y limpiamos nulos
         for p in productos:

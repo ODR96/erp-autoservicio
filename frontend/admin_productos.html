@@ -392,44 +392,61 @@
                                 </div>
 
                                 <div class="col-md-6 pl-3">
-                                    <h6 class="fw-bold text-secondary mb-3">Reglas de Precio Mayorista / Volumen</h6>
+                                    <h6 class="fw-bold text-secondary mb-3">Promociones (volumen y pack)</h6>
+                                    <div class="btn-group btn-group-sm w-100 mb-2" role="group" aria-label="Tipo de promo">
+                                        <input type="radio" class="btn-check" name="tipoPromo" id="tipoPromoVolumen" value="VOLUMEN" checked onchange="cambiarTipoPromoUI()">
+                                        <label class="btn btn-outline-primary" for="tipoPromoVolumen">Volumen (llevando N o más)</label>
+                                        <input type="radio" class="btn-check" name="tipoPromo" id="tipoPromoPack" value="PACK" onchange="cambiarTipoPromoUI()">
+                                        <label class="btn btn-outline-primary" for="tipoPromoPack">Pack (2x1, 3x2, N por $X)</label>
+                                    </div>
                                     <div class="row g-2 align-items-end">
-                                        <div class="col-5">
-                                            <label class="form-label fw-bold small">A partir de:</label>
+                                        <div class="col-6">
+                                            <label class="form-label fw-bold small" id="lblCantPromo" for="inputCantMayorista">A partir de:</label>
                                             <div class="input-group input-group-sm">
-                                                <input id="inputCantMayorista" type="number"
-                                                    class="form-control text-center" placeholder="Ej: 6">
+                                                <input id="inputCantMayorista" type="number" min="1" step="1"
+                                                    class="form-control text-center" placeholder="Ej: 6" oninput="pintarAyudaPromoUI()">
                                                 <span class="input-group-text">Unid.</span>
                                             </div>
                                         </div>
-                                        <div class="col-5">
-                                            <label class="form-label fw-bold small">Precio Unitario:</label>
+                                        <div class="col-6">
+                                            <label class="form-label fw-bold small" id="lblPrecioPromo" for="inputPrecioMayorista">Precio por unidad:</label>
                                             <div class="input-group input-group-sm">
                                                 <span class="input-group-text">$</span>
-                                                <input id="inputPrecioMayorista" type="number"
-                                                    class="form-control text-end" placeholder="0.00">
+                                                <input id="inputPrecioMayorista" type="number" min="0" step="0.01"
+                                                    class="form-control text-end" placeholder="0.00" oninput="pintarAyudaPromoUI()">
                                             </div>
                                         </div>
-                                        <div class="col-2">
+                                        <div class="col-6">
+                                            <label class="form-label fw-bold small" for="inputPromoDesde">Desde (opcional):</label>
+                                            <input id="inputPromoDesde" type="date" class="form-control form-control-sm">
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label fw-bold small" for="inputPromoHasta">Hasta (opcional):</label>
+                                            <input id="inputPromoHasta" type="date" class="form-control form-control-sm">
+                                        </div>
+                                        <div class="col-12">
+                                            <div id="ayudaPromo" class="small text-muted mb-1">Sin fechas, la promo vale hasta que la borres.</div>
                                             <button class="btn btn-sm btn-outline-primary w-100" type="button"
-                                                onclick="agregarReglaUI()"><i class="bi bi-plus-lg"></i></button>
+                                                onclick="agregarReglaUI()"><i class="bi bi-plus-lg"></i> Agregar promo</button>
                                         </div>
                                     </div>
-                                    <table class="table table-sm mt-3 bg-white border small">
+                                    <div class="table-responsive">
+                                    <table class="table table-sm mt-3 bg-white border small align-middle">
                                         <thead class="table-secondary">
                                             <tr>
-                                                <th class="text-center">Llevando...</th>
-                                                <th class="text-center">Precio x Unidad</th>
+                                                <th>Promo</th>
+                                                <th class="text-center">Vigencia</th>
+                                                <th class="text-center">Estado</th>
                                                 <th></th>
                                             </tr>
                                         </thead>
                                         <tbody id="tablaReglasBody">
                                             <tr>
-                                                <td colspan="3" class="text-center text-muted">No hay reglas
-                                                    configuradas</td>
+                                                <td colspan="4" class="text-center text-muted">No hay promos cargadas</td>
                                             </tr>
                                         </tbody>
                                     </table>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -640,7 +657,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
-    <script src="js/app_productos.js?v=1.0.40"></script>
+    <script src="js/app_productos.js?v=1.0.41"></script>
     <script src="js/layout.js?v=1.0.52"></script>
 
 </body>

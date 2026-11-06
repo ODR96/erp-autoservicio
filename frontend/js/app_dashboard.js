@@ -317,38 +317,53 @@ async function lanzarOfertaModal(id, nombre, motivo) {
             ? (((precioActual / costoConIva) - 1) * 100).toFixed(1)
             : '0.0';
 
-        const { value: descuento } = await Swal.fire({
+        const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const { value: oferta } = await Swal.fire({
             title: 'Liquidar Producto',
             html: `
-                <h5 class="text-info fw-bold mb-3">${nombre}</h5>
+                <h5 class="text-info fw-bold mb-3">${esc(nombre)}</h5>
                 <div class="d-flex justify-content-around mb-3 p-2 bg-dark rounded border border-secondary">
                     <div><small class="d-block text-muted">Costo c/IVA</small><b class="text-danger">$${costoConIva.toFixed(2)}</b></div>
                     <div><small class="d-block text-muted">P. Actual</small><b class="text-success">$${precioActual.toFixed(2)}</b></div>
                     <div><small class="d-block text-muted">Margen</small><b class="text-warning">${margenActual}%</b></div>
                 </div>
-                <small class="text-muted d-block mb-2">Motivo: ${motivo}</small>
+                <small class="text-muted d-block mb-2">Motivo: ${esc(motivo)}</small>
+                <div class="row g-2 text-start">
+                    <div class="col-6">
+                        <label class="form-label small fw-bold" for="liqDescuento">Descuento (%)</label>
+                        <input type="number" id="liqDescuento" class="form-control" min="1" max="99" placeholder="Ej: 20">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-bold" for="liqDias">Dura (días)</label>
+                        <input type="number" id="liqDias" class="form-control" min="1" max="60" value="7">
+                    </div>
+                </div>
+                <div id="liqResumen" class="small text-muted mt-2">El precio de la ficha no cambia: al vencer, la caja vuelve sola al precio de lista.</div>
             `,
-            input: 'number',
-            inputLabel: 'Descuento a aplicar (%)',
-            inputPlaceholder: 'Ej: 20',
             showCancelButton: true,
             confirmButtonText: 'Lanzar Oferta',
             confirmButtonColor: '#d33',
-            inputValidator: (value) => {
-                if (!value || value <= 0 || value > 99) return 'Ingresá un porcentaje válido';
-                let precioNuevo = precioActual * (1 - (value/100));
-                if (precioNuevo <= costoConIva) return `¡Peligro! El precio quedaría en $${precioNuevo.toFixed(2)}, por debajo del costo con IVA ($${costoConIva.toFixed(2)}).`;
+            didOpen: () => document.getElementById('liqDescuento').focus(),
+            preConfirm: () => {
+                const desc = Number(document.getElementById('liqDescuento').value);
+                const dias = Number(document.getElementById('liqDias').value);
+                if (!Number.isFinite(desc) || desc <= 0 || desc > 99) return Swal.showValidationMessage('Ingresá un porcentaje de 1 a 99.');
+                if (!Number.isInteger(dias) || dias < 1 || dias > 60) return Swal.showValidationMessage('La oferta dura de 1 a 60 días.');
+                const precioNuevo = precioActual * (1 - (desc / 100));
+                if (precioNuevo <= costoConIva) return Swal.showValidationMessage(`¡Peligro! El precio quedaría en $${precioNuevo.toFixed(2)}, por debajo del costo con IVA ($${costoConIva.toFixed(2)}).`);
+                return { desc, dias };
             }
         });
 
-        if (descuento) {
-            Swal.fire({ title: 'Actualizando precios...', didOpen: () => Swal.showLoading() });
-            // RUTA CORREGIDA
+        if (oferta) {
+            Swal.fire({ title: 'Lanzando oferta...', didOpen: () => Swal.showLoading() });
             const res = await apiFetchSeguro('/reportes/lanzar_oferta', {
                 method: 'POST',
-                body: JSON.stringify({ producto_id: id, porcentaje_descuento: parseFloat(descuento), motivo: motivo })
+                body: JSON.stringify({ producto_id: id, porcentaje_descuento: oferta.desc, dias: oferta.dias, motivo: motivo })
             });
-            const data = await res.json();
+            let data = {};
+            try { data = await res.json(); } catch (e) { /* sin cuerpo */ }
+            if (!res.ok || data.error) throw new Error(data.error || data.detail || 'No se pudo lanzar la oferta.');
             Swal.fire('¡Oferta Lanzada!', data.mensaje, 'success');
             cargarDashboardCompleto(); 
         }

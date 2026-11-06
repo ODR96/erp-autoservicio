@@ -47,6 +47,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         await refrescarConfigCarteleria();
         await cargarCategoriasCarteleria();
         await cargarColaDesdeDB();
+        await cargarPromosVencidas();
         const inpPalabra = document.getElementById('palabraMasivoCarteleria');
         if (inpPalabra) {
             inpPalabra.addEventListener('keydown', (e) => {
@@ -67,10 +68,92 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 });
 
+// --- PROMOS DEL PRODUCTO PARA EL CARTEL ---
+function fechaHoyARCartel() {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+}
+
+function fmtDiaMes(iso) {
+    if (!iso) return '';
+    const [, m, d] = String(iso).split('-');
+    return `${d}/${m}`;
+}
+
+/** Lo que vale hoy: oferta (volumen de 1), pack y volumen mayorista. */
+function promoCartel(p) {
+    const hoy = fechaHoyARCartel();
+    const reglas = ((p && p.reglas_mayoristas) || []).filter((r) =>
+        (!r.fecha_desde || r.fecha_desde <= hoy) && (!r.fecha_hasta || r.fecha_hasta >= hoy)
+    );
+    const volumenes = reglas.filter((r) => (r.tipo || 'VOLUMEN') === 'VOLUMEN');
+    const oferta = volumenes.filter((r) => Number(r.cantidad_minima) <= 1)
+        .sort((a, b) => a.precio_oferta_unitario - b.precio_oferta_unitario)[0] || null;
+    const volumen = volumenes.filter((r) => Number(r.cantidad_minima) > 1)
+        .sort((a, b) => a.cantidad_minima - b.cantidad_minima)[0] || null;
+    const pack = reglas.find((r) => r.tipo === 'PACK' && Number(r.precio_pack) > 0) || null;
+    return { oferta, volumen, pack };
+}
+
+function tienePromoCartel(p) {
+    const pr = promoCartel(p);
+    return !!(pr.pack || pr.volumen);
+}
+
+function nombrePackCartel(n, precioPack, lista) {
+    if (lista > 0 && Math.abs(precioPack - lista * (n - 1)) < 0.005) return `${n}x${n - 1}`;
+    return `${n} x $${fmtPrecioCartel(precioPack)}`;
+}
+
+/**
+ * Arma el cartel de un producto del catálogo: precio de hoy, tachado, pack/volumen y "válido hasta".
+ * precioAntesManual manda sobre el tachado automático de la oferta.
+ */
+function armarItemProducto(pReal, base) {
+    const item = { ...base };
+    const lista = Number(pReal ? pReal.precio_venta_final : item.precio) || 0;
+    item.precio = lista;
+    item.uxb = (pReal && pReal.unidades_por_bulto) || 1;
+    delete item.precioMayo; delete item.cantMayo; delete item.pack; delete item.txtBulto; delete item.hasta;
+    if (!pReal) return item;
+
+    const pr = promoCartel(pReal);
+    const fechas = [];
+    let antesAuto = null;
+    if (pr.oferta) {
+        item.precio = Number(pr.oferta.precio_oferta_unitario);
+        antesAuto = lista;
+        if (pr.oferta.fecha_hasta) fechas.push(pr.oferta.fecha_hasta);
+    }
+    if (pr.pack) {
+        const n = Number(pr.pack.cantidad_minima);
+        item.pack = { n, precio: Number(pr.pack.precio_pack), nombre: nombrePackCartel(n, Number(pr.pack.precio_pack), lista) };
+        if (pr.pack.fecha_hasta) fechas.push(pr.pack.fecha_hasta);
+    } else if (pr.volumen) {
+        item.precioMayo = Number(pr.volumen.precio_oferta_unitario);
+        item.cantMayo = pr.volumen.cantidad_minima;
+        if (pr.volumen.fecha_hasta) fechas.push(pr.volumen.fecha_hasta);
+    }
+    if (fechas.length) item.hasta = fechas.sort()[0];
+
+    // Regla: A4 multiplica por bulto, Cenefas NO. El pack se anuncia por unidad.
+    if (item.uxb > 1 && item.formato === 'Cartel_A4' && !item.pack) {
+        item.precio = item.precio * item.uxb;
+        if (antesAuto) antesAuto = antesAuto * item.uxb;
+        item.txtBulto = `PRECIO X CAJA CERRADA (${item.uxb} un.)`;
+        if (item.precioMayo) item.precioMayo = item.precioMayo * item.uxb;
+    }
+    if (!(Number(item.precio_falso) > 0) && antesAuto) item.precio_falso = antesAuto;
+    return item;
+}
+
+function htmlHastaCartel(hasta, tam) {
+    return hasta ? `<div style="font-size:${tam}; font-weight:bold; color:#dc3545; text-align:center;">Válido hasta el ${fmtDiaMes(hasta)}</div>` : '';
+}
+
 /** Filas viejas: "Cenefa" se vuelve doble si el producto tiene promo; cualquier otro texto es A4. */
 function formatoDesdeDB(tipo, pReal) {
     if (tipo === 'Cenefa_Normal' || tipo === 'Cenefa_Doble' || tipo === 'Cartel_A4') return tipo;
-    if (tipo === 'Cenefa') return (pReal && pReal.cant_promo) ? 'Cenefa_Doble' : 'Cenefa_Normal';
+    if (tipo === 'Cenefa') return tienePromoCartel(pReal) ? 'Cenefa_Doble' : 'Cenefa_Normal';
     return 'Cartel_A4';
 }
 
@@ -80,31 +163,12 @@ async function cargarColaDesdeDB() {
         const data = await leerRespuesta(res, 'No se pudo leer la cola de impresión.');
         const itemsDB = (data.cola || []).map(c => {
             const pReal = catalogoLocal.find(p => p.id === c.producto_id);
-            return {
+            return armarItemProducto(pReal, {
                 id_db: c.cola_id, formato: formatoDesdeDB(c.formato, pReal), copias: c.cantidad,
                 textoExtra: c.texto_personalizado || '', esLibre: false, nombre: c.nombre, precio: c.precio_venta_final,
                 codigo_barras: c.codigo_barras, producto_id: c.producto_id,
                 precio_falso: Number(c.precio_antes) > 0 ? Number(c.precio_antes) : null
-            };
-        });
-
-        itemsDB.forEach(item => {
-            const pReal = catalogoLocal.find(p => p.id === item.producto_id);
-            if (pReal) {
-                item.uxb = pReal.unidades_por_bulto || 1; // Guardamos el bulto
-                
-                if (pReal.cant_promo) {
-                    item.precioMayo = pReal.precio_promo; 
-                    item.cantMayo = pReal.cant_promo;
-                }
-
-                // Si es un Cartel A4, aplicamos la regla de multiplicar todo por el bulto
-                if (pReal.unidades_por_bulto > 1 && item.formato === 'Cartel_A4') {
-                    item.precio = item.precio * pReal.unidades_por_bulto;
-                    item.txtBulto = `PRECIO X CAJA CERRADA (${pReal.unidades_por_bulto} un.)`;
-                    if (item.precioMayo) item.precioMayo = item.precioMayo * pReal.unidades_por_bulto;
-                }
-            }
+            });
         });
 
         colaImpresion = colaImpresion.filter(c => c.esLibre); 
@@ -212,8 +276,7 @@ function seleccionarProd(id) {
     if (!productoSeleccionado) return;
     document.getElementById('inputBuscarEtiqueta').value = productoSeleccionado.nombre;
     cerrarResultadosBusqueda();
-    if (productoSeleccionado.cant_promo) document.getElementById('selectFormato').value = 'Cenefa_Doble';
-    else document.getElementById('selectFormato').value = 'Cenefa_Normal';
+    document.getElementById('selectFormato').value = tienePromoCartel(productoSeleccionado) ? 'Cenefa_Doble' : 'Cenefa_Normal';
     actualizarPreview();
 }
 
@@ -224,62 +287,66 @@ function actualizarPreview() {
     const textoExtra = document.getElementById('inputTextoExtra').value.toUpperCase();
     const logo = urlLogoNegocio();
     const local = nombreNegocio();
-    const precioAntes = parseFloat(document.getElementById('inputPrecioFalso').value) || null;
+    const precioManual = parseFloat(document.getElementById('inputPrecioFalso').value) || null;
 
-    let nombre = "SELECCIONE PRODUCTO"; let precio = "0.00"; let esMayorista = false; let precioMayo = 0; let cantMayo = 0; let txtBulto = ""; let uxb = 1;
-
+    let it = { nombre: "SELECCIONE PRODUCTO", precio: 0, uxb: 1, formato, precio_falso: precioManual };
     if (esLibre) {
-        nombre = document.getElementById('libreTitulo').value || "TÍTULO MANUAL";
-        precio = document.getElementById('librePrecio').value || "0.00";
+        it.nombre = document.getElementById('libreTitulo').value || "TÍTULO MANUAL";
+        it.precio = parseFloat(document.getElementById('librePrecio').value) || 0;
     } else if (productoSeleccionado) {
-        nombre = productoSeleccionado.nombre; 
-        precio = productoSeleccionado.precio_venta_final;
-        uxb = productoSeleccionado.unidades_por_bulto || 1;
-
-        if (productoSeleccionado.cant_promo) { 
-            esMayorista = true; precioMayo = productoSeleccionado.precio_promo; cantMayo = productoSeleccionado.cant_promo; 
-        }
-
-        // Regla: A4 multiplica por bulto, Cenefas NO.
-        if (uxb > 1 && formato === "Cartel_A4") { 
-            txtBulto = `X CAJA CERRADA (${uxb} un.)`; 
-            precio = precio * uxb; 
-            if (esMayorista) precioMayo = precioMayo * uxb;
-        }
+        it = armarItemProducto(productoSeleccionado, { ...it, nombre: productoSeleccionado.nombre });
     }
+    const { nombre, precio, uxb, pack } = it;
+    const precioAntes = it.precio_falso;
+    const esMayorista = !!it.cantMayo;
+    const precioMayo = it.precioMayo || 0;
+    const cantMayo = it.cantMayo || 0;
 
     const bloquePrecio = htmlPrecioAntesAhora(precio, precioAntes, { antes: '7px', ahora: '16px' });
+    const hastaChico = htmlHastaCartel(it.hasta, '5px');
     let html = "";
 
     // LÓGICA DE UXB PARA VISTA PREVIA (Solo visible en Cenefa Doble)
     let previewPrecioBulto = esMayorista ? (precioMayo * uxb) : (precio * uxb);
-    let htmlUxB_preview = (uxb > 1 && formato === "Cenefa_Doble") ? `<div style="background:white; color:${colorInstitucional}; font-size:6px; font-weight:bold; padding:1px 4px; border-radius:3px; margin-top:2px;">UxB: ${uxb} | Caja: $${fmtPrecioCartel(previewPrecioBulto)}</div>` : '';
+    let htmlUxB_preview = (uxb > 1 && formato === "Cenefa_Doble" && !pack) ? `<div style="background:white; color:${colorInstitucional}; font-size:6px; font-weight:bold; padding:1px 4px; border-radius:3px; margin-top:2px;">UxB: ${uxb} | Caja: $${fmtPrecioCartel(previewPrecioBulto)}</div>` : '';
 
     if (formato === "Cenefa_Normal") {
+        const etiquetaPack = pack ? `<div style="background:${colorInstitucional}; color:white; font-size:6px; font-weight:bold; padding:1px 5px; border-radius:3px; margin-top:2px;">${htmlTxtCartel(pack.nombre)}</div>` : '';
         html = `<div style="width: 150px; height: 70px; border: 1px solid #ccc; background: white; display:flex; flex-direction:column; align-items:center; position:relative;">
                     <div style="background:${colorInstitucional}; width:100%; color:white; font-size:5px; text-align:center; padding:1px 0;">${htmlTxtCartel(local.toUpperCase())}</div>
                     ${textoExtra ? `<div style="background:#dc3545; color:white; font-size:6px; padding:2px 5px; border-radius:3px; margin-top:2px;">${htmlTxtCartel(textoExtra)}</div>` : ''}
+                    ${etiquetaPack}
                     <div style="font-size: 8px; font-weight:bold; margin-top:auto; text-align:center; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${htmlTxtCartel(nombre)}</div>
-                    <div style="margin-top:auto; padding-bottom:2px; text-align:center;">${bloquePrecio}</div>
+                    <div style="margin-top:auto; padding-bottom:2px; text-align:center;">${bloquePrecio}${hastaChico}</div>
                 </div>`;
     } else if (formato === "Cenefa_Doble") {
-        let mitadDerecha = esMayorista 
-            ? `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+        let mitadDerecha;
+        if (pack) {
+            mitadDerecha = `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                <span style="background:#dc3545; border-radius:5px; padding:1px 4px; font-size:5px; margin-bottom:2px;">PROMO</span>
+                <span style="font-size:16px; font-weight:900;">${htmlTxtCartel(pack.nombre)}</span>
+                <span style="font-size:6px;">Llevando ${pack.n}: $${fmtPrecioCartel(pack.precio)}</span>
+               </div>`;
+        } else if (esMayorista) {
+            mitadDerecha = `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
                 <span style="background:#dc3545; border-radius:5px; padding:1px 4px; font-size:5px; margin-bottom:2px;">OFERTA MAYORISTA</span>
                 <span style="font-size:14px; font-weight:bold;">$${fmtPrecioCartel(precioMayo)}</span>
                 <span style="font-size:6px;">Llevando ${htmlTxtCartel(cantMayo)} o más</span>
                 ${htmlUxB_preview}
-               </div>` 
-            : `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+               </div>`;
+        } else {
+            mitadDerecha = `<div style="width:50%; background:${colorInstitucional}; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
                 <span style="font-size:16px; font-weight:bold;">$${fmtPrecioCartel(precio)}</span>
                 ${htmlUxB_preview}
                </div>`;
+        }
             
         html = `<div style="width: 250px; height: 60px; border: 1px solid #333; display:flex; background:white;">
                     <div style="width:50%; padding:5px; text-align:center; display:flex; flex-direction:column; justify-content:center;">
                         ${textoExtra ? `<div style="font-size:6px; color:#dc3545; font-weight:bold;">${htmlTxtCartel(textoExtra)}</div>` : '<div style="font-size:6px; color:#666; font-weight:bold;">PRECIO NORMAL</div>'}
                         <div style="font-size:8px; font-weight:bold;">${htmlTxtCartel(nombre)}</div>
                         <div style="font-size:12px; font-weight:bold; text-align:center;">${htmlPrecioAntesAhora(precio, precioAntes, { antes: '6px', ahora: '12px' })}</div>
+                        ${hastaChico}
                     </div>
                     ${mitadDerecha}
                 </div>`;
@@ -287,10 +354,16 @@ function actualizarPreview() {
         const cabecera = logo
             ? `<img src="${logo}" style="max-height:36px; max-width:90%; object-fit:contain; margin-bottom:6px;">`
             : `<div style="font-size:9px; font-weight:bold; color:${colorInstitucional}; text-align:center;">${htmlTxtCartel(local)}</div>`;
+        const bloquePromoA4 = pack
+            ? `<div style="background:${colorInstitucional}; color:white; border-radius:6px; padding:4px 8px; margin-top:6px; text-align:center;"><div style="font-size:16px; font-weight:900;">${htmlTxtCartel(pack.nombre)}</div><div style="font-size:7px;">Llevando ${pack.n}: $${fmtPrecioCartel(pack.precio)}</div></div>`
+            : (esMayorista ? `<div style="background:${colorInstitucional}; color:white; border-radius:6px; padding:4px 8px; margin-top:6px; text-align:center; font-size:7px;">LLEVANDO ${htmlTxtCartel(cantMayo)}: <b>$${fmtPrecioCartel(precioMayo)} c/u</b></div>` : '');
         html = `<div style="width: 170px; height: 240px; border: 3px solid ${colorInstitucional}; border-radius:8px; background:white; display:flex; flex-direction:column; align-items:center; padding:10px;">
                     ${cabecera}
                     <div style="font-size:11px; font-weight:bold; text-align:center; margin-top:8px;">${htmlTxtCartel(nombre)}</div>
+                    ${it.txtBulto ? `<div style="font-size:6px; color:red; font-weight:bold;">${htmlTxtCartel(it.txtBulto)}</div>` : ''}
                     <div style="margin-top:auto; text-align:center; color:#198754;">${htmlPrecioAntesAhora(precio, precioAntes, { antes: '11px', ahora: '22px', colorAhora: '#198754' })}</div>
+                    ${bloquePromoA4}
+                    ${htmlHastaCartel(it.hasta, '7px')}
                 </div>`;
     }
     preview.innerHTML = html;
@@ -323,27 +396,12 @@ async function agregarACola() {
         if (inputFotoLibre && inputFotoLibre.files.length > 0) {
             item.fotoManual = await procesarFotoBase64(inputFotoLibre.files[0]);
         }
-    } else {
-        if (!productoSeleccionado) return Swal.fire('Aviso', 'Seleccioná un producto primero.', 'warning');
-        item.nombre = productoSeleccionado.nombre; 
-        item.precio = productoSeleccionado.precio_venta_final; 
-        item.codigo_barras = productoSeleccionado.codigo_barras;
-        item.uxb = productoSeleccionado.unidades_por_bulto || 1;
-        
-        if (productoSeleccionado.cant_promo) { 
-            item.precioMayo = productoSeleccionado.precio_promo; 
-            item.cantMayo = productoSeleccionado.cant_promo; 
-        }
-
-        // Regla: A4 multiplica por bulto, Cenefas NO.
-        if (item.uxb > 1 && formato === "Cartel_A4") { 
-            item.precio = item.precio * item.uxb; 
-            item.txtBulto = `PRECIO X CAJA CERRADA (${item.uxb} un.)`; 
-            if (item.precioMayo) item.precioMayo = item.precioMayo * item.uxb;
-        }
+    } else if (!productoSeleccionado) {
+        return Swal.fire('Aviso', 'Seleccioná un producto primero.', 'warning');
     }
 
-    if (!esLibre && productoSeleccionado) {
+    // Los de catálogo se guardan en el servidor; promo, bulto y fechas se arman al leer la cola.
+    if (!esLibre) {
         try {
             const res = await apiFetch(`${obtenerBaseUrl()}/productos/etiquetas/encolar`, {
                 method: 'POST',
@@ -423,10 +481,15 @@ function dibujarCola() {
         const badgeFalso = c.precio_falso
             ? `<div class="small text-muted text-decoration-line-through">$${fmtPrecioCartel(c.precio_falso)}</div>`
             : '';
+        const extraCola = [
+            c.pack ? htmlTxtCartel(c.pack.nombre) : '',
+            c.cantMayo ? `Llevando ${htmlTxtCartel(c.cantMayo)}` : '',
+            c.hasta ? `Hasta ${fmtDiaMes(c.hasta)}` : ''
+        ].filter(Boolean).join(' · ');
 
         tbody.innerHTML += `
         <tr>
-            <td class="text-start ps-3 fw-bold">${txtDB} ${htmlTxtCartel(c.nombre)} ${fotito}</td>
+            <td class="text-start ps-3 fw-bold">${txtDB} ${htmlTxtCartel(c.nombre)} ${fotito}${extraCola ? `<div class="small fw-normal text-muted">${extraCola}</div>` : ''}</td>
             <td class="text-success fw-bold">${badgeFalso}$${fmtPrecioCartel(c.precio)}</td>
             <td><span class="badge ${badge}">${c.formato.replace('_', ' ')}</span></td>
             <td class="fw-bold">${c.copias}</td>
@@ -484,7 +547,9 @@ function imprimirTodo(filtroSeleccionado) {
         
         let uxb = item.uxb || 1;
         let precioBultoNum = item.cantMayo ? (item.precioMayo * uxb) : (item.precio * uxb);
-        let htmlUxB_print = (uxb > 1 && item.formato === "Cenefa_Doble") ? `<div class="bg-print" style="background:white; color:${colorInstitucional}; font-size:10px; font-weight:bold; padding:2px 8px; border-radius:4px; margin-top:2px;">UxB: ${uxb} | Caja: $${fmtPrecioCartel(precioBultoNum)}</div>` : '';
+        let htmlUxB_print = (uxb > 1 && item.formato === "Cenefa_Doble" && !item.pack) ? `<div class="bg-print" style="background:white; color:${colorInstitucional}; font-size:10px; font-weight:bold; padding:2px 8px; border-radius:4px; margin-top:2px;">UxB: ${uxb} | Caja: $${fmtPrecioCartel(precioBultoNum)}</div>` : '';
+        const hastaPrint = htmlHastaCartel(item.hasta, '9px');
+        const packChico = item.pack ? `<div class="bg-print" style="background:${colorInstitucional}; color:white; font-size:11px; font-weight:900; text-align:center; padding:2px 8px; border-radius:4px; margin-bottom:2px;">${htmlTxtCartel(item.pack.nombre)}</div>` : '';
 
         let bultoHTML = item.txtBulto ? `<div style="font-size:12px; color:red; font-weight:bold; margin-bottom:2px; text-align:center;">${item.txtBulto}</div>` : '';
 
@@ -496,8 +561,9 @@ function imprimirTodo(filtroSeleccionado) {
                         <div class="bg-print" style="width: 100%; background: ${colorInstitucional}; color: white; font-size: 8px; font-weight: bold; text-align: center; text-transform: uppercase; padding: 1.5mm 0; letter-spacing: 1px;">${htmlTxtCartel(local)}</div>
                         <div style="padding: 1mm 2mm; width: 100%; display: flex; flex-direction: column; align-items: center; height: 100%;">
                             ${txExtra}
+                            ${packChico}
                             <div class="truncate-lines" style="font-size: 11px; font-weight: bold; text-align: center; color: #333; line-height:1.1; margin-top:1mm; min-height: 8mm;">${htmlTxtCartel(item.nombre)}</div>
-                            <div style="margin-top:auto; color: #000; padding-bottom:1mm; text-align:center;">${bloquePrecioCenefa}</div>
+                            <div style="margin-top:auto; color: #000; padding-bottom:1mm; text-align:center;">${bloquePrecioCenefa}${hastaPrint}</div>
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:9mm; width:65mm; margin:0; margin-top:auto;"></svg>` : ''}
                         </div>
                         </div>
@@ -505,17 +571,26 @@ function imprimirTodo(filtroSeleccionado) {
                 `;
             } 
             else if (item.formato === "Cenefa_Doble") {
-                let mitadDer = item.cantMayo 
-                    ? `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; justify-content:center; align-items:center; padding: 2mm;">
+                let mitadDer;
+                if (item.pack) {
+                    mitadDer = `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; justify-content:center; align-items:center; padding: 2mm;">
+                           <div class="bg-print" style="background:#dc3545; color:white; font-size:11px; font-weight:bold; text-transform:uppercase; padding: 2px 10px; border-radius: 10px; margin-bottom: 1mm; letter-spacing: 1px;">PROMO</div>
+                           <div style="font-size:38px; font-weight:900; line-height:1;">${htmlTxtCartel(item.pack.nombre)}</div>
+                           <div style="font-size:10px; font-weight:bold; color: rgba(255,255,255,0.9); margin-top: 1mm;">Llevando ${item.pack.n}: $${fmtPrecioCartel(item.pack.precio)}</div>
+                       </div>`;
+                } else if (item.cantMayo) {
+                    mitadDer = `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; justify-content:center; align-items:center; padding: 2mm;">
                            <div class="bg-print" style="background:#dc3545; color:white; font-size:11px; font-weight:bold; text-transform:uppercase; padding: 2px 10px; border-radius: 10px; margin-bottom: 1mm; letter-spacing: 1px;">OFERTA MAYORISTA</div>
                            <div style="font-size:45px; font-weight:900; line-height:1;">$${fmtPrecioCartel(item.precioMayo)}</div>
                            <div style="font-size:10px; font-weight:bold; color: rgba(255,255,255,0.9); margin-top: 1mm; margin-bottom: 1mm;">Llevando ${item.cantMayo} un. o más</div>
                            ${htmlUxB_print}
-                       </div>`
-                    : `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                       </div>`;
+                } else {
+                    mitadDer = `<div class="bg-print" style="width: 50%; background: ${colorInstitucional}; color: white; display:flex; flex-direction:column; align-items:center; justify-content:center;">
                            <div style="font-size:45px; font-weight:900;">$${pF}</div>
                            ${htmlUxB_print}
                        </div>`;
+                }
 
                 htmlCenefas += `
                     <div class="cartel cenefa cenefa-doble">
@@ -524,7 +599,7 @@ function imprimirTodo(filtroSeleccionado) {
                             ${txExtra}
                             <div style="font-size: 10px; text-transform:uppercase; color: #666; font-weight:bold; background: #f0f0f0; padding: 2px 8px; border-radius: 4px; margin-bottom: 2mm;">PRECIO NORMAL</div>
                             <div class="truncate-lines" style="font-size: 14px; font-weight: bold; text-align: center; line-height:1.1; color:#333; margin-bottom: 1mm;">${htmlTxtCartel(item.nombre)}</div>
-                            <div style="color: #000; margin-bottom: 1mm; text-align:center;">${bloquePrecioDoble}</div>
+                            <div style="color: #000; margin-bottom: 1mm; text-align:center;">${bloquePrecioDoble}${hastaPrint}</div>
                             ${item.codigo_barras ? `<svg id="bc-${idx}-${i}" style="height:7mm; width:45mm; margin:0;"></svg>` : ''}
                         </div>
                         ${mitadDer}
@@ -562,7 +637,8 @@ function imprimirTodo(filtroSeleccionado) {
                             
                             <div style="font-size: ${fontSizePrecio}; font-weight: 900; color: #198754; line-height: 0.9; text-shadow: 4px 4px 0px rgba(0,0,0,0.1); margin-top: ${tieneFoto ? 'auto' : '0'}; text-align:center;">${bloquePrecioA4}</div>
                             
-                            ${item.cantMayo ? `<div class="bg-print" style="margin-top:10mm; background:${colorInstitucional}; color:white; padding: 8mm; border-radius:15px; width:90%;"><div style="font-size:25px; font-weight:bold;">OFERTA MAYORISTA LLEVANDO ${item.cantMayo} UNIDADES</div><div style="font-size:60px; font-weight:900; margin-top:2mm;">$${fmtPrecioCartel(item.precioMayo)} c/u</div></div>` : ''}
+                            ${item.pack ? `<div class="bg-print" style="margin-top:10mm; background:${colorInstitucional}; color:white; padding: 8mm; border-radius:15px; width:90%;"><div style="font-size:28px; font-weight:bold;">PROMO</div><div style="font-size:60px; font-weight:900; margin-top:2mm;">${htmlTxtCartel(item.pack.nombre)}</div><div style="font-size:22px; margin-top:2mm;">Llevando ${item.pack.n}: $${fmtPrecioCartel(item.pack.precio)}</div></div>` : (item.cantMayo ? `<div class="bg-print" style="margin-top:10mm; background:${colorInstitucional}; color:white; padding: 8mm; border-radius:15px; width:90%;"><div style="font-size:25px; font-weight:bold;">OFERTA MAYORISTA LLEVANDO ${item.cantMayo} UNIDADES</div><div style="font-size:60px; font-weight:900; margin-top:2mm;">$${fmtPrecioCartel(item.precioMayo)} c/u</div></div>` : '')}
+                            ${item.hasta ? `<div style="margin-top:6mm; font-size:22px; font-weight:900; color:#dc3545;">Válido hasta el ${fmtDiaMes(item.hasta)}</div>` : ''}
                         </div>
                     </div>
                 `;
@@ -718,5 +794,47 @@ async function cargarCategoriasCarteleria() {
         opt.disabled = true;
         opt.textContent = 'No se pudieron leer los rubros';
         select.appendChild(opt);
+    }
+}
+
+function textoPromoVencida(p) {
+    if (p.tipo === 'PACK') return nombrePackCartel(Number(p.cantidad_minima), Number(p.precio_pack), Number(p.precio_venta_final) || 0);
+    if (Number(p.cantidad_minima) <= 1) return `Oferta $${fmtPrecioCartel(p.precio_oferta_unitario)}`;
+    return `Llevando ${p.cantidad_minima}: $${fmtPrecioCartel(p.precio_oferta_unitario)}`;
+}
+
+async function cargarPromosVencidas() {
+    const caja = document.getElementById('cajaPromosVencidas');
+    const lista = document.getElementById('listaPromosVencidas');
+    if (!caja || !lista) return;
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/promos/vencidas`);
+        const data = await leerRespuesta(res, 'No se pudieron leer las promos vencidas.');
+        const promos = data.promos || [];
+        if (!promos.length) {
+            caja.classList.add('d-none');
+            lista.innerHTML = '';
+            return;
+        }
+        caja.classList.remove('d-none');
+        lista.innerHTML = promos.map((p) => `
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 py-2 border-bottom border-warning">
+                <div><b>${htmlTxtCartel(p.nombre)}</b> · ${htmlTxtCartel(textoPromoVencida(p))} · venció el ${fmtDiaMes(p.fecha_hasta)}</div>
+                <button type="button" class="btn btn-sm btn-outline-dark fw-bold" onclick="marcarCartelRetirado(${Number(p.id)})">Ya lo saqué</button>
+            </div>
+        `).join('');
+    } catch (e) {
+        caja.classList.add('d-none');
+        console.error('Promos vencidas', e);
+    }
+}
+
+async function marcarCartelRetirado(promoId) {
+    try {
+        const res = await apiFetch(`${obtenerBaseUrl()}/productos/promos/${promoId}/cartel_retirado`, { method: 'POST' });
+        await leerRespuesta(res, 'No se pudo marcar el cartel.');
+        await cargarPromosVencidas();
+    } catch (e) {
+        Swal.fire('Error', e.message, 'error');
     }
 }

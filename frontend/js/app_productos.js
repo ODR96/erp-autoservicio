@@ -140,7 +140,10 @@ function dibujarTablaCatalogo(listaProductos, estadoSeleccionado) {
     hoy.setHours(0,0,0,0);
 
     listaProductos.forEach(p => {
-        let htmlPromo = p.cant_promo ? `<div class="text-success small mt-1 lh-1"><i class="bi bi-tags-fill"></i> Llevando ${p.cant_promo}: $${p.precio_promo} c/u</div>` : '';
+        let htmlPromo = p.cant_promo
+            ? `<div class="text-success small mt-1 lh-1"><i class="bi bi-tags-fill"></i> ${Number(p.cant_promo) <= 1 ? 'Oferta' : `Llevando ${p.cant_promo}`}: $${p.precio_promo} c/u</div>`
+            : '';
+        if (Number(p.packs_vigentes) > 0) htmlPromo += '<div class="text-primary small mt-1 lh-1"><i class="bi bi-box2-heart"></i> Pack vigente</div>';
         
         let stock = p.stock_total || 0;
         let minimo = p.stock_minimo_alerta || 0;
@@ -558,9 +561,144 @@ function calcularPrecioAutomatico() {
     let c = parseFloat(document.getElementById('inputCosto').value) || 0; let i = parseFloat(document.getElementById('inputIva').value) || 0; let m = parseFloat(document.getElementById('inputMargen').value) || 0;
     document.getElementById('inputPrecioVenta').value = ((c + (c * i / 100)) * (1 + m / 100)).toFixed(2);
 }
-function agregarReglaUI() { let c = parseFloat(document.getElementById('inputCantMayorista').value); let p = parseFloat(document.getElementById('inputPrecioMayorista').value); if (c && p) { reglasMayoristas.push({ cantidad: c, precio: p }); dibujarTablaReglas(); document.getElementById('inputCantMayorista').value = ""; document.getElementById('inputPrecioMayorista').value = ""; } }
+// --- PROMOS DE LA FICHA: VOLUMEN ("llevando N o más, $X c/u") y PACK ("N por $X") ---
+function fechaHoyARProd() {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+}
+
+function fmtFechaCorta(iso) {
+    if (!iso) return '';
+    const [a, m, d] = String(iso).split('-');
+    return `${d}/${m}/${a.slice(2)}`;
+}
+
+function tipoPromoElegido() {
+    const pack = document.getElementById('tipoPromoPack');
+    return pack && pack.checked ? 'PACK' : 'VOLUMEN';
+}
+
+function precioListaFicha() {
+    return parseFloat(document.getElementById('inputPrecioVenta').value) || 0;
+}
+
+function costoConIvaFicha() {
+    const costo = parseFloat(document.getElementById('inputCosto').value) || 0;
+    const iva = parseFloat(document.getElementById('inputIva').value) || 0;
+    return costo * (1 + iva / 100);
+}
+
+function nombrePack(n, precioPack, lista) {
+    if (lista > 0 && Math.abs(precioPack - lista * (n - 1)) < 0.005) return `${n}x${n - 1}`;
+    return `${n} por $${fmtMoneda(precioPack)}`;
+}
+
+function fmtMoneda(n) {
+    return Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function cambiarTipoPromoUI() {
+    const esPack = tipoPromoElegido() === 'PACK';
+    document.getElementById('lblCantPromo').textContent = esPack ? 'Unidades del pack:' : 'A partir de:';
+    document.getElementById('lblPrecioPromo').textContent = esPack ? 'Precio del pack completo:' : 'Precio por unidad:';
+    document.getElementById('inputCantMayorista').placeholder = esPack ? 'Ej: 2' : 'Ej: 6';
+    pintarAyudaPromoUI();
+}
+
+function pintarAyudaPromoUI() {
+    const caja = document.getElementById('ayudaPromo');
+    if (!caja) return;
+    const n = parseFloat(document.getElementById('inputCantMayorista').value);
+    const precio = parseFloat(document.getElementById('inputPrecioMayorista').value);
+    const lista = precioListaFicha();
+    if (tipoPromoElegido() === 'PACK' && n >= 2 && precio > 0) {
+        const unit = Math.floor((precio / n) * 100) / 100;
+        caja.innerHTML = `<b>${htmlTxt(nombrePack(n, precio, lista))}</b>: cada unidad del pack sale $${fmtMoneda(unit)}. Lo que sobra se cobra a lista ($${fmtMoneda(lista)}).`;
+    } else if (tipoPromoElegido() === 'VOLUMEN' && n > 0 && precio > 0) {
+        caja.innerHTML = n <= 1
+            ? `Oferta: todas las unidades a $${fmtMoneda(precio)} (lista $${fmtMoneda(lista)}).`
+            : `Llevando ${n} o más, <b>todas</b> salen a $${fmtMoneda(precio)} c/u.`;
+    } else {
+        caja.textContent = 'Sin fechas, la promo vale hasta que la borres.';
+    }
+}
+
+async function agregarReglaUI() {
+    const tipo = tipoPromoElegido();
+    const n = parseFloat(document.getElementById('inputCantMayorista').value);
+    const precio = parseFloat(document.getElementById('inputPrecioMayorista').value);
+    const desde = document.getElementById('inputPromoDesde').value || null;
+    const hasta = document.getElementById('inputPromoHasta').value || null;
+    const lista = precioListaFicha();
+
+    if (!(n > 0) || !(precio > 0)) return Swal.fire('Aviso', 'Cargá la cantidad y el precio.', 'warning');
+    if (desde && hasta && hasta < desde) return Swal.fire('Aviso', 'El "hasta" es anterior al "desde".', 'warning');
+    if (hasta && hasta < fechaHoyARProd()) return Swal.fire('Aviso', 'El "hasta" ya pasó.', 'warning');
+
+    let regla;
+    if (tipo === 'PACK') {
+        if (!Number.isInteger(n) || n < 2) return Swal.fire('Aviso', 'Un pack lleva 2 unidades o más, en número entero.', 'warning');
+        if (lista > 0 && precio >= lista * n) return Swal.fire('Aviso', `El pack no es más barato que ${n} sueltos ($${fmtMoneda(lista * n)}).`, 'warning');
+        regla = { tipo, cantidad: n, precio: Math.round((precio / n) * 100) / 100, precio_pack: precio, desde, hasta };
+    } else {
+        regla = { tipo, cantidad: n, precio, precio_pack: null, desde, hasta };
+    }
+
+    const costoIva = costoConIvaFicha();
+    const unitario = tipo === 'PACK' ? precio / n : precio;
+    if (costoIva > 0 && unitario <= costoIva) {
+        const ok = await Swal.fire({
+            title: 'Promo debajo del costo',
+            html: `Cada unidad sale <b>$${fmtMoneda(unitario)}</b> y el costo con IVA es <b>$${fmtMoneda(costoIva)}</b>. Perdés plata en cada una.`,
+            icon: 'warning', showCancelButton: true, confirmButtonText: 'Cargarla igual', cancelButtonText: 'Corregir',
+            confirmButtonColor: '#dc3545', reverseButtons: true
+        });
+        if (!ok.isConfirmed) return;
+    }
+
+    reglasMayoristas.push(regla);
+    dibujarTablaReglas();
+    ['inputCantMayorista', 'inputPrecioMayorista', 'inputPromoDesde', 'inputPromoHasta'].forEach((id) => { document.getElementById(id).value = ''; });
+    pintarAyudaPromoUI();
+}
+
 function borrarReglaUI(i) { reglasMayoristas.splice(i, 1); dibujarTablaReglas(); }
-function dibujarTablaReglas() { const tb = document.getElementById('tablaReglasBody'); tb.innerHTML = ''; if (reglasMayoristas.length === 0) { tb.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No hay reglas</td></tr>'; return; } reglasMayoristas.forEach((r, i) => { tb.innerHTML += `<tr><td class="text-center fw-bold">${r.cantidad} un.</td><td class="text-center text-success fw-bold">$${r.precio.toFixed(2)}</td><td class="text-center"><button class="btn btn-sm text-danger border-0" type="button" onclick="borrarReglaUI(${i})"><i class="bi bi-trash"></i></button></td></tr>`; }); }
+
+function dibujarTablaReglas() {
+    const tb = document.getElementById('tablaReglasBody');
+    tb.innerHTML = '';
+    if (reglasMayoristas.length === 0) {
+        tb.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No hay promos cargadas</td></tr>';
+        return;
+    }
+    const hoy = fechaHoyARProd();
+    const lista = precioListaFicha();
+    tb.innerHTML = reglasMayoristas.map((r, i) => {
+        const tipo = r.tipo || 'VOLUMEN';
+        let texto;
+        if (tipo === 'PACK') {
+            texto = `<span class="badge bg-primary">Pack</span> ${htmlTxt(nombrePack(Number(r.cantidad), Number(r.precio_pack), lista))}`;
+        } else if (Number(r.cantidad) <= 1) {
+            texto = `<span class="badge bg-danger">Oferta</span> $${fmtMoneda(r.precio)} c/u`;
+        } else {
+            texto = `<span class="badge bg-secondary">Volumen</span> Llevando ${htmlTxt(r.cantidad)}: $${fmtMoneda(r.precio)} c/u`;
+        }
+        if (r.origen === 'LIQUIDAR') texto += ' <small class="text-muted">(Liquidar)</small>';
+
+        const vigencia = (r.desde || r.hasta)
+            ? `${r.desde ? fmtFechaCorta(r.desde) : '—'} al ${r.hasta ? fmtFechaCorta(r.hasta) : '—'}`
+            : 'Sin vencimiento';
+        let estado = '<span class="badge bg-success">Vigente</span>';
+        if (r.hasta && r.hasta < hoy) estado = '<span class="badge bg-dark">Vencida</span>';
+        else if (r.desde && r.desde > hoy) estado = `<span class="badge bg-info text-dark">Empieza ${fmtFechaCorta(r.desde)}</span>`;
+
+        return `<tr>
+            <td class="fw-bold">${texto}</td>
+            <td class="text-center">${vigencia}</td>
+            <td class="text-center">${estado}</td>
+            <td class="text-center"><button class="btn btn-sm text-danger border-0" type="button" onclick="borrarReglaUI(${i})" title="Borrar"><i class="bi bi-trash"></i></button></td>
+        </tr>`;
+    }).join('');
+}
 
 async function agregarLoteRapido() {
     if (!productoEditandoId) return Swal.fire('Aviso', 'Guardá el producto primero.', 'info');

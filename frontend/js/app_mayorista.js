@@ -114,10 +114,19 @@ function mostrarResultadosModal(productos) {
         // Ahora sí, esperamos tranquilos a que Python nos mande el dato correcto
         let stockReal = p.stock_actual || 0;
         
-        let opcionesSelector = `<option value="1|${p.precio_venta_final}|Unidad">Unidad ($${p.precio_venta_final})</option>`;
-        
-        if (p.reglas_mayoristas && p.reglas_mayoristas.length > 0) {
-            p.reglas_mayoristas.forEach(regla => {
+        // El pack (2x1) es de mostrador; acá solo bultos por volumen que valen hoy.
+        const hoyAR = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+        const reglasHoy = (p.reglas_mayoristas || []).filter((r) =>
+            (r.tipo || 'VOLUMEN') === 'VOLUMEN' &&
+            (!r.fecha_desde || r.fecha_desde <= hoyAR) && (!r.fecha_hasta || r.fecha_hasta >= hoyAR)
+        );
+        const ofertaUnidad = reglasHoy.find((r) => Number(r.cantidad_minima) <= 1);
+        const precioUnidad = ofertaUnidad ? ofertaUnidad.precio_oferta_unitario : p.precio_venta_final;
+        const reglasBulto = reglasHoy.filter((r) => Number(r.cantidad_minima) > 1);
+
+        let opcionesSelector = `<option value="1|${precioUnidad}|Unidad">Unidad ($${precioUnidad}${ofertaUnidad ? ' oferta' : ''})</option>`;
+        if (reglasBulto.length > 0) {
+            reglasBulto.forEach(regla => {
                 opcionesSelector += `<option value="${regla.cantidad_minima}|${regla.precio_oferta_unitario}|Bulto x${regla.cantidad_minima}">Bulto x${regla.cantidad_minima} ($${regla.precio_oferta_unitario} c/u)</option>`;
             });
         }
