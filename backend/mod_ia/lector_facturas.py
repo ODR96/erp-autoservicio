@@ -9,7 +9,8 @@ import time
 
 from pydantic import BaseModel, Field
 
-MODELO_POR_DEFECTO = "gemini-3.8-flash"
+# En el plan gratis los flash completos viven saturados (503/504); el lite lee la factura en ~5 s.
+MODELO_POR_DEFECTO = "gemini-3.5-flash-lite"
 TIMEOUT_MS = 90_000
 ESPERAS_REINTENTO_503 = (4, 10)
 MIMES_ADMITIDOS = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"}
