@@ -8,7 +8,7 @@ import os
 
 from pydantic import BaseModel, Field
 
-MODELO_POR_DEFECTO = "gemini-2.5-flash"
+MODELO_POR_DEFECTO = "gemini-3.8-flash"
 TIMEOUT_MS = 90_000
 MIMES_ADMITIDOS = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"}
 
@@ -62,6 +62,8 @@ def disponible() -> bool:
 
 def _mensaje_error(e) -> str:
     codigo = getattr(e, "code", None)
+    if codigo == 404:
+        return "Ese modelo de Gemini ya no está disponible. Cambiá GEMINI_MODELO en el .env."
     if codigo == 429:
         return "Gemini sin cuota por ahora (límite del plan). Probá en un rato."
     if codigo in (400, 401, 403) and "key" in str(e).lower():
