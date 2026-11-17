@@ -1736,6 +1736,8 @@ async function confirmarIngresoMercaderia() {
                 costo_unitario: Number(it.costo_unitario),
                 fecha_vencimiento: it.fecha_vencimiento || '2099-12-31',
                 numero_lote_proveedor: it.numero_lote_proveedor || 'S/L',
+                texto_papel: String(it.nombre_ocr || '').slice(0, 200),
+                codigo_papel: String(it.codigo_ocr || '').slice(0, 60),
                 nuevo_precio_venta: it.actualizar_gondola
                     ? (Number.isFinite(Number(it.nuevo_precio_venta))
                         ? Number(it.nuevo_precio_venta)

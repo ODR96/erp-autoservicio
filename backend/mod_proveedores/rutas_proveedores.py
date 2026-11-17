@@ -10,6 +10,7 @@ import json
 import uuid
 import base64
 import hmac
+import unicodedata
 import urllib.request
 import urllib.error
 from backend.database import obtener_conexion, RAIZ_PROYECTO
@@ -34,6 +35,8 @@ class ItemFactura(BaseModel):
     nuevo_precio_venta: Optional[float] = None
     fecha_vencimiento: str = "2099-12-31"
     numero_lote_proveedor: str = "S/L"
+    texto_papel: str = Field("", max_length=200)
+    codigo_papel: str = Field("", max_length=60)
 
 class PagoInmediato(BaseModel):
     metodo_pago: str
@@ -260,6 +263,77 @@ def _asegurar_tablas_borrador(cursor):
         )
         """
     )
+    _asegurar_tabla_vinculos(cursor)
+
+
+def _asegurar_tabla_vinculos(cursor):
+    """Qué producto es cada código o texto del papel de un proveedor. Solo se graba al confirmar un ingreso."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vinculos_papel_producto (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proveedor_id INTEGER NOT NULL,
+            tipo TEXT NOT NULL,
+            clave TEXT NOT NULL,
+            producto_id INTEGER NOT NULL,
+            veces INTEGER NOT NULL DEFAULT 1,
+            actualizado TEXT NOT NULL,
+            UNIQUE (proveedor_id, tipo, clave)
+        )
+        """
+    )
+
+
+def _clave_texto_papel(texto) -> str:
+    s = unicodedata.normalize("NFKD", str(texto or "")).encode("ascii", "ignore").decode("ascii")
+    return " ".join(re.sub(r"[^A-Za-z0-9]+", " ", s).upper().split())[:120]
+
+
+def _clave_codigo_papel(codigo) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", str(codigo or "")).upper()[:40]
+
+
+def _claves_papel(codigo, texto):
+    for tipo, clave in (("CODIGO", _clave_codigo_papel(codigo)), ("TEXTO", _clave_texto_papel(texto))):
+        if len(clave) >= 3:
+            yield tipo, clave
+
+
+def _producto_vinculado(cursor, proveedor_id, codigo: str, texto: str):
+    if not proveedor_id:
+        return None
+    for tipo, clave in _claves_papel(codigo, texto):
+        cursor.execute(
+            """
+            SELECT p.* FROM vinculos_papel_producto v
+            JOIN productos p ON p.id = v.producto_id
+            WHERE v.proveedor_id = ? AND v.tipo = ? AND v.clave = ? AND p.activo = 1
+            """,
+            (proveedor_id, tipo, clave),
+        )
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+    return None
+
+
+def _recordar_vinculo(cursor, proveedor_id: int, producto_id: int, codigo_barras_ficha: str, codigo: str, texto: str):
+    ficha = _clave_codigo_papel(codigo_barras_ficha)
+    for tipo, clave in _claves_papel(codigo, texto):
+        if tipo == "CODIGO" and clave == ficha:
+            continue  # el código de barras de la ficha ya lo encuentra solo
+        cursor.execute(
+            """
+            INSERT INTO vinculos_papel_producto (proveedor_id, tipo, clave, producto_id, veces, actualizado)
+            VALUES (?, ?, ?, ?, 1, ?)
+            ON CONFLICT (proveedor_id, tipo, clave) DO UPDATE SET
+                veces = CASE WHEN vinculos_papel_producto.producto_id = excluded.producto_id
+                             THEN vinculos_papel_producto.veces + 1 ELSE 1 END,
+                producto_id = excluded.producto_id,
+                actualizado = excluded.actualizado
+            """,
+            (proveedor_id, tipo, clave, producto_id, _ahora_ar_dt()),
+        )
 
 
 def _dir_fotos(borrador_id: int) -> str:
@@ -1201,13 +1275,15 @@ def _item_desde_lector(linea: dict, prod) -> dict:
             "unidades_por_bulto": uxb,
             "porcentaje_iva": linea["alicuota_iva"],
         })
+    item["nombre_ocr"] = _texto_externo(linea["descripcion"], 120)
+    item["codigo_ocr"] = _texto_externo(linea["codigo"], 40)
     item["costo_final_ocr"] = linea["costo_unitario_final_con_impuestos"]
     if linea["avisos"]:
         item["aviso_ocr"] = _texto_externo(" ".join(linea["avisos"]), 300)
     return item
 
 
-def _items_desde_lector(cursor, parsed: dict):
+def _items_desde_lector(cursor, parsed: dict, proveedor_id):
     from backend.mod_ia.calculo_costos import procesar_factura
 
     leida = parsed.get("leida") or {}
@@ -1217,6 +1293,7 @@ def _items_desde_lector(cursor, parsed: dict):
             cursor,
             _texto_externo(l.get("codigo"), 40),
             _texto_externo(l.get("descripcion"), 120),
+            proveedor_id,
         )
         for l in lineas
     ]
@@ -1225,7 +1302,7 @@ def _items_desde_lector(cursor, parsed: dict):
     return items, calculo["cargos_pie"], calculo["avisos"]
 
 
-def _match_producto_ocr(cursor, codigo: str, nombre: str):
+def _match_producto_ocr(cursor, codigo: str, nombre: str, proveedor_id=None):
     codigo = (codigo or "").strip()
     if codigo:
         cursor.execute(
@@ -1235,6 +1312,9 @@ def _match_producto_ocr(cursor, codigo: str, nombre: str):
         row = cursor.fetchone()
         if row:
             return dict(row)
+    vinculado = _producto_vinculado(cursor, proveedor_id, codigo, nombre)
+    if vinculado:
+        return vinculado
     nombre = (nombre or "").strip()
     if len(nombre) >= 4:
         cursor.execute(
@@ -1377,10 +1457,15 @@ def _aplicar_parseo_ocr(cursor, fila, parsed: dict) -> dict:
 
     manuales = [it for it in items_prev if (it.get("origen_linea") or "") == "MANUAL"]
 
+    proveedor_ocr = None
+    if not fila["proveedor_id"] and parsed.get("proveedor"):
+        proveedor_ocr = _match_proveedor_ocr(cursor, parsed.get("proveedor"))
+    proveedor_id = fila["proveedor_id"] or proveedor_ocr
+
     ocr_items = []
     avisos_factura = []
     if parsed.get("motor") == "gemini":
-        ocr_items, parsed["cargos_pie"], avisos_factura = _items_desde_lector(cursor, parsed)
+        ocr_items, parsed["cargos_pie"], avisos_factura = _items_desde_lector(cursor, parsed, proveedor_id)
     else:
         for linea in parsed.get("items") or []:
             try:
@@ -1389,12 +1474,15 @@ def _aplicar_parseo_ocr(cursor, fila, parsed: dict) -> dict:
                 conf = 0
             if conf and conf < 0.45:
                 continue
-            prod = _match_producto_ocr(cursor, linea.get("codigo") or "", linea.get("nombre") or "")
+            prod = _match_producto_ocr(cursor, linea.get("codigo") or "", linea.get("nombre") or "", proveedor_id)
             modo = "CAJA" if str(linea.get("unidad") or "").upper() == "CAJA" else "UN"
             cant = linea.get("cantidad") or 1
             costo = linea.get("costo_unitario") or 0
             if prod:
-                ocr_items.append(_item_desde_producto_row(prod, cant, costo, modo, "OCR"))
+                item = _item_desde_producto_row(prod, cant, costo, modo, "OCR")
+                item["nombre_ocr"] = _texto_externo(linea.get("nombre"), 120)
+                item["codigo_ocr"] = _texto_externo(linea.get("codigo"), 40)
+                ocr_items.append(item)
             else:
                 ocr_items.append(_item_huerfano_ocr(linea))
 
@@ -1406,11 +1494,9 @@ def _aplicar_parseo_ocr(cursor, fila, parsed: dict) -> dict:
     if not fila["numero_factura"] and numero_ocr:
         cab_sets.append("numero_factura = ?")
         cab_vals.append(numero_ocr)
-    if not fila["proveedor_id"] and parsed.get("proveedor"):
-        pid = _match_proveedor_ocr(cursor, parsed.get("proveedor"))
-        if pid:
-            cab_sets.append("proveedor_id = ?")
-            cab_vals.append(pid)
+    if proveedor_ocr:
+        cab_sets.append("proveedor_id = ?")
+        cab_vals.append(proveedor_ocr)
     fecha = (parsed.get("fecha") or "").strip()[:10]
     if fecha and re.match(r"^\d{4}-\d{2}-\d{2}$", fecha) and not (fila["fecha_papel"] or "").strip():
         cab_sets.append("fecha_papel = ?")
@@ -1616,6 +1702,7 @@ def ingresar_mercaderia(factura: NuevaFacturaCompra, background_tasks: Backgroun
             VALUES (?, ?, ?, 0, ?)
         ''', (factura.proveedor_id, numero, fecha_compra, factura.condicion_pago))
         compra_id = cursor.lastrowid
+        _asegurar_tabla_vinculos(cursor)
         
         # 2. Procesamos cada producto que llegó en el camión
         for item in factura.items:
@@ -1626,7 +1713,7 @@ def ingresar_mercaderia(factura: NuevaFacturaCompra, background_tasks: Backgroun
             subtotal_item = item.cantidad_comprada * item.costo_unitario
             total_acumulado += subtotal_item
             
-            cursor.execute("SELECT nombre FROM productos WHERE id = ?", (item.producto_id,))
+            cursor.execute("SELECT nombre, codigo_barras FROM productos WHERE id = ?", (item.producto_id,))
             prod = cursor.fetchone()
             if not prod:
                 raise HTTPException(status_code=400, detail=f"El producto #{item.producto_id} no existe. Vinculá o dales alta a las líneas sin catálogo.")
@@ -1654,6 +1741,10 @@ def ingresar_mercaderia(factura: NuevaFacturaCompra, background_tasks: Backgroun
                     "UPDATE productos SET precio_venta_final = ? WHERE id = ?",
                     (item.nuevo_precio_venta, item.producto_id),
                 )
+            _recordar_vinculo(
+                cursor, factura.proveedor_id, item.producto_id, prod["codigo_barras"],
+                item.codigo_papel, item.texto_papel,
+            )
 
 # 3. ACTUALIZAMOS EL TOTAL DE LA FACTURA (Sumando los cargos extra)
         total_final_real = total_acumulado + factura.cargos_extra
