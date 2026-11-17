@@ -1107,6 +1107,19 @@ def _ocr_clave_openai() -> str:
     return (os.getenv("OPENAI_API_KEY") or os.getenv("FACTURA_OCR_KEY") or "").strip()
 
 
+def _lector_gemini():
+    """None si backend/mod_ia no está, falta google-genai o falta GEMINI_API_KEY: se usa OpenAI."""
+    try:
+        from backend.mod_ia import lector_facturas
+    except ImportError:
+        return None
+    return lector_facturas if lector_facturas.disponible() else None
+
+
+def _ocr_disponible() -> bool:
+    return _lector_gemini() is not None or bool(_ocr_clave_openai())
+
+
 def _item_desde_producto_row(prod: dict, cantidad: float, costo: float, modo: str, origen: str) -> dict:
     uxb = max(1, int(prod.get("unidades_por_bulto") or 1))
     precio = float(prod.get("precio_venta_final") or 0)
@@ -1167,6 +1180,49 @@ def _item_huerfano_ocr(linea: dict) -> dict:
         "origen_linea": "OCR",
         "huerfano": True,
     }
+
+
+def _item_desde_lector(linea: dict, prod) -> dict:
+    """linea: ítem ya calculado por mod_ia.calculo_costos (costo neto sin IVA por unidad suelta)."""
+    modo = linea["modo"]
+    bultos = linea["cantidad_bultos_o_packs"] or 1
+    costo = linea["costo_unitario_neto_sin_iva"]
+    if prod:
+        item = _item_desde_producto_row(prod, bultos, costo, modo, "OCR")
+    else:
+        item = _item_huerfano_ocr({"nombre": linea["descripcion"], "codigo": linea["codigo"], "cantidad": bultos})
+        uxb = linea["unidades_por_bulto"]
+        item.update({
+            "modo_cantidad": modo,
+            "cantidad_comprada": linea["unidades_totales_reales"] or bultos,
+            "costo_unitario": costo,
+            "costo_anterior": costo,
+            "costo_caja": costo * uxb,
+            "unidades_por_bulto": uxb,
+            "porcentaje_iva": linea["alicuota_iva"],
+        })
+    item["costo_final_ocr"] = linea["costo_unitario_final_con_impuestos"]
+    if linea["avisos"]:
+        item["aviso_ocr"] = _texto_externo(" ".join(linea["avisos"]), 300)
+    return item
+
+
+def _items_desde_lector(cursor, parsed: dict):
+    from backend.mod_ia.calculo_costos import procesar_factura
+
+    leida = parsed.get("leida") or {}
+    lineas = [l for l in (leida.get("items") or []) if float(l.get("confianza") or 0) >= 0.45]
+    fichas = [
+        _match_producto_ocr(
+            cursor,
+            _texto_externo(l.get("codigo"), 40),
+            _texto_externo(l.get("descripcion"), 120),
+        )
+        for l in lineas
+    ]
+    calculo = procesar_factura({**leida, "items": lineas}, fichas)
+    items = [_item_desde_lector(l, f) for l, f in zip(calculo["items"], fichas)]
+    return items, calculo["cargos_pie"], calculo["avisos"]
 
 
 def _match_producto_ocr(cursor, codigo: str, nombre: str):
@@ -1282,6 +1338,33 @@ def _fotos_a_imagenes_ocr(cursor, fila) -> list:
     return out
 
 
+MAX_ARCHIVOS_LECTOR = 6
+MAX_BYTES_LECTOR = 18 * 1024 * 1024
+
+
+def _archivos_para_lector(fila) -> list:
+    """Fotos y PDF del borrador en bytes, dentro del límite de un pedido inline a Gemini."""
+    out, total = [], 0
+    for foto in _parse_json_list(fila["fotos_json"]):
+        mime = (foto.get("mime") or "image/jpeg").split(";")[0].strip().lower()
+        if mime == "image/jpg":
+            mime = "image/jpeg"
+        if not (mime.startswith("image/") or mime == "application/pdf"):
+            continue
+        ruta = _ruta_archivo_foto(fila["id"], foto)
+        if not os.path.isfile(ruta):
+            continue
+        with open(ruta, "rb") as fh:
+            raw = fh.read()
+        if not raw or len(raw) > MAX_FOTO_BYTES or total + len(raw) > MAX_BYTES_LECTOR:
+            continue
+        out.append({"mime": mime, "datos": raw})
+        total += len(raw)
+        if len(out) >= MAX_ARCHIVOS_LECTOR:
+            break
+    return out
+
+
 def _aplicar_parseo_ocr(cursor, fila, parsed: dict) -> dict:
     if parsed.get("mano"):
         return {"estado": "mano", "n_items": 0, "n_huerfanos": 0}
@@ -1295,21 +1378,25 @@ def _aplicar_parseo_ocr(cursor, fila, parsed: dict) -> dict:
     manuales = [it for it in items_prev if (it.get("origen_linea") or "") == "MANUAL"]
 
     ocr_items = []
-    for linea in parsed.get("items") or []:
-        try:
-            conf = float(linea.get("confianza") or 0)
-        except (TypeError, ValueError):
-            conf = 0
-        if conf and conf < 0.45:
-            continue
-        prod = _match_producto_ocr(cursor, linea.get("codigo") or "", linea.get("nombre") or "")
-        modo = "CAJA" if str(linea.get("unidad") or "").upper() == "CAJA" else "UN"
-        cant = linea.get("cantidad") or 1
-        costo = linea.get("costo_unitario") or 0
-        if prod:
-            ocr_items.append(_item_desde_producto_row(prod, cant, costo, modo, "OCR"))
-        else:
-            ocr_items.append(_item_huerfano_ocr(linea))
+    avisos_factura = []
+    if parsed.get("motor") == "gemini":
+        ocr_items, parsed["cargos_pie"], avisos_factura = _items_desde_lector(cursor, parsed)
+    else:
+        for linea in parsed.get("items") or []:
+            try:
+                conf = float(linea.get("confianza") or 0)
+            except (TypeError, ValueError):
+                conf = 0
+            if conf and conf < 0.45:
+                continue
+            prod = _match_producto_ocr(cursor, linea.get("codigo") or "", linea.get("nombre") or "")
+            modo = "CAJA" if str(linea.get("unidad") or "").upper() == "CAJA" else "UN"
+            cant = linea.get("cantidad") or 1
+            costo = linea.get("costo_unitario") or 0
+            if prod:
+                ocr_items.append(_item_desde_producto_row(prod, cant, costo, modo, "OCR"))
+            else:
+                ocr_items.append(_item_huerfano_ocr(linea))
 
     nuevos = manuales + ocr_items
     cab_sets = ["items_json = ?", "updated_at = ?", "modo = ?"]
@@ -1354,6 +1441,9 @@ def _aplicar_parseo_ocr(cursor, fila, parsed: dict) -> dict:
         "n_items": len(nuevos),
         "n_huerfanos": n_h,
         "mano": False,
+        "motor": parsed.get("motor") or "openai",
+        "n_avisos": sum(1 for it in ocr_items if it.get("aviso_ocr")),
+        "avisos": avisos_factura,
     }
 
 
@@ -1366,8 +1456,11 @@ def _ocr_borrador_completo(borrador_id: int) -> dict:
         fila = _fila_borrador(cursor, borrador_id)
         if not fila:
             return {"estado": "error", "detalle": "Borrador no encontrado."}
-        imagenes = _fotos_a_imagenes_ocr(cursor, fila)
-        parsed = _llamar_ocr_openai(imagenes)
+        lector = _lector_gemini()
+        if lector:
+            parsed = lector.leer_factura(_archivos_para_lector(fila))
+        else:
+            parsed = _llamar_ocr_openai(_fotos_a_imagenes_ocr(cursor, fila))
         if parsed.get("estado") in ("sin_clave", "sin_imagen", "error"):
             return parsed
         res = _aplicar_parseo_ocr(cursor, fila, parsed)
@@ -1479,10 +1572,10 @@ def borrador_desde_whatsapp(body: FotoWhatsappIn, request: Request):
 @router.post("/borradores/{borrador_id}/ocr", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
 def ocr_borrador_factura(borrador_id: int):
     """Lee las fotos del borrador y precarga ítems. Nunca toca stock."""
-    if not _ocr_clave_openai():
+    if not _ocr_disponible():
         raise HTTPException(
             status_code=400,
-            detail="Falta OPENAI_API_KEY (o FACTURA_OCR_KEY) en el servidor para leer el papel.",
+            detail="Falta GEMINI_API_KEY (o OPENAI_API_KEY) en el servidor para leer el papel.",
         )
     res = _ocr_borrador_completo(borrador_id)
     if res.get("estado") == "error":

@@ -624,7 +624,7 @@ async function onInputFotoBorrador(input) {
     dibujarFotosBorrador();
     await refrescarListaBorradores();
     marcarEstadoBorradorFactura(`Borrador #${borradorServidorId} en el servidor · ${fotosBorradorActual.length} foto(s).`);
-    if (files.some((f) => String(f.type || '').startsWith('image/'))) {
+    if (files.some((f) => String(f.type || '').startsWith('image/') || f.type === 'application/pdf')) {
         await ocrBorradorFactura();
     }
 }
@@ -1104,6 +1104,7 @@ function htmlFilaFactura(item, idx) {
     if (item.codigo_barras) meta.push(escapeHtmlFactura(item.codigo_barras));
     meta.push(`Último costo $${Number(item.costo_anterior || item.costo_unitario || 0).toFixed(2)}`);
     if (uxb > 1) meta.push(`Caja x${uxb}`);
+    const avisoOcr = item.aviso_ocr ? `<div class="small text-warning">${escapeHtmlFactura(item.aviso_ocr)}</div>` : '';
 
     const gondolaOn = !!item.actualizar_gondola;
     const sugerido = precioSugeridoItem(item);
@@ -1126,10 +1127,10 @@ function htmlFilaFactura(item, idx) {
                 <td class="text-start" data-label="Producto">
                     ${item.producto_id
                         ? `<div class="fw-bold">${escapeHtmlFactura(item.nombre)}</div>
-                    <small class="text-muted">${meta.join(' · ')}</small>`
+                    <small class="text-muted">${meta.join(' · ')}</small>${avisoOcr}`
                         : `<div class="fw-bold text-warning">Sin catálogo</div>
                     <div>${escapeHtmlFactura(item.nombre || item.nombre_ocr || '')}</div>
-                    <small class="text-muted">${escapeHtmlFactura(item.codigo_ocr || item.codigo_barras || 'sin código')} · del papel</small>
+                    <small class="text-muted">${escapeHtmlFactura(item.codigo_ocr || item.codigo_barras || 'sin código')} · del papel</small>${avisoOcr}
                     <div class="d-flex flex-wrap gap-1 mt-1">
                         <button type="button" class="btn btn-outline-primary btn-sm py-0" onclick="vincularProductoFila(${idx})">Vincular</button>
                         <button type="button" class="btn btn-primary btn-sm py-0" onclick="altaRapidaFila(${idx})">Dar de alta</button>
@@ -1172,7 +1173,9 @@ function aplicarProductoAFila(idx, producto) {
     const item = facturaActualItems[idx];
     if (!item || !producto) return;
     const uxb = Math.max(1, parseInt(producto.unidades_por_bulto, 10) || item.unidades_por_bulto || 1);
-    const costoPapel = Number(item.costo_unitario);
+    const bultoDelPapel = item.huerfano && item.origen_linea === 'OCR' && item.modo_cantidad === 'CAJA' && Number(item.costo_caja) > 0;
+    const costoPapel = bultoDelPapel ? Number(item.costo_caja) / uxb : Number(item.costo_unitario);
+    if (bultoDelPapel && uxb === 1) item.modo_cantidad = 'UN';
     const costo = Number.isFinite(costoPapel) && costoPapel > 0 ? costoPapel : (parseFloat(producto.costo_sin_iva) || 0);
     const precio = parseFloat(producto.precio_venta_final) || 0;
     item.producto_id = producto.id;
@@ -1448,15 +1451,21 @@ async function ocrBorradorFactura() {
             return;
         }
         if (ocr.estado === 'sin_clave') {
-            Swal.fire('OCR', 'Falta OPENAI_API_KEY en el servidor.', 'warning');
+            Swal.fire('OCR', 'Falta GEMINI_API_KEY (o OPENAI_API_KEY) en el servidor.', 'warning');
+            return;
+        }
+        if (ocr.estado === 'sin_imagen') {
+            Swal.fire('OCR', 'No hay foto ni PDF que se pueda leer en este borrador.', 'info');
             return;
         }
         const h = ocr.n_huerfanos || 0;
-        Swal.fire(
-            'Papel leído',
-            `${ocr.n_items || facturaActualItems.length} ítems. ${h ? h + ' sin catálogo: vinculá o dalos de alta. ' : ''}No se tocó stock.`,
-            'success'
-        );
+        const a = ocr.n_avisos || 0;
+        const avisosFactura = Array.isArray(ocr.avisos) ? ocr.avisos.join(' ') : '';
+        Swal.fire({
+            title: 'Papel leído',
+            text: `${ocr.n_items || facturaActualItems.length} ítems. ${h ? h + ' sin catálogo: vinculá o dalos de alta. ' : ''}${a ? a + ' con aviso: revisalos. ' : ''}${avisosFactura ? avisosFactura + ' ' : ''}No se tocó stock.`,
+            icon: a || avisosFactura ? 'warning' : 'success'
+        });
     } catch (e) {
         Swal.fire('OCR', e.message || 'No se pudo leer.', 'error');
     }
