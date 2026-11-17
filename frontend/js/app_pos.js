@@ -866,6 +866,68 @@ function lineasDePrecio(p) {
     return mejor;
 }
 
+function fmtDiaMesPos(iso) {
+    const partes = String(iso || '').split('-');
+    return partes.length >= 3 ? `${partes[2]}/${partes[1]}` : '';
+}
+
+function nombrePackPos(n, precioPack, lista) {
+    if (lista > 0 && Math.abs(Number(precioPack) - redondearCent(lista * (n - 1))) < 0.005) return `${n}x${n - 1}`;
+    return `${n} por $${Number(precioPack).toFixed(2)}`;
+}
+
+/**
+ * Promos de hoy que el cajero todavía no está cobrando.
+ * En el ticket dice cuánto falta. En la búsqueda lista la promo, sin cantidad.
+ */
+function avisosPromoPos(p, enTicket) {
+    if (p.precio_modificado_manual) return [];
+    const cant = enTicket ? (Number(p.cantidad) || 0) : 0;
+    const lista = Number(p.precio_venta_final) || 0;
+    const pesable = esPesablePos(p);
+    const avisos = [];
+    reglasVigentesPos(p).forEach((r) => {
+        const hasta = r.fecha_hasta ? `, hasta el ${fmtDiaMesPos(r.fecha_hasta)}` : '';
+        const tipo = r.tipo || 'VOLUMEN';
+        if (tipo === 'VOLUMEN') {
+            const n = Number(r.cantidad_minima);
+            const precio = Number(r.precio_oferta_unitario);
+            if (!(n > 0) || !(precio > 0)) return;
+            if (n <= 1) {
+                if (!enTicket) avisos.push(`Oferta $${precio.toFixed(2)}${hasta}`);
+                return;
+            }
+            if (enTicket && cant >= n) return;
+            const base = `Llevando ${n}: $${precio.toFixed(2)} c/u${hasta}`;
+            if (!enTicket) {
+                avisos.push(base);
+                return;
+            }
+            const faltan = Math.round((n - cant) * 1000) / 1000;
+            avisos.push(`${base}, ${faltan === 1 ? 'falta 1' : `faltan ${faltan}`}`);
+            return;
+        }
+        if (tipo !== 'PACK' || pesable) return;
+        const n = Number(r.cantidad_minima);
+        if (!Number.isInteger(n) || n < 2 || !(Number(r.precio_pack) > 0)) return;
+        if (enTicket && Number.isInteger(cant) && cant >= n) return;
+        const nombre = `${nombrePackPos(n, r.precio_pack, lista)}${hasta}`;
+        if (!enTicket) {
+            avisos.push(nombre);
+            return;
+        }
+        const faltan = n - Math.floor(cant);
+        avisos.push(`${nombre}, ${faltan === 1 ? 'falta 1' : `faltan ${faltan}`}`);
+    });
+    return avisos;
+}
+
+function htmlAvisosPromo(p, enTicket) {
+    const avisos = avisosPromoPos(p, enTicket);
+    if (!avisos.length) return '';
+    return `<div class="fw-normal text-muted" style="font-size:0.65rem;">${avisos.map(escHtmlPos).join(' · ')}</div>`;
+}
+
 function agregarAlCarrito(p) {
     // 1. Detectamos si el producto se vende por peso
     // (Ajustá 'PESO' o 'Kg' según cómo lo hayas escrito en tu base de datos)
@@ -1071,7 +1133,7 @@ function actualizarTabla() {
                     <span class="fw-bold px-1" style="font-size: 0.95rem;">${p.cantidad} <small class="text-muted">${unidad}</small></span>
                     <button class="btn btn-sm btn-light border py-0 px-1 text-success fw-bold" onclick="cambiarCantidad(${i}, 1)">+</button>
                 </div>
-                <div class="text-start fw-bold" style="line-height:1.1;">${p.nombre}${badgePromo}</div>
+                <div class="text-start fw-bold" style="line-height:1.1;">${escHtmlPos(p.nombre)}${badgePromo}${htmlAvisosPromo(p, true)}</div>
                 <div class="text-primary text-decoration-underline" style="cursor:pointer;" ondblclick="cambiarPrecioManual(${i})" title="Doble clic para editar">$${precioF.toFixed(2)}</div>
                 <div class="fw-bold">$${sub.toFixed(2)}</div>
                 <button class="btn btn-outline-danger border-0 btn-sm" onclick="carrito.splice(${i},1); actualizarTabla();"><i class="bi bi-trash"></i></button>
@@ -2730,14 +2792,18 @@ async function filtrarAvanzado(event) {
             resultados.forEach((p) => {
                 let categoriaTexto = p.categoria_id ? `Cat ID ${p.categoria_id}` : "Sin Rubro";
                 let codigoMostrar = p.codigo_barras || p.id;
-                let precioMostrar = p.precio_venta_final || 0;
+                const lista = Number(p.precio_venta_final) || 0;
+                const precioUna = lineasDePrecio({ ...p, cantidad: 1, precio_modificado_manual: false }).lineas[0].precio;
+                const precioHtml = precioUna < lista - 0.009
+                    ? `<div class="small text-muted text-decoration-line-through">$${lista.toFixed(2)}</div>$${precioUna.toFixed(2)}`
+                    : `$${precioUna.toFixed(2)}`;
 
                 tbody.innerHTML += `
                     <tr class="fila-busqueda" onclick="agregarDesdeF3('${p.id}')">
-                        <td class="text-muted fw-bold">${codigoMostrar}</td>
-                        <td class="fw-bold">${p.nombre}</td>
-                        <td><span class="badge bg-secondary">${categoriaTexto}</span></td>
-                        <td class="text-end fw-bold text-success">$${precioMostrar.toFixed(2)}</td>
+                        <td class="text-muted fw-bold">${escHtmlPos(codigoMostrar)}</td>
+                        <td class="fw-bold">${escHtmlPos(p.nombre)}${htmlAvisosPromo(p, false)}</td>
+                        <td><span class="badge bg-secondary">${escHtmlPos(categoriaTexto)}</span></td>
+                        <td class="text-end fw-bold text-success">${precioHtml}</td>
                     </tr>
                 `;
             });
