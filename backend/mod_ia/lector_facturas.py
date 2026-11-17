@@ -5,11 +5,13 @@ las hace calculo_costos.py en Python.
 """
 import importlib.util
 import os
+import time
 
 from pydantic import BaseModel, Field
 
 MODELO_POR_DEFECTO = "gemini-3.8-flash"
 TIMEOUT_MS = 90_000
+ESPERAS_REINTENTO_503 = (4, 10)
 MIMES_ADMITIDOS = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"}
 
 
@@ -64,6 +66,8 @@ def _mensaje_error(e) -> str:
     codigo = getattr(e, "code", None)
     if codigo == 404:
         return "Ese modelo de Gemini ya no está disponible. Cambiá GEMINI_MODELO en el .env."
+    if codigo == 503:
+        return "Gemini está saturado ahora (es de Google, pasa seguido en el plan gratis). Probá en unos minutos."
     if codigo == 504:
         return "Gemini tardó demasiado en leer. Probá de nuevo; si sigue, mandá la foto más cerca y derecha."
     if codigo == 429:
@@ -88,22 +92,26 @@ def leer_factura(archivos: list) -> dict:
     from google.genai import types
 
     modelo = (os.getenv("GEMINI_MODELO") or MODELO_POR_DEFECTO).strip()
-    try:
-        cliente = genai.Client(api_key=clave, http_options=types.HttpOptions(timeout=TIMEOUT_MS))
-        respuesta = cliente.models.generate_content(
-            model=modelo,
-            contents=[types.Part.from_bytes(data=a["datos"], mime_type=a["mime"]) for a in partes_archivo] + [PROMPT],
-            config=types.GenerateContentConfig(
-                temperature=0,
-                # Transcribir no necesita razonar: con el nivel por defecto pasa los 90 s y Google corta con 504.
-                thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
-                response_mime_type="application/json",
-                response_schema=FacturaLeida,
-            ),
-        )
-    except Exception as e:
-        print(f"Lector Gemini: {type(e).__name__}: {str(e)[:300]}")
-        return {"estado": "error", "detalle": _mensaje_error(e)}
+    cliente = genai.Client(api_key=clave, http_options=types.HttpOptions(timeout=TIMEOUT_MS))
+    contenido = [types.Part.from_bytes(data=a["datos"], mime_type=a["mime"]) for a in partes_archivo] + [PROMPT]
+    config = types.GenerateContentConfig(
+        temperature=0,
+        # Transcribir no necesita razonar: con el nivel por defecto pasa los 90 s y Google corta con 504.
+        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
+        response_mime_type="application/json",
+        response_schema=FacturaLeida,
+    )
+    inicio = time.monotonic()
+    for espera in ESPERAS_REINTENTO_503 + (None,):
+        try:
+            respuesta = cliente.models.generate_content(model=modelo, contents=contenido, config=config)
+            break
+        except Exception as e:
+            print(f"Lector Gemini: {type(e).__name__}: {str(e)[:300]}")
+            # El bot y nginx esperan 120 s: solo se reintenta si el 503 llegó rápido.
+            if getattr(e, "code", None) != 503 or espera is None or time.monotonic() - inicio > 20:
+                return {"estado": "error", "detalle": _mensaje_error(e)}
+            time.sleep(espera)
 
     leida = respuesta.parsed
     if not isinstance(leida, FacturaLeida):
