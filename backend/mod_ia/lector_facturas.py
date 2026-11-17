@@ -64,6 +64,8 @@ def _mensaje_error(e) -> str:
     codigo = getattr(e, "code", None)
     if codigo == 404:
         return "Ese modelo de Gemini ya no está disponible. Cambiá GEMINI_MODELO en el .env."
+    if codigo == 504:
+        return "Gemini tardó demasiado en leer. Probá de nuevo; si sigue, mandá la foto más cerca y derecha."
     if codigo == 429:
         return "Gemini sin cuota por ahora (límite del plan). Probá en un rato."
     if codigo in (400, 401, 403) and "key" in str(e).lower():
@@ -93,6 +95,8 @@ def leer_factura(archivos: list) -> dict:
             contents=[types.Part.from_bytes(data=a["datos"], mime_type=a["mime"]) for a in partes_archivo] + [PROMPT],
             config=types.GenerateContentConfig(
                 temperature=0,
+                # Transcribir no necesita razonar: con el nivel por defecto pasa los 90 s y Google corta con 504.
+                thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
                 response_mime_type="application/json",
                 response_schema=FacturaLeida,
             ),
