@@ -140,12 +140,59 @@ def _sumar_transferencias(cursor, turno_id):
     return bruto
 
 
+_ESTADOS_VENTA_CAJA = "('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')"
+
+
+def _efectivo_en_cajon(cursor, turno_id):
+    """Efectivo puro más la pata en efectivo de cada mixto. Las dos van al cajón."""
+    cursor.execute(
+        f"""
+        SELECT IFNULL(SUM(total_venta), 0) FROM ventas_cabecera
+        WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ?
+          AND estado IN {_ESTADOS_VENTA_CAJA}
+        """,
+        (turno_id,),
+    )
+    puro = float(cursor.fetchone()[0] or 0)
+    mixto = 0.0
+    try:
+        cursor.execute(
+            f"""
+            SELECT IFNULL(SUM(m.monto), 0)
+            FROM ventas_pagos_mixtos m
+            JOIN ventas_cabecera c ON c.id = m.venta_id
+            WHERE UPPER(m.metodo_pago) = 'EFECTIVO' AND c.turno_id = ?
+              AND c.estado IN {_ESTADOS_VENTA_CAJA}
+            """,
+            (turno_id,),
+        )
+        mixto = float(cursor.fetchone()[0] or 0)
+    except sqlite3.OperationalError:
+        pass
+    return puro + mixto
+
+
+def _suma_movimiento_cajon(cursor, turno_id, tipo):
+    """Ingresos y retiros de verdad. El efectivo de un mixto viejo quedó anotado como ingreso y no se vuelve a sumar."""
+    cursor.execute(
+        """
+        SELECT IFNULL(SUM(monto), 0) FROM movimientos_caja
+        WHERE tipo_movimiento = ? AND turno_id = ?
+          AND IFNULL(observaciones, '') NOT LIKE 'Efectivo de Ticket % (Mixto)'
+          AND IFNULL(observaciones, '') NOT LIKE 'Anulación Efectivo Mixto %'
+        """,
+        (tipo, turno_id),
+    )
+    return float(cursor.fetchone()[0] or 0)
+
+
 def _detalle_retiros_turno(cursor, turno_id):
     cursor.execute(
         '''
         SELECT monto, IFNULL(observaciones, '') AS obs
         FROM movimientos_caja
         WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?
+          AND IFNULL(observaciones, '') NOT LIKE 'Anulación Efectivo Mixto %'
         ORDER BY id ASC
         ''',
         (turno_id,),
@@ -503,8 +550,7 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks,
             
         fecha_cierre = datetime.now(ZONA_AR).strftime("%Y-%m-%d %H:%M:%S")
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')", (cierre.turno_id,))
-        ventas_efectivo = cursor.fetchone()[0] or 0.0
+        ventas_efectivo = _efectivo_en_cajon(cursor, cierre.turno_id)
         
         ventas_tarjeta, comision_tarjeta = _sumar_medio(cursor, cierre.turno_id, "%TARJETA%")
         ventas_qr, comision_qr = _sumar_medio(cursor, cierre.turno_id, "%QR%")
@@ -517,11 +563,8 @@ def cerrar_turno(cierre: CierreCaja, background_tasks: BackgroundTasks,
         ventas_fiados += _fiado_mixto(cursor, cierre.turno_id)
         ventas_transferencia = _sumar_transferencias(cursor, cierre.turno_id)
         
-        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (cierre.turno_id,))
-        total_retiros = cursor.fetchone()[0] or 0.0
-        
-        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?", (cierre.turno_id,))
-        total_ingresos = cursor.fetchone()[0] or 0.0
+        total_retiros = _suma_movimiento_cajon(cursor, cierre.turno_id, "RETIRO")
+        total_ingresos = _suma_movimiento_cajon(cursor, cierre.turno_id, "INGRESO")
         
         monto_esperado_sistema = turno['monto_inicial'] + ventas_efectivo + total_ingresos - total_retiros
         diferencia = cierre.monto_final_declarado - monto_esperado_sistema
@@ -702,10 +745,7 @@ def _enviar_z_guardado(turno_id: int):
             (turno["usuario_id"],),
         ).fetchone()
         nombre = cajero["nombre_completo"] if cajero and cajero["nombre_completo"] else f"Usuario #{turno['usuario_id']}"
-        ventas_efectivo = cursor.execute(
-            "SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')",
-            (turno_id,),
-        ).fetchone()[0] or 0.0
+        ventas_efectivo = _efectivo_en_cajon(cursor, turno_id)
         ventas_tarjeta, comision_tarjeta = _sumar_medio(cursor, turno_id, "%TARJETA%")
         ventas_qr, comision_qr = _sumar_medio(cursor, turno_id, "%QR%")
         ventas_virtual = cursor.execute(
@@ -718,14 +758,8 @@ def _enviar_z_guardado(turno_id: int):
         ).fetchone()[0] or 0.0
         ventas_fiados += _fiado_mixto(cursor, turno_id)
         ventas_transferencia = _sumar_transferencias(cursor, turno_id)
-        total_retiros = cursor.execute(
-            "SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?",
-            (turno_id,),
-        ).fetchone()[0] or 0.0
-        total_ingresos = cursor.execute(
-            "SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?",
-            (turno_id,),
-        ).fetchone()[0] or 0.0
+        total_retiros = _suma_movimiento_cajon(cursor, turno_id, "RETIRO")
+        total_ingresos = _suma_movimiento_cajon(cursor, turno_id, "INGRESO")
         fondo = turno["fondo_dejado"] if "fondo_dejado" in turno.keys() else None
         declarado = float(turno["monto_final_declarado"] or 0)
         if fondo is None:
@@ -784,8 +818,7 @@ def sacar_informe_x(turno_id: int):
             
         fondo_inicial = turno['monto_inicial']
         
-        cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE UPPER(metodo_pago) = 'EFECTIVO' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')", (turno_id,))
-        v_efectivo = cursor.fetchone()[0] or 0.0
+        v_efectivo = _efectivo_en_cajon(cursor, turno_id)
         
         v_tarjeta, comision_tarjeta = _sumar_medio(cursor, turno_id, "%TARJETA%")
         v_qr, comision_qr = _sumar_medio(cursor, turno_id, "%QR%")
@@ -798,11 +831,8 @@ def sacar_informe_x(turno_id: int):
         v_fiados += _fiado_mixto(cursor, turno_id)
         v_transferencia = _sumar_transferencias(cursor, turno_id)
         
-        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (turno_id,))
-        retiros = cursor.fetchone()[0] or 0.0
-        
-        cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?", (turno_id,))
-        ingresos = cursor.fetchone()[0] or 0.0
+        retiros = _suma_movimiento_cajon(cursor, turno_id, "RETIRO")
+        ingresos = _suma_movimiento_cajon(cursor, turno_id, "INGRESO")
         
         esperado = fondo_inicial + v_efectivo + ingresos - retiros
         
@@ -845,16 +875,13 @@ def monitor_cajas_vivo():
         
         for turno in turnos_abiertos:
             turno_id_actual = turno['turno_id']
-            cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago = 'EFECTIVO' AND turno_id = ? AND estado IN ('COMPLETADA', 'PAGADO_PENDIENTE_ENTREGA', 'ENTREGADA')", (turno_id_actual,))
-            ventas_efectivo = cursor.fetchone()[0] or 0.0
+            ventas_efectivo = _efectivo_en_cajon(cursor, turno_id_actual)
             ventas_tarjeta, _comision_tarjeta = _sumar_medio(cursor, turno_id_actual, "%TARJETA%")
             ventas_qr, _comision_qr = _sumar_medio(cursor, turno_id_actual, "%QR%")
             cursor.execute("SELECT SUM(total_venta) FROM ventas_cabecera WHERE metodo_pago LIKE '%Billetera%' AND turno_id = ?", (turno_id_actual,))
             ventas_virtual = cursor.fetchone()[0] or 0.0
-            cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?", (turno_id_actual,))
-            retiros = cursor.fetchone()[0] or 0.0
-            cursor.execute("SELECT SUM(monto) FROM movimientos_caja WHERE tipo_movimiento = 'INGRESO' AND turno_id = ?", (turno_id_actual,))
-            ingresos = cursor.fetchone()[0] or 0.0
+            retiros = _suma_movimiento_cajon(cursor, turno_id_actual, "RETIRO")
+            ingresos = _suma_movimiento_cajon(cursor, turno_id_actual, "INGRESO")
             
             turno['ventas_efectivo'] = ventas_efectivo
             turno['ventas_tarjeta'] = ventas_tarjeta
@@ -1015,6 +1042,25 @@ def auditar_turno(turno_id: int):
                 "monto": turno['monto_inicial']
             })
 
+        patas_mixto = {}
+        try:
+            cursor.execute(
+                '''
+                SELECT m.venta_id, m.metodo_pago, m.monto
+                FROM ventas_pagos_mixtos m
+                JOIN ventas_cabecera c ON c.id = m.venta_id
+                WHERE c.turno_id = ?
+                ORDER BY m.id
+                ''',
+                (turno_id,),
+            )
+            for pata in cursor.fetchall():
+                patas_mixto.setdefault(pata["venta_id"], []).append(
+                    f"{pata['metodo_pago']} ${float(pata['monto'] or 0):.2f}"
+                )
+        except sqlite3.OperationalError:
+            pass
+
         cursor.execute('''
             SELECT v.id, v.fecha_hora, v.metodo_pago, v.total_venta, v.estado,
                    COALESCE(NULLIF(TRIM(c.nombre_completo), ''), NULLIF(TRIM(v.nombre_cliente_factura), '')) AS nombre_cliente
@@ -1028,6 +1074,8 @@ def auditar_turno(turno_id: int):
             nombre_fiado = (v['nombre_cliente'] or '').strip()
             if metodo in ('FIADO', 'CUENTA CORRIENTE') and nombre_fiado:
                 detalle_venta = f"Fiado a {nombre_fiado} · Cobró: {nombre_cajero}"
+            elif metodo == 'MIXTO' and patas_mixto.get(v['id']):
+                detalle_venta = " · ".join(patas_mixto[v['id']])
             else:
                 detalle_venta = f"Venta de mostrador - Cobró: {nombre_cajero}"
             linea_tiempo.append({
@@ -1046,6 +1094,11 @@ def auditar_turno(turno_id: int):
             WHERE turno_id = ?
         ''', (turno_id,))
         for m in cursor.fetchall():
+            obs = m['observaciones'] or ''
+            if obs.startswith('Efectivo de Ticket ') and obs.endswith(' (Mixto)'):
+                continue
+            if obs.startswith('Anulación Efectivo Mixto '):
+                continue
             linea_tiempo.append({
                 "fecha_hora_cruda": m['fecha_hora'],
                 "hora": m['fecha_hora'][11:16] if m['fecha_hora'] else "-",

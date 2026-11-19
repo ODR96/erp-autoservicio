@@ -3302,7 +3302,8 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
                 <div class="divisor"></div>
                 <div style="display: flex; justify-content: space-between; font-size: 14px;" class="bold"><span>TOTAL A PAGAR:</span><span>$ ${ticket.totales.total_a_pagar.toFixed(2)}</span></div>
                 <div class="divisor-doble"></div>
-                <div class="left">Forma de Pago: ${ticket.totales.metodo_pago}</div>
+                <div class="left">Forma de Pago: ${escHtmlPos(ticket.totales.metodo_pago)}</div>
+                ${(ticket.totales.desglose_mixto || []).map((p) => `<div style="display:flex; justify-content:space-between;"><span>${escHtmlPos(p.metodo_pago)}</span><span>$ ${Number(p.monto || 0).toFixed(2)}</span></div>`).join('')}
         `;
 
         const abonoCon = pagoReal !== null ? pagoReal : ticket.totales.total_a_pagar;

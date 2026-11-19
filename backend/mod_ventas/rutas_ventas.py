@@ -565,12 +565,6 @@ def registrar_venta(venta: NuevaVenta, background_tasks: BackgroundTasks):
                     "INSERT INTO ventas_pagos_mixtos (venta_id, metodo_pago, monto, comision) VALUES (?, ?, ?, ?)",
                     (venta_id, p.metodo, p.monto, comision_pata),
                 )
-                if p.metodo == "EFECTIVO":
-                    # EL ARREGLO: Inyectamos explícitamente el turno_id de la venta
-                    cursor.execute('''
-                        INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id)
-                        VALUES (?, ?, 'INGRESO', ?, ?, ?)
-                    ''', (fecha_actual, 1, p.monto, f"Efectivo de Ticket #{venta_id} (Mixto)", venta.turno_id))
 
         _atar_cobro_qr(cursor, venta, venta_id, total_final)
 
@@ -1009,17 +1003,15 @@ def anular_venta(venta_id: int, peticion: AnularVentaRequest, background_tasks: 
             motivo_retiro = f"Anulación Efectivo Ticket #{venta_id}"
 
         elif metodo_pago == 'MIXTO':
+            # La pata en efectivo sale de la venta al anularla. No hace falta un retiro aparte.
             try:
                 cursor.execute("SELECT monto FROM ventas_pagos_mixtos WHERE venta_id = ? AND metodo_pago = 'EFECTIVO'", (venta_id,))
                 efvo = cursor.fetchone()
                 if efvo and efvo[0] > 0:
-                    cursor.execute('''
-                        INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id) 
-                        VALUES (?, ?, 'RETIRO', ?, ?, ?)
-                    ''', (fecha_actual, peticion.usuario_id, efvo[0], f"Anulación Efectivo Mixto #{venta_id}", peticion.turno_id))
                     retiro_anulado = efvo[0]
-                    motivo_retiro = f"Anulación Efectivo Mixto #{venta_id}"
-            except: pass
+                    motivo_retiro = f"Anulación efectivo del mixto, ticket #{venta_id}"
+            except sqlite3.OperationalError:
+                pass
 
         if cobro_qr and cobro_qr[1] == "aprobado":
             from backend.mod_pagos.rutas_pagos import reembolsar_cobro_aprobado
