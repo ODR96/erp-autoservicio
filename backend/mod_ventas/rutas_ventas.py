@@ -508,6 +508,9 @@ def registrar_venta(venta: NuevaVenta, background_tasks: BackgroundTasks):
             recargo_total = 0.0
             comision_total = 0.0
             for p in venta.pagos_mixtos:
+                if (p.metodo or "").upper() == "EFECTIVO" and float(p.monto or 0) < 0:
+                    pagos_ajustados.append({"metodo": "EFECTIVO", "monto": plata(p.monto), "comision": 0.0})
+                    continue
                 cobrado, recargo, comision = liquidar_comision(cursor, p.metodo, p.monto, cobrar_recargo)
                 pagos_ajustados.append({"metodo": p.metodo, "monto": cobrado, "comision": comision})
                 recargo_total += recargo
@@ -995,10 +998,7 @@ def anular_venta(venta_id: int, peticion: AnularVentaRequest, background_tasks: 
 
         # EL ARREGLO: Las anulaciones ahora sí declaran a qué turno y caja están afectando
         elif metodo_pago == 'EFECTIVO':
-            cursor.execute('''
-                INSERT INTO movimientos_caja (fecha_hora, usuario_id, tipo_movimiento, monto, observaciones, turno_id) 
-                VALUES (?, ?, 'RETIRO', ?, ?, ?)
-            ''', (fecha_actual, peticion.usuario_id, total_venta, f"Anulación Efectivo Ticket #{venta_id}", peticion.turno_id))
+            # La venta pasa a anulada y sale de las ventas en efectivo. Un retiro la restaría otra vez.
             retiro_anulado = total_venta
             motivo_retiro = f"Anulación Efectivo Ticket #{venta_id}"
 

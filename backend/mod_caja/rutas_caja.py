@@ -180,6 +180,7 @@ def _suma_movimiento_cajon(cursor, turno_id, tipo):
         WHERE tipo_movimiento = ? AND turno_id = ?
           AND IFNULL(observaciones, '') NOT LIKE 'Efectivo de Ticket % (Mixto)'
           AND IFNULL(observaciones, '') NOT LIKE 'Anulación Efectivo Mixto %'
+          AND IFNULL(observaciones, '') NOT LIKE 'Anulación Efectivo Ticket %'
         """,
         (tipo, turno_id),
     )
@@ -193,6 +194,7 @@ def _detalle_retiros_turno(cursor, turno_id):
         FROM movimientos_caja
         WHERE tipo_movimiento = 'RETIRO' AND turno_id = ?
           AND IFNULL(observaciones, '') NOT LIKE 'Anulación Efectivo Mixto %'
+          AND IFNULL(observaciones, '') NOT LIKE 'Anulación Efectivo Ticket %'
         ORDER BY id ASC
         ''',
         (turno_id,),
@@ -1055,9 +1057,12 @@ def auditar_turno(turno_id: int):
                 (turno_id,),
             )
             for pata in cursor.fetchall():
-                patas_mixto.setdefault(pata["venta_id"], []).append(
-                    f"{pata['metodo_pago']} ${float(pata['monto'] or 0):.2f}"
-                )
+                monto_pata = float(pata["monto"] or 0)
+                if monto_pata < -0.009 and (pata["metodo_pago"] or "").upper() == "EFECTIVO":
+                    texto_pata = f"Vuelto efectivo ${abs(monto_pata):.2f}"
+                else:
+                    texto_pata = f"{pata['metodo_pago']} ${monto_pata:.2f}"
+                patas_mixto.setdefault(pata["venta_id"], []).append(texto_pata)
         except sqlite3.OperationalError:
             pass
 
@@ -1097,7 +1102,7 @@ def auditar_turno(turno_id: int):
             obs = m['observaciones'] or ''
             if obs.startswith('Efectivo de Ticket ') and obs.endswith(' (Mixto)'):
                 continue
-            if obs.startswith('Anulación Efectivo Mixto '):
+            if obs.startswith('Anulación Efectivo Mixto ') or obs.startswith('Anulación Efectivo Ticket '):
                 continue
             linea_tiempo.append({
                 "fecha_hora_cruda": m['fecha_hora'],

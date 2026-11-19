@@ -3303,7 +3303,12 @@ async function imprimirTicket80mm(ticketId, pagoReal = null, vueltoReal = null, 
                 <div style="display: flex; justify-content: space-between; font-size: 14px;" class="bold"><span>TOTAL A PAGAR:</span><span>$ ${ticket.totales.total_a_pagar.toFixed(2)}</span></div>
                 <div class="divisor-doble"></div>
                 <div class="left">Forma de Pago: ${escHtmlPos(ticket.totales.metodo_pago)}</div>
-                ${(ticket.totales.desglose_mixto || []).map((p) => `<div style="display:flex; justify-content:space-between;"><span>${escHtmlPos(p.metodo_pago)}</span><span>$ ${Number(p.monto || 0).toFixed(2)}</span></div>`).join('')}
+                ${(ticket.totales.desglose_mixto || []).map((p) => {
+                    const monto = Number(p.monto || 0);
+                    const esVuelto = monto < -0.009 && String(p.metodo_pago || '').toUpperCase() === 'EFECTIVO';
+                    const etiqueta = esVuelto ? 'Vuelto en efectivo' : p.metodo_pago;
+                    return `<div style="display:flex; justify-content:space-between;"><span>${escHtmlPos(etiqueta)}</span><span>${esVuelto ? '-' : ''}$ ${Math.abs(monto).toFixed(2)}</span></div>`;
+                }).join('')}
         `;
 
         const abonoCon = pagoReal !== null ? pagoReal : ticket.totales.total_a_pagar;
@@ -3588,7 +3593,8 @@ async function procesarPagoMixto() {
 
     const qrCobrado = pataQr ? liquidarMedio('QR Mercado Pago', qr, !absorber).cobrado : 0;
     const desglosePagos = [];
-    if (efectivoRealCaja > 0) desglosePagos.push({ metodo: "EFECTIVO", monto: efectivoRealCaja });
+    const efectivoNeto = Math.round(efectivoRealCaja * 100) / 100;
+    if (Math.abs(efectivoNeto) > 0.009) desglosePagos.push({ metodo: "EFECTIVO", monto: efectivoNeto });
     if (ta > 0) desglosePagos.push({ metodo: metodoTarjeta, monto: ta });
     if (tr > 0) desglosePagos.push({ metodo: "TRANSFERENCIA", monto: tr });
     if (qr > 0.01) desglosePagos.push({ metodo: "QR Mercado Pago", monto: qr });
