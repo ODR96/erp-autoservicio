@@ -173,6 +173,9 @@ function dibujarTablaCatalogo(listaProductos, estadoSeleccionado) {
         let nombreCat = catReal ? catReal.nombre : 'Sin Rubro';
 
         let costoF = costoConIvaLista(p).toLocaleString('es-AR', {minimumFractionDigits: 2});
+        let costoNetoF = (Number(p.costo_sin_iva) || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+        let ivaLista = alicuotaFicha(p.porcentaje_iva);
+        let ivaListaTxt = ivaLista > 0 ? `s/IVA · ${String(ivaLista).replace('.', ',')} %` : 'Exento';
         let unidad = p.unidad_medida && p.unidad_medida !== 'Unidad' ? `x ${p.unidad_medida}` : '';
         let precioF = (p.precio_venta_final || 0).toLocaleString('es-AR', {minimumFractionDigits: 2}) + ` <span class="small text-muted">${unidad}</span>`;
         
@@ -202,7 +205,7 @@ function dibujarTablaCatalogo(listaProductos, estadoSeleccionado) {
             <button class="btn btn-sm btn-success fw-bold shadow-sm" title="Restaurar" onclick="restaurarProducto(${p.id}, '${nombreJs}')"><i class="bi bi-arrow-counterclockwise"></i> Restaurar</button>
         `;
 
-        tbody.innerHTML += `<tr class="fila-catalogo ${claseFila}" data-id="${p.id}" onclick="if (window.innerWidth < 768) abrirEditarProducto(${p.id})"><td class="text-muted align-middle col-hide-xs">${htmlTxt(p.codigo_barras || 'S/C')}</td><td class="align-middle"><div class="fw-bold lh-1">${htmlTxt(p.nombre)}</div>${htmlPromo}${alertaVencHTML}</td><td class="align-middle col-hide-xs"><span class="badge bg-primary">${htmlTxt(nombreCat)}</span></td><td class="text-end text-muted align-middle col-hide-xs">$ ${costoF}</td><td class="text-end fw-bold text-success align-middle">$ ${precioF}</td><td class="text-center align-middle"><span class="badge ${badgeClase} rounded-pill px-3">${textoStock}</span>${htmlLotes}</td><td class="text-center align-middle" onclick="event.stopPropagation()">${botonesEscritorio}</td></tr>`;
+        tbody.innerHTML += `<tr class="fila-catalogo ${claseFila}" data-id="${p.id}" onclick="if (window.innerWidth < 768) abrirEditarProducto(${p.id})"><td class="text-muted align-middle col-hide-xs">${htmlTxt(p.codigo_barras || 'S/C')}</td><td class="align-middle"><div class="fw-bold lh-1">${htmlTxt(p.nombre)}</div>${htmlPromo}${alertaVencHTML}</td><td class="align-middle col-hide-xs"><span class="badge bg-primary">${htmlTxt(nombreCat)}</span></td><td class="text-end text-muted align-middle col-hide-xs">$ ${costoF}<div class="small lh-1">${ivaLista > 0 ? `$ ${costoNetoF} ` : ''}${ivaListaTxt}</div></td><td class="text-end fw-bold text-success align-middle">$ ${precioF}</td><td class="text-center align-middle"><span class="badge ${badgeClase} rounded-pill px-3">${textoStock}</span>${htmlLotes}</td><td class="text-center align-middle" onclick="event.stopPropagation()">${botonesEscritorio}</td></tr>`;
     });
 }
 
@@ -431,6 +434,7 @@ document.querySelector('[data-bs-target="#modalNuevoProducto"]').addEventListene
         if (campoNuevoIva.selectedIndex === -1) {
             campoNuevoIva.value = '21'; 
         }
+    pintarLeyendaCostoIva();
     document.getElementById('inputAlertaStock').value = '5';
     const chkStock = document.getElementById('chkControlaStock');
     if (chkStock) chkStock.checked = true;
@@ -560,6 +564,22 @@ async function generarCodigoInterno() {
 function calcularPrecioAutomatico() {
     let c = parseFloat(document.getElementById('inputCosto').value) || 0; let i = parseFloat(document.getElementById('inputIva').value) || 0; let m = parseFloat(document.getElementById('inputMargen').value) || 0;
     document.getElementById('inputPrecioVenta').value = ((c + (c * i / 100)) * (1 + m / 100)).toFixed(2);
+    pintarLeyendaCostoIva();
+}
+
+function pintarLeyendaCostoIva() {
+    const caja = document.getElementById('leyendaCostoIva');
+    if (!caja) return;
+    const costo = parseFloat(document.getElementById('inputCosto').value) || 0;
+    const iva = parseFloat(document.getElementById('inputIva').value) || 0;
+    if (costo <= 0) {
+        caja.textContent = '';
+        return;
+    }
+    const conIva = (costo * (1 + iva / 100)).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    caja.textContent = iva > 0
+        ? `Con IVA ${String(iva).replace('.', ',')} %: $ ${conIva}`
+        : 'Exento: con IVA es el mismo costo.';
 }
 // --- PROMOS DE LA FICHA: VOLUMEN ("llevando N o más, $X c/u") y PACK ("N por $X") ---
 function fechaHoyARProd() {
@@ -941,6 +961,7 @@ async function abrirEditarProducto(id, pestana = 'precios') {
         } else {
             document.getElementById('inputMargen').value = 0;
         }
+        pintarLeyendaCostoIva();
         document.getElementById('inputAlertaStock').value = p.stock_minimo_alerta || 5;
         const chkStock = document.getElementById('chkControlaStock');
         if (chkStock) chkStock.checked = Number(p.controla_stock ?? 1) !== 0;
@@ -1478,6 +1499,7 @@ function aplicarCostoComboDesdeComponentes({ tocarPrecio } = { tocarPrecio: true
     if (costoConIva > 0 && precio > 0) {
         document.getElementById('inputMargen').value = (((precio / costoConIva) - 1) * 100).toFixed(2);
     }
+    pintarLeyendaCostoIva();
 }
 
 function agregarComponenteUI() {

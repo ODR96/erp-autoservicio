@@ -1104,6 +1104,7 @@ function htmlFilaFactura(item, idx) {
     if (item.codigo_barras) meta.push(escapeHtmlFactura(item.codigo_barras));
     meta.push(`Último costo $${Number(item.costo_anterior || item.costo_unitario || 0).toFixed(2)}`);
     if (uxb > 1) meta.push(`Caja x${uxb}`);
+    meta.push(`<button type="button" class="btn btn-link btn-sm p-0 align-baseline" title="Cambiar el IVA de la ficha" onclick="cambiarIvaFichaFila(${idx})">${textoIvaFila(ivaItem(item))}</button>`);
     const avisoOcr = item.aviso_ocr ? `<div class="small text-warning">${escapeHtmlFactura(item.aviso_ocr)}</div>` : '';
 
     const gondolaOn = !!item.actualizar_gondola;
@@ -1201,16 +1202,65 @@ function aplicarProductoAFila(idx, producto) {
     const costoFicha = parseFloat(producto.costo_sin_iva) || costo;
     item.margen_pct = margenSobreCostoConIva(precio, costoFicha, item.porcentaje_iva);
     syncDerivadosItem(item);
-    if (factorIva !== 1) {
-        // Lo que baja o sube el neto es IVA: pasa a cargos extra para que el total siga cerrando con el papel.
-        const extra = document.getElementById('inputCargosExtra');
-        if (extra) {
-            const ajuste = subtotalAntes - cantidadStockItem(item) * costo;
-            extra.value = Math.max(0, (parseFloat(extra.value) || 0) + ajuste).toFixed(2);
-        }
-    }
+    if (factorIva !== 1) sumarACargosExtra(subtotalAntes - cantidadStockItem(item) * costo);
     reemplazarFilaFactura(idx);
     programarBorradorFactura();
+}
+
+// Lo que baja o sube el neto al cambiar la alícuota es IVA: va a cargos extra para que el total siga cerrando con el papel.
+function sumarACargosExtra(ajuste) {
+    const extra = document.getElementById('inputCargosExtra');
+    if (!extra || !ajuste) return;
+    extra.value = Math.max(0, (parseFloat(extra.value) || 0) + ajuste).toFixed(2);
+}
+
+function textoIvaFila(iva) {
+    return iva > 0 ? `IVA ${String(iva).replace('.', ',')} %` : 'Exento';
+}
+
+async function cambiarIvaFichaFila(idx) {
+    const item = facturaActualItems[idx];
+    if (!item || !item.producto_id) return;
+    const actual = ivaItem(item);
+    const r = await Swal.fire({
+        title: 'IVA de la ficha',
+        html: `<div class="small text-start">Cambia el IVA de <b>${escapeHtmlFactura(item.nombre)}</b> en el catálogo, no solo en esta factura.</div>`,
+        input: 'select',
+        inputOptions: { '21': '21 %', '10.5': '10,5 %', '0': 'Exento' },
+        inputValue: String(actual),
+        showCancelButton: true,
+        confirmButtonText: 'Guardar en la ficha',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#1b365d'
+    });
+    if (!r.isConfirmed) return;
+    const nuevo = parseFloat(r.value);
+    if (!Number.isFinite(nuevo) || nuevo === actual) return;
+    try {
+        const res = await fetch(`${obtenerBaseUrl()}/productos/${Number(item.producto_id)}/iva`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ porcentaje_iva: nuevo })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(detalleApi(data));
+    } catch (e) {
+        Swal.fire('IVA', e.message || 'No se pudo guardar en la ficha.', 'error');
+        return;
+    }
+    const ivaDividido = Number(item.iva_dividido_ocr);
+    if (item.iva_dividido_ocr != null && Number.isFinite(ivaDividido) && ivaDividido !== nuevo) {
+        const antes = cantidadStockItem(item) * (Number(item.costo_unitario) || 0);
+        item.costo_unitario = (Number(item.costo_unitario) || 0) * (1 + ivaDividido / 100) / (1 + nuevo / 100);
+        sumarACargosExtra(antes - cantidadStockItem(item) * item.costo_unitario);
+        item.iva_dividido_ocr = nuevo;
+    }
+    item.porcentaje_iva = nuevo;
+    if (item.aviso_ocr) item.aviso_ocr = item.aviso_ocr.replace(/La línea no muestra IVA:.*?ficha\.\s*/, '').trim();
+    const costoFicha = parseFloat(item.costo_anterior) || Number(item.costo_unitario) || 0;
+    item.margen_pct = margenSobreCostoConIva(Number(item.precio_gondola_actual) || 0, costoFicha, nuevo);
+    syncDerivadosItem(item);
+    reemplazarFilaFactura(idx);
 }
 
 async function vincularProductoFila(idx) {

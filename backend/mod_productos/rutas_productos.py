@@ -556,6 +556,33 @@ def actualizar_producto(producto_id: int, datos: ProductoActualizar, background_
     finally:
         if conexion: conexion.close()
 
+ALICUOTAS_IVA_VALIDAS = (0.0, 10.5, 21.0)
+
+
+class CambioIvaFicha(BaseModel):
+    porcentaje_iva: float
+
+
+@router.put("/{producto_id}/iva", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO"]))])
+def cambiar_iva_ficha(producto_id: int, datos: CambioIvaFicha):
+    """Solo el IVA. Actualizar la ficha entera reescribe combos y promos."""
+    if datos.porcentaje_iva not in ALICUOTAS_IVA_VALIDAS:
+        raise HTTPException(status_code=400, detail="IVA inválido: 0 (exento), 10,5 o 21.")
+    conexion = obtener_conexion()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute(
+            "UPDATE productos SET porcentaje_iva = ? WHERE id = ? AND activo = 1",
+            (datos.porcentaje_iva, producto_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Producto no encontrado.")
+        conexion.commit()
+        return {"mensaje": "IVA actualizado.", "porcentaje_iva": datos.porcentaje_iva}
+    finally:
+        conexion.close()
+
+
 @router.get("/ver/{producto_id}", dependencies=[Depends(VerificarRol(["ADMIN", "ENCARGADO", "CAJERO"]))])
 def ver_producto_por_id(producto_id: int):
     conexion = obtener_conexion()
