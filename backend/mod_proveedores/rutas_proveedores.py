@@ -1278,6 +1278,8 @@ def _item_desde_lector(linea: dict, prod) -> dict:
     item["nombre_ocr"] = _texto_externo(linea["descripcion"], 120)
     item["codigo_ocr"] = _texto_externo(linea["codigo"], 40)
     item["costo_final_ocr"] = linea["costo_unitario_final_con_impuestos"]
+    if linea["iva_dividido"] is not None:
+        item["iva_dividido_ocr"] = linea["iva_dividido"]
     if linea["avisos"]:
         item["aviso_ocr"] = _texto_externo(" ".join(linea["avisos"]), 300)
     return item

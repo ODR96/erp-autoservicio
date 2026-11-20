@@ -6,7 +6,11 @@ Reglas del ERP (responsable inscripto):
 - Percepciones, flete y el IVA del pie no van al costo unitario: son cargos_extra
   (lo que falta para que el total del sistema cierre con el total del papel).
 - Si el producto existe, la ficha manda: su alícuota y sus unidades por bulto.
+- Solo la factura A (o M) da crédito fiscal. En C, B, remito o ticket no hay IVA que
+  recuperar: el costo es el importe entero de la línea, aunque el precio "incluya" IVA.
 """
+
+TIPOS_CON_CREDITO_FISCAL = ("A", "M")
 
 ALICUOTA_POR_DEFECTO = 21.0
 TOLERANCIA_CIERRE = 0.05
@@ -68,8 +72,16 @@ def procesar_factura(leida: dict, fichas: list) -> dict:
     """
     lineas = list(leida.get("items") or [])
     fichas = list(fichas or []) + [None] * max(0, len(lineas) - len(fichas or []))
-    incluye_iva = bool(leida.get("precios_incluyen_iva"))
+    tipo = str(leida.get("tipo_comprobante") or "").strip().upper()
+    con_credito = tipo in TIPOS_CON_CREDITO_FISCAL
+    divide_iva = con_credito and bool(leida.get("precios_incluyen_iva"))
     desc_general = _num(leida.get("descuento_general_porcentaje"))
+
+    avisos_factura = []
+    if not con_credito:
+        avisos_factura.append(
+            f"Comprobante {tipo or 'sin tipo'}: no hay IVA para recuperar, el costo es el importe entero de cada línea."
+        )
 
     items = []
     for linea, ficha in zip(lineas, fichas):
@@ -84,9 +96,10 @@ def procesar_factura(leida: dict, fichas: list) -> dict:
             alicuota = alic_papel
         else:
             alicuota = ALICUOTA_POR_DEFECTO
-            avisos.append("La línea no muestra IVA: se tomó 21 %. Revisalo.")
+            if con_credito:
+                avisos.append("La línea no muestra IVA: se tomó 21 %. Al vincular se usa el de la ficha.")
 
-        neto = _neto_linea(linea, incluye_iva, desc_general, alicuota)
+        neto = _neto_linea(linea, divide_iva, desc_general, alicuota)
         neto += max(0.0, _num(linea.get("impuesto_interno_linea")))
 
         bultos = max(0.0, _num(linea.get("cantidad_bultos_o_packs")))
@@ -123,6 +136,7 @@ def procesar_factura(leida: dict, fichas: list) -> dict:
             "descuento_porcentaje": _num(linea.get("descuento_porcentaje")),
             "alicuota_iva": alicuota,
             "modo": modo,
+            "iva_dividido": alicuota if divide_iva else None,
             "neto_linea": neto,
             "confianza": _num(linea.get("confianza"), 1.0),
             "avisos": avisos,
@@ -140,9 +154,8 @@ def procesar_factura(leida: dict, fichas: list) -> dict:
         costo = it["neto_linea"] / u if u > 0 else 0.0
         it["costo_unitario_neto_sin_iva"] = round(costo, 4)
         # Informativo: lo que te sale 1 unidad con IVA. No se guarda como costo de la ficha.
-        it["costo_unitario_final_con_impuestos"] = round(costo * (1 + it["alicuota_iva"] / 100), 4)
+        it["costo_unitario_final_con_impuestos"] = round(costo * (1 + it["alicuota_iva"] / 100) if con_credito else costo, 4)
 
-    avisos_factura = []
     total_papel = _num(leida.get("total_papel"))
     if total_papel > 0:
         cargos = total_papel - suma_neta
@@ -150,7 +163,7 @@ def procesar_factura(leida: dict, fichas: list) -> dict:
             avisos_factura.append("Las líneas suman más que el total del papel. Revisá cantidades y precios.")
             cargos = 0.0
     else:
-        iva_estimado = sum(it["neto_linea"] * it["alicuota_iva"] / 100 for it in items)
+        iva_estimado = sum(it["neto_linea"] * it["alicuota_iva"] / 100 for it in items) if con_credito else 0.0
         cargos = iva_estimado + max(0.0, _num(leida.get("percepciones_y_otros_cargos")))
 
     return {

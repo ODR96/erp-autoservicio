@@ -1172,11 +1172,20 @@ function htmlFilaFactura(item, idx) {
 function aplicarProductoAFila(idx, producto) {
     const item = facturaActualItems[idx];
     if (!item || !producto) return;
+    const subtotalAntes = cantidadStockItem(item) * (Number(item.costo_unitario) || 0);
     const uxb = Math.max(1, parseInt(producto.unidades_por_bulto, 10) || item.unidades_por_bulto || 1);
     const bultoDelPapel = item.huerfano && item.origen_linea === 'OCR' && item.modo_cantidad === 'CAJA' && Number(item.costo_caja) > 0;
     const costoPapel = bultoDelPapel ? Number(item.costo_caja) / uxb : Number(item.costo_unitario);
     if (bultoDelPapel && uxb === 1) item.modo_cantidad = 'UN';
-    const costo = Number.isFinite(costoPapel) && costoPapel > 0 ? costoPapel : (parseFloat(producto.costo_sin_iva) || 0);
+    const ivaFicha = ivaItem(producto);
+    const ivaDividido = Number(item.iva_dividido_ocr);
+    // El lector dividió el precio con IVA por una alícuota supuesta: se rehace con la de la ficha.
+    const factorIva = item.iva_dividido_ocr != null && Number.isFinite(ivaDividido) && ivaDividido !== ivaFicha
+        ? (1 + ivaDividido / 100) / (1 + ivaFicha / 100)
+        : 1;
+    if (item.iva_dividido_ocr != null) item.iva_dividido_ocr = ivaFicha;
+    if (item.aviso_ocr) item.aviso_ocr = item.aviso_ocr.replace(/La línea no muestra IVA:.*?ficha\.\s*/, '').trim();
+    const costo = Number.isFinite(costoPapel) && costoPapel > 0 ? costoPapel * factorIva : (parseFloat(producto.costo_sin_iva) || 0);
     const precio = parseFloat(producto.precio_venta_final) || 0;
     item.producto_id = producto.id;
     item.nombre = producto.nombre;
@@ -1192,6 +1201,14 @@ function aplicarProductoAFila(idx, producto) {
     const costoFicha = parseFloat(producto.costo_sin_iva) || costo;
     item.margen_pct = margenSobreCostoConIva(precio, costoFicha, item.porcentaje_iva);
     syncDerivadosItem(item);
+    if (factorIva !== 1) {
+        // Lo que baja o sube el neto es IVA: pasa a cargos extra para que el total siga cerrando con el papel.
+        const extra = document.getElementById('inputCargosExtra');
+        if (extra) {
+            const ajuste = subtotalAntes - cantidadStockItem(item) * costo;
+            extra.value = Math.max(0, (parseFloat(extra.value) || 0) + ajuste).toFixed(2);
+        }
+    }
     reemplazarFilaFactura(idx);
     programarBorradorFactura();
 }

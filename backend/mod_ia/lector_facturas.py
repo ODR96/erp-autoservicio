@@ -33,7 +33,9 @@ class LineaLeida(BaseModel):
 
 class FacturaLeida(BaseModel):
     es_manuscrita_o_ilegible: bool = Field(description="true si es manuscrita o no se puede leer. En ese caso items vacío.")
-    tipo_comprobante: str = Field(description="A, B, C, REMITO, TICKET u OTRO.")
+    tipo_comprobante: str = Field(
+        description="La letra del recuadro del encabezado: A, B, C o M. Si no tiene letra: REMITO, TICKET u OTRO. No la deduzcas por los precios."
+    )
     precios_incluyen_iva: bool = Field(
         description="true si los precios de las líneas ya traen IVA (factura B o C, ticket, remito a precio final). false si son netos con el IVA discriminado en el pie (factura A)."
     )
